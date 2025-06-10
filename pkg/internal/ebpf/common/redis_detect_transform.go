@@ -46,13 +46,23 @@ func isRedisOp(buf []uint8) bool {
 }
 
 func isRedisError(buf []uint8) bool {
-	return bytes.HasPrefix(buf, []byte("ERR ")) ||
+	// Check for standard Redis error prefixes
+	if bytes.HasPrefix(buf, []byte("ERR ")) ||
 		bytes.HasPrefix(buf, []byte("WRONGTYPE ")) ||
 		bytes.HasPrefix(buf, []byte("MOVED ")) ||
 		bytes.HasPrefix(buf, []byte("ASK ")) ||
 		bytes.HasPrefix(buf, []byte("BUSY ")) ||
 		bytes.HasPrefix(buf, []byte("NOSCRIPT ")) ||
-		bytes.HasPrefix(buf, []byte("CLUSTERDOWN "))
+		bytes.HasPrefix(buf, []byte("CLUSTERDOWN ")) {
+		return true
+	}
+
+	// Check if it's a CRLF terminated error message (any error response starting with -)
+	// This handles custom errors like "unknown command 'INVALID_COMMAND'"
+	return crlfTerminatedMatch(buf, func(c uint8) bool {
+		// Allow any printable character in error messages
+		return c >= 32 && c <= 126
+	})
 }
 
 func crlfTerminatedMatch(buf []uint8, matches func(c uint8) bool) bool {
@@ -159,7 +169,8 @@ func parseRedisRequest(buf string) (string, string, bool) {
 
 func redisStatus(buf []byte) int {
 	status := 0
-	if isErr := isRedisError(buf); isErr {
+	if len(buf) > 0 && buf[0] == '-' {
+		// Any error response in Redis starts with '-'
 		status = 1
 	}
 
