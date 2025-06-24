@@ -150,7 +150,7 @@ type Span struct {
 	OtherNamespace string         `json:"-"`
 	Statement      string         `json:"-"`
 	SubType        int            `json:"-"`
-	DbError        DBError        `json:"DBError,omitempty"`
+	DBError        DBError        `json:""`
 }
 
 func (s *Span) Inside(parent *Span) bool {

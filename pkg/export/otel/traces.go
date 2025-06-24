@@ -715,8 +715,8 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			}
 		}
 		if span.Status == 1 {
-			attrs = append(attrs, request.DBResponseStatusCode(span.DbError.ErrorCode))
-			attrs = append(attrs, request.ErrorType(span.DbError.Description))
+			attrs = append(attrs, request.DBResponseStatusCode(span.DBError.ErrorCode))
+			attrs = append(attrs, request.ErrorType(span.DBError.Description))
 		}
 	case request.EventTypeKafkaServer, request.EventTypeKafkaClient:
 		operation := request.MessagingOperationType(span.Method)

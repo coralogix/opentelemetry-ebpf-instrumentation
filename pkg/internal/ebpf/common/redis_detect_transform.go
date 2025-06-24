@@ -14,6 +14,17 @@ import (
 
 const minRedisFrameLen = 3
 
+var redisErrorCodes = [...]string{
+	"ERR ",
+	"WRONGTYPE ",
+	"MOVED ",
+	"ASK ",
+	"BUSY ",
+	"NOSCRIPT ",
+	"CLUSTERDOWN ",
+	"READONLY ",
+}
+
 func isRedis(buf []uint8) bool {
 	if len(buf) < minRedisFrameLen {
 		return false
@@ -49,26 +60,12 @@ func isRedisOp(buf []uint8) bool {
 func getRedisError(buf []uint8) (request.DBError, bool) {
 	description := strings.Trim(string(buf), "\r\n")
 	errorCode := ""
-	if bytes.HasPrefix(buf, []byte("ERR ")) {
-		errorCode = "ERR"
-	} else if bytes.HasPrefix(buf, []byte("WRONGTYPE ")) {
-		errorCode = "WRONGTYPE"
-	} else if bytes.HasPrefix(buf, []byte("MOVED ")) {
-		errorCode = "MOVED"
-	} else if bytes.HasPrefix(buf, []byte("ASK ")) {
-		errorCode = "ASK"
-	} else if bytes.HasPrefix(buf, []byte("BUSY ")) {
-		errorCode = "BUSY"
-	} else if bytes.HasPrefix(buf, []byte("NOSCRIPT ")) {
-		errorCode = "NOSCRIPT"
-	} else if bytes.HasPrefix(buf, []byte("CLUSTERDOWN ")) {
-		errorCode = "CLUSTERDOWN"
-	} else if bytes.HasPrefix(buf, []byte("READONLY ")) {
-		errorCode = "READONLY"
-	} else if bytes.HasPrefix(buf, []byte("NOSCRIPT ")) {
-		errorCode = "NOSCRIPT"
-	} else if bytes.HasPrefix(buf, []byte("READONLY ")) {
-		errorCode = "READONLY"
+
+	for _, redisErrorCode := range redisErrorCodes {
+		if bytes.HasPrefix(buf, []byte(redisErrorCode)) {
+			errorCode = strings.TrimSpace(redisErrorCode)
+			break
+		}
 	}
 	dbError := request.DBError{
 		Description: description,
@@ -193,7 +190,7 @@ func redisStatus(buf []byte) (request.DBError, int) {
 	return dbError, status
 }
 
-func TCPToRedisToSpan(trace *TCPRequestInfo, op, text string, status int, error request.DBError) request.Span {
+func TCPToRedisToSpan(trace *TCPRequestInfo, op, text string, status int, dbError request.DBError) request.Span {
 	peer := ""
 	hostname := ""
 	hostPort := 0
@@ -230,7 +227,7 @@ func TCPToRedisToSpan(trace *TCPRequestInfo, op, text string, status int, error 
 			UserPID:   trace.Pid.UserPid,
 			Namespace: trace.Pid.Ns,
 		},
-		DbError: error,
+		DBError: dbError,
 	}
 }
 
