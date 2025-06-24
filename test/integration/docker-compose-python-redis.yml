@@ -2,18 +2,23 @@ version: '3.8'
 
 services:
   redis:
-    image: redis:7.2.0
+    build:
+      context: ../../test/integration/components/redis/
+      dockerfile: Dockerfile
+    image: redis
+
   testserver:
     build:
-      context: ../..
-      dockerfile: test/integration/components/pythonredis/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}
-    image: hatest-redis-testserver-python
+      context: ../../test/integration/components/pythonredis/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-redis
     ports:
       - "${TEST_SERVICE_PORTS}"
     depends_on:
       otelcol:
         condition: service_started
-
+      redis:
+        condition: service_started
   autoinstrumenter:
     build:
       context: ../..

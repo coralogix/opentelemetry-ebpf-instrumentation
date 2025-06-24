@@ -5,7 +5,6 @@ package integration
 import (
 	"encoding/json"
 	"go.opentelemetry.io/otel/attribute"
-	"log"
 	"net/http"
 	"testing"
 	"time"
@@ -62,14 +61,12 @@ func testREDMetricsForPythonRedisLibrary(t *testing.T, testCase TestCase) {
 			require.Equal(t, http.StatusOK, resp.StatusCode, "unexpected status code for %s: %d", command, resp.StatusCode)
 			var tq jaeger.TracesQuery
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&tq), "failed to decode jaeger response for %s", command)
-			log.Printf("jaeger response contains %d traces for %s", len(tq.Data), command)
 			var tags []jaeger.Tag
 			for _, attr := range span.Attributes {
 				tags = append(tags, otelAttributeToJaegerTag(attr))
 			}
-			log.Printf("looking for span %s with tag %v", command, tags)
 			traces := tq.FindBySpan(tags...)
-			assert.LessOrEqual(t, 1, len(traces), "span %s not found in traces in traces %v", command, tq.Data)
+			assert.LessOrEqual(t, 1, len(traces), "span %s with tags %v not found in traces in traces %v", command, tags, tq.Data)
 		}
 	}, test.Interval(100*time.Millisecond))
 
