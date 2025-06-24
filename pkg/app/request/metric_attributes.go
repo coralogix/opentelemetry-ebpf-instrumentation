@@ -88,6 +88,10 @@ func DBQueryText(val string) attribute.KeyValue {
 	return attribute.Key(attr.DBQueryText).String(val)
 }
 
+func DBResponseStatusCode(val string) attribute.KeyValue {
+	return attribute.Key(attr.DBResponseStatusCode).String(val)
+}
+
 func DBCollectionName(val string) attribute.KeyValue {
 	return attribute.Key(attr.DBCollectionName).String(val)
 }
@@ -103,6 +107,10 @@ func DBSystemName(val string) attribute.KeyValue {
 
 func ErrorType(val string) attribute.KeyValue {
 	return attribute.Key(attr.ErrorType).String(val)
+}
+
+func OtelStatusDescription(val string) attribute.KeyValue {
+	return attribute.Key(attr.OtelStatusDescription).String(val)
 }
 
 func MessagingOperationType(val string) attribute.KeyValue {

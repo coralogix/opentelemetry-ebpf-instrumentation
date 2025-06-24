@@ -115,6 +115,11 @@ type PidInfo struct {
 	Namespace uint32
 }
 
+type DBError struct {
+	ErrorCode   string
+	Description string
+}
+
 // Span contains the information being submitted by the following nodes in the graph.
 // It enables comfortable handling of data from Go.
 // REMINDER: any attribute here must be also added to the functions SpanOTELGetters,
@@ -145,6 +150,7 @@ type Span struct {
 	OtherNamespace string         `json:"-"`
 	Statement      string         `json:"-"`
 	SubType        int            `json:"-"`
+	DbError        DBError        `json:"DBError,omitempty"`
 }
 
 func (s *Span) Inside(parent *Span) bool {
