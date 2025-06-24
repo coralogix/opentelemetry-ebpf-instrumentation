@@ -8,9 +8,12 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/jaeger"
+	"go.opentelemetry.io/otel/attribute"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +24,19 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/prom"
 )
+
+type TestCaseSpan struct {
+	Name       string
+	Attributes []attribute.KeyValue
+}
+
+type TestCase struct {
+	Route     string
+	Subpath   string
+	Comm      string
+	Namespace string
+	Spans     []TestCaseSpan
+}
 
 var tr = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -300,4 +316,19 @@ func waitForTestComponentsHTTP2Sub(t *testing.T, url, subpath string, minutes in
 		require.NoError(t, err)
 		require.NotEmpty(t, results)
 	}, test.Interval(time.Second))
+}
+
+func otelAttributeToJaegerTag(attr attribute.KeyValue) jaeger.Tag {
+	var value any
+	if attr.Value.Type() == attribute.INT64 {
+		// jaeger encodes int64 as float64
+		value = float64(attr.Value.AsInt64())
+	} else {
+		value = attr.Value.AsInterface()
+	}
+	return jaeger.Tag{
+		Key:   string(attr.Key),
+		Type:  strings.ToLower(attr.Value.Type().String()),
+		Value: value,
+	}
 }
