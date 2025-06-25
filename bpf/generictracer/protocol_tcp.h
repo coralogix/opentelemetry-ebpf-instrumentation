@@ -10,21 +10,8 @@
 
 #include <generictracer/protocol_common.h>
 
-// Keeps track of tcp buffers for unknown protocols
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(key, pid_connection_info_t);
-    __type(value, tcp_req_t);
-    __uint(max_entries, MAX_CONCURRENT_SHARED_REQUESTS);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
-} ongoing_tcp_req SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, tcp_req_t);
-    __uint(max_entries, 1);
-} tcp_req_mem SEC(".maps");
+#include <generictracer/maps/ongoing_tcp_req.h>
+#include <generictracer/maps/tcp_req_mem.h>
 
 static __always_inline tcp_req_t *empty_tcp_req() {
     int zero = 0;
@@ -41,8 +28,8 @@ static __always_inline void init_new_trace(tp_info_t *tp) {
     __builtin_memset(tp->parent_id, 0, sizeof(tp->span_id));
 }
 
-static __always_inline void
-set_tcp_trace_info(u32 type, connection_info_t *conn, tp_info_t *tp, u32 pid, u8 ssl) {
+static __always_inline void set_tcp_trace_info(
+    u32 type, connection_info_t *conn, tp_info_t *tp, u32 pid, u8 ssl, u16 orig_dport) {
     tp_info_pid_t *tp_p = tp_buf();
 
     if (!tp_p) {
@@ -59,13 +46,13 @@ set_tcp_trace_info(u32 type, connection_info_t *conn, tp_info_t *tp, u32 pid, u8
     bpf_dbg_printk("Set traceinfo for conn");
     dbg_print_http_connection_info(conn);
 
-    server_or_client_trace(type, conn, tp_p, ssl);
+    server_or_client_trace(type, conn, tp_p, ssl, orig_dport);
 }
 
 static __always_inline void
-tcp_get_or_set_trace_info(tcp_req_t *req, pid_connection_info_t *pid_conn, u8 ssl) {
+tcp_get_or_set_trace_info(tcp_req_t *req, pid_connection_info_t *pid_conn, u8 ssl, u16 orig_dport) {
     if (req->direction == TCP_SEND) { // Client
-        u8 found = find_trace_for_client_request(pid_conn, &req->tp);
+        u8 found = find_trace_for_client_request(pid_conn, orig_dport, &req->tp);
         bpf_dbg_printk("Looking up client trace info, found %d", found);
         if (found) {
             urand_bytes(req->tp.span_id, SPAN_ID_SIZE_BYTES);
@@ -73,7 +60,8 @@ tcp_get_or_set_trace_info(tcp_req_t *req, pid_connection_info_t *pid_conn, u8 ss
             init_new_trace(&req->tp);
         }
 
-        set_tcp_trace_info(TRACE_TYPE_CLIENT, &pid_conn->conn, &req->tp, pid_conn->pid, ssl);
+        set_tcp_trace_info(
+            TRACE_TYPE_CLIENT, &pid_conn->conn, &req->tp, pid_conn->pid, ssl, orig_dport);
     } else { // Server
         u8 found = find_trace_for_server_request(&pid_conn->conn, &req->tp, EVENT_TCP_REQUEST);
         bpf_dbg_printk("Looking up server trace info, found %d", found);
@@ -82,7 +70,8 @@ tcp_get_or_set_trace_info(tcp_req_t *req, pid_connection_info_t *pid_conn, u8 ss
         } else {
             init_new_trace(&req->tp);
         }
-        set_tcp_trace_info(TRACE_TYPE_SERVER, &pid_conn->conn, &req->tp, pid_conn->pid, ssl);
+        set_tcp_trace_info(
+            TRACE_TYPE_SERVER, &pid_conn->conn, &req->tp, pid_conn->pid, ssl, orig_dport);
     }
 }
 
@@ -125,10 +114,30 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
                 bpf_dbg_printk("Got receive as first operation for client connection, ignoring...");
                 return;
             }
+            connection_info_part_t client_part = {};
+            populate_ephemeral_info(
+                &client_part, &pid_conn->conn, orig_dport, pid_conn->pid, FD_CLIENT);
+            fd_info_t *fd_info = fd_info_for_conn(&client_part);
+            if (fd_info) {
+                bpf_dbg_printk(
+                    "Got receive as first operation for part client connection, ignoring...");
+                return;
+            }
+        } else {
+            connection_info_part_t server_part = {};
+            populate_ephemeral_info(
+                &server_part, &pid_conn->conn, orig_dport, pid_conn->pid, FD_SERVER);
+            fd_info_t *fd_info = fd_info_for_conn(&server_part);
+            if (fd_info) {
+                bpf_dbg_printk(
+                    "Got send as first operation for part server connection, ignoring...");
+                return;
+            }
         }
 
         tcp_req_t *req = empty_tcp_req();
         if (req) {
+            bpf_clamp_umax(bytes_len, K_TCP_MAX_LEN);
             req->flags = EVENT_TCP_REQUEST;
             req->conn_info = pid_conn->conn;
             fixup_connection_info(&req->conn_info, direction, orig_dport);
@@ -141,18 +150,19 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
             req->req_len = req->len;
             req->extra_id = extra_runtime_id();
             task_pid(&req->pid);
-            bpf_probe_read(req->buf, K_TCP_MAX_LEN, u_buf);
+            bpf_probe_read(req->buf, bytes_len, u_buf);
 
             req->tp.ts = bpf_ktime_get_ns();
 
             bpf_dbg_printk("TCP request start, direction = %d, ssl = %d", direction, ssl);
 
-            tcp_get_or_set_trace_info(req, pid_conn, ssl);
+            tcp_get_or_set_trace_info(req, pid_conn, ssl, orig_dport);
 
             bpf_map_update_elem(&ongoing_tcp_req, pid_conn, req, BPF_ANY);
         }
     } else if (existing->direction != direction) {
         if (existing->end_monotime_ns == 0) {
+            bpf_clamp_umax(bytes_len, K_TCP_RES_LEN);
             existing->end_monotime_ns = bpf_ktime_get_ns();
             existing->resp_len = bytes_len;
             tcp_req_t *trace = bpf_ringbuf_reserve(&events, sizeof(tcp_req_t), 0);
@@ -161,7 +171,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
                     "Sending TCP trace %lx, response length %d", existing, existing->resp_len);
 
                 __builtin_memcpy(trace, existing, sizeof(tcp_req_t));
-                bpf_probe_read(trace->rbuf, K_TCP_RES_LEN, u_buf);
+                bpf_probe_read(trace->rbuf, bytes_len, u_buf);
                 bpf_ringbuf_submit(trace, get_flags());
             } else {
                 bpf_printk("failed to reserve space on the ringbuf");

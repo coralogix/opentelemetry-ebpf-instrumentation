@@ -19,13 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
+	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
 )
@@ -41,11 +42,18 @@ func TestAppMetricsExpiration(t *testing.T) {
 	require.NoError(t, err)
 	promURL := fmt.Sprintf("http://127.0.0.1:%d/metrics", openPort)
 
+	var g attributes.AttrGroups
+	g.Add(attributes.GroupKubernetes)
+
 	// GIVEN a Prometheus Metrics Exporter with a metrics expire time of 3 minutes
 	promInput := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(10))
 	processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(20))
 	exporter, err := PrometheusEndpoint(
-		&global.ContextInfo{Prometheus: &connector.PrometheusManager{}, HostID: "my-host"},
+		&global.ContextInfo{
+			Prometheus:            &connector.PrometheusManager{},
+			HostID:                "my-host",
+			MetricAttributeGroups: g,
+		},
 		&PrometheusConfig{
 			Port:                        openPort,
 			Path:                        "/metrics",
@@ -54,9 +62,14 @@ func TestAppMetricsExpiration(t *testing.T) {
 			Features:                    []string{otel.FeatureApplication},
 			Instrumentations:            []string{instrumentations.InstrumentationALL},
 		},
-		attributes.Selection{
-			attributes.HTTPServerDuration.Section: attributes.InclusionLists{
-				Include: []string{"url_path"},
+		&attributes.SelectorConfig{
+			SelectionCfg: attributes.Selection{
+				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
+					Include: []string{"url_path", "k8s.app.version"},
+				},
+			},
+			ExtraGroupAttributesCfg: map[string][]attr.Name{
+				"k8s_app_meta": {"k8s.app.version"},
 			},
 		},
 		promInput,
@@ -78,7 +91,16 @@ func TestAppMetricsExpiration(t *testing.T) {
 
 	// WHEN it receives metrics
 	promInput.Send([]request.Span{
-		{Type: request.EventTypeHTTP, Path: "/foo", End: 123 * time.Second.Nanoseconds()},
+		{
+			Type: request.EventTypeHTTP,
+			Path: "/foo",
+			End:  123 * time.Second.Nanoseconds(),
+			Service: svc.Attrs{
+				Metadata: map[attr.Name]string{
+					"k8s.app.version": "v0.0.1",
+				},
+			},
+		},
 		{Type: request.EventTypeHTTP, Path: "/baz", End: 456 * time.Second.Nanoseconds()},
 	})
 
@@ -87,8 +109,8 @@ func TestAppMetricsExpiration(t *testing.T) {
 	// THEN the metrics are exported
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		exported := getMetrics(t, promURL)
-		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{url_path="/foo"} 123`)
-		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{url_path="/baz"} 456`)
+		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="v0.0.1",url_path="/foo"} 123`)
+		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="",url_path="/baz"} 456`)
 		assert.Regexp(t, containsTargetInfo, exported)
 	})
 
@@ -96,7 +118,16 @@ func TestAppMetricsExpiration(t *testing.T) {
 	now.Advance(2 * time.Minute)
 	// WHEN it receives metrics
 	promInput.Send([]request.Span{
-		{Type: request.EventTypeHTTP, Path: "/foo", End: 123 * time.Second.Nanoseconds()},
+		{
+			Type: request.EventTypeHTTP,
+			Path: "/foo",
+			End:  123 * time.Second.Nanoseconds(),
+			Service: svc.Attrs{
+				Metadata: map[attr.Name]string{
+					"k8s.app.version": "v0.0.1",
+				},
+			},
+		},
 	})
 	now.Advance(2 * time.Minute)
 
@@ -104,10 +135,10 @@ func TestAppMetricsExpiration(t *testing.T) {
 	var exported string
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		exported = getMetrics(t, promURL)
-		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{url_path="/foo"} 246`)
+		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="v0.0.1",url_path="/foo"} 246`)
 	})
 	// BUT not the metrics that haven't been received during that time
-	assert.NotContains(t, exported, `http_server_request_duration_seconds_sum{url_path="/baz"}`)
+	assert.NotContains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="",url_path="/baz"}`)
 	assert.Regexp(t, containsTargetInfo, exported)
 	now.Advance(2 * time.Minute)
 
@@ -120,9 +151,9 @@ func TestAppMetricsExpiration(t *testing.T) {
 	// THEN they are reported again, starting from zero in the case of counters
 	test.Eventually(t, timeout, func(t require.TestingT) {
 		exported = getMetrics(t, promURL)
-		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{url_path="/baz"} 456`)
+		assert.Contains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="",url_path="/baz"} 456`)
 	})
-	assert.NotContains(t, exported, `http_server_request_duration_seconds_sum{url_path="/foo"}`)
+	assert.NotContains(t, exported, `http_server_request_duration_seconds_sum{k8s_app_version="",url_path="/foo"}`)
 	assert.Regexp(t, containsTargetInfo, exported)
 }
 
@@ -311,7 +342,7 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 	}
 }
 
-func TestSpanMetricsDiscarded(t *testing.T) {
+func TestMetricsDiscarded(t *testing.T) {
 	mc := PrometheusConfig{
 		Features: []string{otel.FeatureApplication},
 	}
@@ -326,6 +357,9 @@ func TestSpanMetricsDiscarded(t *testing.T) {
 
 	svcExportTraces := svc.Attrs{}
 	svcExportTraces.SetExportsOTelTraces()
+
+	svcExportMetricsSpan := svc.Attrs{}
+	svcExportMetricsSpan.SetExportsOTelMetricsSpan()
 
 	tests := []struct {
 		name      string
@@ -347,11 +381,62 @@ func TestSpanMetricsDiscarded(t *testing.T) {
 			span:      request.Span{Service: svcExportTraces, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
 			discarded: false,
 		},
+		{
+			name:      "/v1/traces span is not filtered",
+			span:      request.Span{Service: svcExportMetricsSpan, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
+			discarded: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.discarded, !(mr.otelSpanObserved(&tt.span)), tt.name)
+			assert.Equal(t, tt.discarded, !(mr.otelMetricsObserved(&tt.span)), tt.name)
+			assert.False(t, mr.otelSpanFiltered(&tt.span), tt.name)
+		})
+	}
+}
+
+func TestSpanMetricsDiscarded(t *testing.T) {
+	mc := PrometheusConfig{
+		Features: []string{otel.FeatureApplication},
+	}
+	mr := metricsReporter{
+		cfg: &mc,
+	}
+
+	svcNoExport := svc.Attrs{}
+
+	svcExportMetrics := svc.Attrs{}
+	svcExportMetrics.SetExportsOTelMetrics()
+
+	svcExportMetricsSpan := svc.Attrs{}
+	svcExportMetricsSpan.SetExportsOTelMetricsSpan()
+
+	tests := []struct {
+		name      string
+		span      request.Span
+		discarded bool
+	}{
+		{
+			name:      "Foo span is not filtered",
+			span:      request.Span{Service: svcNoExport, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/foo", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/metrics span is filtered",
+			span:      request.Span{Service: svcExportMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/metrics", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/traces span is not filtered",
+			span:      request.Span{Service: svcExportMetricsSpan, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
+			discarded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.discarded, !(mr.otelSpanMetricsObserved(&tt.span)), tt.name)
 			assert.False(t, mr.otelSpanFiltered(&tt.span), tt.name)
 		})
 	}
@@ -406,6 +491,49 @@ func TestTerminatesOnBadPromPort(t *testing.T) {
 	assert.True(t, ok)
 }
 
+func TestProcessPIDEvents(t *testing.T) {
+	mc := PrometheusConfig{
+		Features: []string{otel.FeatureApplication},
+	}
+	mr := metricsReporter{
+		cfg:         &mc,
+		serviceMap:  map[svc.UID]svc.Attrs{},
+		pidsTracker: otel.NewPidServiceTracker(),
+	}
+
+	svcA := svc.Attrs{
+		UID: svc.UID{Name: "A", Instance: "A"},
+	}
+	svcB := svc.Attrs{
+		UID: svc.UID{Name: "B", Instance: "B"},
+	}
+
+	mr.setupPIDToServiceRelationship(1, svcA.UID)
+	mr.setupPIDToServiceRelationship(2, svcA.UID)
+	mr.setupPIDToServiceRelationship(3, svcB.UID)
+	mr.setupPIDToServiceRelationship(4, svcB.UID)
+
+	deleted, uid := mr.disassociatePIDFromService(1)
+	assert.False(t, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(1)
+	assert.False(t, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(2)
+	assert.True(t, deleted)
+	assert.Equal(t, svcA.UID, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(3)
+	assert.False(t, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(4)
+	assert.True(t, deleted)
+	assert.Equal(t, svcB.UID, uid)
+}
+
 var mmux = sync.Mutex{}
 
 func getMetrics(t require.TestingT, promURL string) string {
@@ -451,9 +579,11 @@ func makePromExporter(
 			Features:                    []string{otel.FeatureApplication},
 			Instrumentations:            instrumentations,
 		},
-		attributes.Selection{
-			attributes.HTTPServerDuration.Section: attributes.InclusionLists{
-				Include: []string{"url_path"},
+		&attributes.SelectorConfig{
+			SelectionCfg: attributes.Selection{
+				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
+					Include: []string{"url_path"},
+				},
 			},
 		},
 		input,

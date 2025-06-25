@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
 	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
@@ -66,6 +66,9 @@ type KubernetesDecorator struct {
 	// ResourceLabels allows Beyla overriding the OTEL Resource attributes from a map of user-defined labels.
 	//nolint:undoc
 	ResourceLabels kube.ResourceLabels `yaml:"resource_labels"`
+
+	// ServiceNameTemplate allows to override the service.name with a custom value. Uses the go template language.
+	ServiceNameTemplate string `yaml:"service_name_template" env:"OTEL_EBPF_SERVICE_NAME_TEMPLATE"`
 }
 
 const (
@@ -85,7 +88,7 @@ func KubeDecoratorProvider(
 		}
 		metaStore, err := ctxInfo.K8sInformer.Get(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("inititalizing KubeDecoratorProvider: %w", err)
+			return nil, fmt.Errorf("initializing KubeDecoratorProvider: %w", err)
 		}
 		decorator := &metadataDecorator{
 			db:          metaStore,
@@ -108,7 +111,7 @@ func KubeProcessEventDecoratorProvider(
 		}
 		metaStore, err := ctxInfo.K8sInformer.Get(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("inititalizing KubeDecoratorProvider: %w", err)
+			return nil, fmt.Errorf("initializing KubeDecoratorProvider: %w", err)
 		}
 		decorator := &procEventMetadataDecorator{
 			db:          metaStore,
@@ -148,29 +151,40 @@ func (md *metadataDecorator) nodeLoop(_ context.Context) {
 	klog().Debug("stopping kubernetes span decoration loop")
 }
 
-func (md *procEventMetadataDecorator) k8sLoop(_ context.Context) {
+func (md *procEventMetadataDecorator) k8sLoop(ctx context.Context) {
 	// output channel must be closed so later stages in the pipeline can finish in cascade
 	defer md.output.Close()
-	klog().Debug("starting kubernetes process event decoration loop")
-	for pe := range md.input {
-		klog().Debug("annotating process event", "event", pe)
 
-		if podMeta, containerName := md.db.PodContainerByPIDNs(pe.File.Ns); podMeta != nil {
-			appendMetadata(md.db, &pe.File.Service, podMeta, md.clusterName, containerName)
-		} else {
-			// do not leave the service attributes map as nil
-			pe.File.Service.Metadata = map[attr.Name]string{}
+	log := klog()
+	log.Debug("starting kubernetes process event decoration loop")
+mainLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			break mainLoop
+		case pe, ok := <-md.input:
+			if !ok {
+				break mainLoop
+			}
+			log.Debug("annotating process event", "event", pe)
+
+			if podMeta, containerName := md.db.PodContainerByPIDNs(pe.File.Ns); podMeta != nil {
+				AppendKubeMetadata(md.db, &pe.File.Service, podMeta, md.clusterName, containerName)
+			} else {
+				// do not leave the service attributes map as nil
+				pe.File.Service.Metadata = map[attr.Name]string{}
+			}
+
+			// in-place decoration and forwarding
+			md.output.Send(pe)
 		}
-
-		// in-place decoration and forwarding
-		md.output.Send(pe)
 	}
-	klog().Debug("stopping kubernetes process event decoration loop")
+	log.Debug("stopping kubernetes process event decoration loop")
 }
 
 func (md *metadataDecorator) do(span *request.Span) {
 	if podMeta, containerName := md.db.PodContainerByPIDNs(span.Pid.Namespace); podMeta != nil {
-		appendMetadata(md.db, &span.Service, podMeta, md.clusterName, containerName)
+		AppendKubeMetadata(md.db, &span.Service, podMeta, md.clusterName, containerName)
 	} else {
 		// do not leave the service attributes map as nil
 		span.Service.Metadata = map[attr.Name]string{}
@@ -184,14 +198,17 @@ func (md *metadataDecorator) do(span *request.Span) {
 	}
 }
 
-func appendMetadata(db *kube.Store, svc *svc.Attrs, meta *kube.CachedObjMeta, clusterName, containerName string) {
+// AppendKubeMetadata populates some metadata values in the passed svc.Attrs.
+// This method should be invoked by any entity willing to follow a common policy for
+// setting metadata attributes. For example this metadataDecorator or the survey informer
+func AppendKubeMetadata(db *kube.Store, svc *svc.Attrs, meta *kube.CachedObjMeta, clusterName, containerName string) {
 	if meta.Meta.Pod == nil {
 		// if this message happen, there is a bug
 		klog().Debug("pod metadata for is nil. Ignoring decoration", "meta", meta)
 		return
 	}
 	topOwner := kube.TopOwner(meta.Meta.Pod)
-	name, namespace := db.ServiceNameNamespaceForMetadata(meta.Meta)
+	name, namespace := db.ServiceNameNamespaceForMetadata(meta.Meta, containerName)
 	// If the user has not defined criteria values for the reported
 	// service name and namespace, we will automatically set it from
 	// the kubernetes metadata
@@ -225,9 +242,13 @@ func appendMetadata(db *kube.Store, svc *svc.Attrs, meta *kube.CachedObjMeta, cl
 	// growing cardinality
 	if topOwner != nil {
 		svc.Metadata[attr.K8sOwnerName] = topOwner.Name
+		svc.Metadata[attr.K8sKind] = topOwner.Kind
 	}
 
 	for _, owner := range meta.Meta.Pod.Owners {
+		if _, ok := svc.Metadata[attr.K8sKind]; !ok {
+			svc.Metadata[attr.K8sKind] = owner.Kind
+		}
 		if kindLabel := OwnerLabelName(owner.Kind); kindLabel != "" {
 			svc.Metadata[kindLabel] = owner.Name
 		}

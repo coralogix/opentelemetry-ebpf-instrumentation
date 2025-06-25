@@ -11,17 +11,18 @@ import (
 	"github.com/gobwas/glob"
 	"gopkg.in/yaml.v3"
 
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/tcmanager"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/traces"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
+	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/debug"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/prom"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/filter"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/ebpf/tcmanager"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/traces"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/services"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/transform"
@@ -38,7 +39,22 @@ const (
 )
 
 const (
-	defaultMetricsTTL = 70 * time.Minute
+	defaultMetricsTTL = 5 * time.Minute
+)
+
+const (
+	k8sGKEDefaultNamespacesRegex = "|^gke-connect$|^gke-gmp-system$|^gke-managed-cim$|^gke-managed-filestorecsi$|^gke-managed-metrics-server$|^gke-managed-system$|^gke-system$|^gke-managed-volumepopulator$"
+	k8sGKEDefaultNamespacesGlob  = ",gke-connect,gke-gmp-system,gke-managed-cim,gke-managed-filestorecsi,gke-managed-metrics-server,gke-managed-system,gke-system,gke-managed-volumepopulator"
+)
+
+const (
+	k8sAKSDefaultNamespacesRegex = "|^gatekeeper-system"
+	k8sAKSDefaultNamespacesGlob  = ",gatekeeper-system"
+)
+
+var (
+	k8sDefaultNamespacesRegex = services.NewPathRegexp(regexp.MustCompile("^kube-system$|^kube-node-lease$|^local-path-storage$|^grafana-alloy$|^cert-manager$|^monitoring$" + k8sGKEDefaultNamespacesRegex + k8sAKSDefaultNamespacesRegex))
+	k8sDefaultNamespacesGlob  = services.NewGlob(glob.MustCompile("{kube-system,kube-node-lease,local-path-storage,grafana-alloy,cert-manager,monitoring" + k8sGKEDefaultNamespacesGlob + k8sAKSDefaultNamespacesGlob + "}"))
 )
 
 var DefaultConfig = Config{
@@ -126,10 +142,16 @@ var DefaultConfig = Config{
 			services.RegexSelector{
 				Path: services.NewPathRegexp(regexp.MustCompile("(?:^|/)(beyla$|alloy$|otelcol[^/]*$)")),
 			},
+			services.RegexSelector{
+				Metadata: map[string]*services.RegexpAttr{"k8s_namespace": &k8sDefaultNamespacesRegex},
+			},
 		},
 		DefaultExcludeInstrument: services.GlobDefinitionCriteria{
 			services.GlobAttributes{
 				Path: services.NewGlob(glob.MustCompile("{*beyla,*alloy,*ebpf-instrument,*otelcol,*otelcol-contrib,*otelcol-contrib[!/]*}")),
+			},
+			services.GlobAttributes{
+				Metadata: map[string]*services.GlobAttr{"k8s_namespace": &k8sDefaultNamespacesGlob},
 			},
 		},
 	},
@@ -204,10 +226,11 @@ type Config struct {
 // Attributes configures the decoration of some extra attributes that will be
 // added to each span
 type Attributes struct {
-	Kubernetes transform.KubernetesDecorator `yaml:"kubernetes"`
-	InstanceID traces.InstanceIDConfig       `yaml:"instance_id"`
-	Select     attributes.Selection          `yaml:"select"`
-	HostID     HostIDConfig                  `yaml:"host_id"`
+	Kubernetes           transform.KubernetesDecorator `yaml:"kubernetes"`
+	InstanceID           traces.InstanceIDConfig       `yaml:"instance_id"`
+	Select               attributes.Selection          `yaml:"select"`
+	HostID               HostIDConfig                  `yaml:"host_id"`
+	ExtraGroupAttributes map[string][]attr.Name        `yaml:"extra_group_attributes"`
 }
 
 type HostIDConfig struct {
@@ -283,6 +306,13 @@ func (c *Config) Validate() error {
 		!c.Prometheus.Enabled() && !c.TracePrinter.Enabled() {
 		return ConfigError("you need to define at least one exporter: trace_printer," +
 			" otel_metrics_export, otel_traces_export or prometheus_export")
+	}
+
+	if c.Enabled(FeatureAppO11y) &&
+		((c.Prometheus.Enabled() && c.Prometheus.InvalidSpanMetricsConfig()) ||
+			(c.Metrics.Enabled() && c.Metrics.InvalidSpanMetricsConfig())) {
+		return ConfigError("you can only enable one format of span metrics," +
+			" application_span or application_span_otel")
 	}
 
 	if len(c.Routes.WildcardChar) > 1 {

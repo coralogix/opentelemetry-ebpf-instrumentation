@@ -9,21 +9,13 @@
 #include <common/runtime.h>
 #include <common/trace_common.h>
 
+#include <generictracer/maps/http_info_mem.h>
 #include <generictracer/protocol_common.h>
 
 #include <maps/active_ssl_connections.h>
 #include <maps/ongoing_http.h>
 
 volatile const u32 high_request_volume;
-
-// http_info_t became too big to be declared as a variable in the stack.
-// We use a percpu array to keep a reusable copy of it
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, http_info_t);
-    __uint(max_entries, 1);
-} http_info_mem SEC(".maps");
 
 // empty_http_info zeroes and return the unique percpu copy in the map
 // this function assumes that a given thread is not trying to use many
@@ -51,7 +43,8 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
                                                           void *u_buf,
                                                           int bytes_len,
                                                           s32 capture_header_buffer,
-                                                          u8 ssl) {
+                                                          u8 ssl,
+                                                          u16 orig_dport) {
     //TODO use make_key
     egress_key_t e_key = {
         .d_port = conn->d_port,
@@ -95,7 +88,7 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
         if (meta->type == EVENT_HTTP_CLIENT) {
             pid_connection_info_t p_conn = {.pid = pid};
             __builtin_memcpy(&p_conn.conn, conn, sizeof(connection_info_t));
-            found_tp = find_trace_for_client_request(&p_conn, &tp_p->tp);
+            found_tp = find_trace_for_client_request(&p_conn, orig_dport, &tp_p->tp);
         } else {
             //bpf_dbg_printk("Looking up existing trace for connection");
             //dbg_print_http_connection_info(conn);
@@ -140,7 +133,7 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
             if (meta) {
                 u32 type = trace_type_from_meta(meta);
                 set_trace_info_for_connection(conn, type, tp_p);
-                server_or_client_trace(meta->type, conn, tp_p, ssl);
+                server_or_client_trace(meta->type, conn, tp_p, ssl, orig_dport);
             }
             return;
         }
@@ -185,7 +178,7 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
         // sock_msg program has already punched a hole in the HTTP headers and has made
         // the HTTP header invalid. We need to add more smarts there or pull the
         // sock msg information here and mark it so that we don't override the span_id.
-        server_or_client_trace(meta->type, conn, tp_p, ssl);
+        server_or_client_trace(meta->type, conn, tp_p, ssl, orig_dport);
     }
 }
 
@@ -446,7 +439,8 @@ int beyla_protocol_http(void *ctx) {
                                       (void *)args->u_buf,
                                       args->bytes_len,
                                       capture_header_buffer,
-                                      args->ssl);
+                                      args->ssl,
+                                      args->orig_dport);
 
         if (meta) {
             u32 type = trace_type_from_meta(meta);

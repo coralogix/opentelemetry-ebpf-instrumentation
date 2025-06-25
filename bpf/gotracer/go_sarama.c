@@ -10,6 +10,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build obi_bpf_ignore
+
 #include <bpfcore/utils.h>
 
 #include <common/ringbuf.h>
@@ -78,7 +80,7 @@ int beyla_uprobe_sarama_broker_write(struct pt_regs *ctx) {
     off_table_t *ot = get_offsets_table();
 
     if (invocation) {
-        u8 small_buf[8];
+        unsigned char small_buf[8];
         bpf_probe_read(small_buf, 8, buf_ptr);
         // the api key is 2 bytes, but num APIs at the moment is max 50.
         // instead of reading 2 bytes and then doing ntohs, we just read

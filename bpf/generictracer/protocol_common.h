@@ -7,43 +7,26 @@
 #include <common/pin_internal.h>
 #include <common/ringbuf.h>
 
+#include <generictracer/iovec_len.h>
+
+#include <generictracer/maps/connection_meta_mem.h>
+#include <generictracer/maps/iovec_mem.h>
+#include <generictracer/maps/protocol_args_mem.h>
+
 #include <logger/bpf_dbg.h>
 
 #define PACKET_TYPE_REQUEST 1
 #define PACKET_TYPE_RESPONSE 2
 
-#define IO_VEC_MAX_LEN 512
-
 volatile const s32 capture_header_buffer = 0;
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, http_connection_metadata_t);
-    __uint(max_entries, 1);
-} connection_meta_mem SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, u8[(IO_VEC_MAX_LEN * 2)]);
-    __uint(max_entries, 1);
-} iovec_mem SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __type(key, int);
-    __type(value, call_protocol_args_t);
-    __uint(max_entries, 1);
-} protocol_args_mem SEC(".maps");
 
 static __always_inline http_connection_metadata_t *empty_connection_meta() {
     int zero = 0;
     return bpf_map_lookup_elem(&connection_meta_mem, &zero);
 }
 
-static __always_inline u8 *iovec_memory() {
-    int zero = 0;
+static __always_inline unsigned char *iovec_memory() {
+    const u32 zero = 0;
     return bpf_map_lookup_elem(&iovec_mem, &zero);
 }
 
@@ -127,12 +110,12 @@ static __always_inline void get_iovec_ctx(iovec_iter_ctx *ctx, struct msghdr *ms
     ctx->nr_segs = BPF_CORE_READ((struct iov_iter___dummy *)&msg->msg_iter, nr_segs);
 }
 
-static __always_inline int read_iovec_ctx(iovec_iter_ctx *ctx, u8 *buf, size_t max_len) {
+static __always_inline int read_iovec_ctx(iovec_iter_ctx *ctx, unsigned char *buf, size_t max_len) {
     if (max_len == 0) {
         return 0;
     }
 
-    bpf_clamp_umax(max_len, IO_VEC_MAX_LEN);
+    bpf_clamp_umax(max_len, k_iovec_max_len);
 
     bpf_dbg_printk("iter_type=%u", ctx->iter_type);
     bpf_dbg_printk("nr_segs=%lu, iov=%p, ubuf=%p", ctx->nr_segs, ctx->iov, ctx->ubuf);
@@ -144,7 +127,7 @@ static __always_inline int read_iovec_ctx(iovec_iter_ctx *ctx, u8 *buf, size_t m
         // ITER_UBUF is never a bitmask, and can be 0, so we perform a proper
         // equality check rather than a bitwise and like we do for ITER_IOVEC
         if (ctx->ubuf != NULL && ctx->iter_type == iter_ubuf) {
-            bpf_clamp_umax(max_len, IO_VEC_MAX_LEN);
+            bpf_clamp_umax(max_len, k_iovec_max_len);
             return bpf_probe_read(buf, max_len, ctx->ubuf) == 0 ? max_len : 0;
         }
     }
@@ -176,11 +159,11 @@ static __always_inline int read_iovec_ctx(iovec_iter_ctx *ctx, u8 *buf, size_t m
             continue;
         }
 
-        const u32 remaining = IO_VEC_MAX_LEN > tot_len ? (IO_VEC_MAX_LEN - tot_len) : 0;
+        const u32 remaining = k_iovec_max_len > tot_len ? (k_iovec_max_len - tot_len) : 0;
         u32 iov_size = vec.iov_len < max_len ? vec.iov_len : max_len;
         iov_size = iov_size < remaining ? iov_size : remaining;
-        bpf_clamp_umax(tot_len, IO_VEC_MAX_LEN);
-        bpf_clamp_umax(iov_size, IO_VEC_MAX_LEN);
+        bpf_clamp_umax(tot_len, k_iovec_max_len);
+        bpf_clamp_umax(iov_size, k_iovec_max_len);
 
         // bpf_dbg_printk("tot_len=%d, remaining=%d", tot_len, remaining);
 
@@ -198,7 +181,7 @@ static __always_inline int read_iovec_ctx(iovec_iter_ctx *ctx, u8 *buf, size_t m
     return tot_len;
 }
 
-static __always_inline int read_msghdr_buf(struct msghdr *msg, u8 *buf, size_t max_len) {
+static __always_inline int read_msghdr_buf(struct msghdr *msg, unsigned char *buf, size_t max_len) {
     if (max_len == 0) {
         return 0;
     }
@@ -208,25 +191,4 @@ static __always_inline int read_msghdr_buf(struct msghdr *msg, u8 *buf, size_t m
     get_iovec_ctx(&ctx, msg);
 
     return read_iovec_ctx(&ctx, buf, max_len);
-}
-
-// We sort the connection info to ensure we can track requests and responses. However, if the destination port
-// is somehow in the ephemeral port range, it can be higher than the source port and we'd use the sorted connection
-// info in user space, effectively reversing the flow of the operation. We keep track of the original destination port
-// and we undo the swap in the data collections we send to user space.
-static __always_inline void
-fixup_connection_info(connection_info_t *conn_info, u8 client, u16 orig_dport) {
-    if (!orig_dport) {
-        bpf_dbg_printk("orig_dport is 0, not swapping");
-        return;
-    }
-    // The destination port is the server port in userspace
-    if ((client && conn_info->d_port != orig_dport) ||
-        (!client && conn_info->d_port == orig_dport)) {
-        bpf_dbg_printk("Swapped connection info for userspace, client = %d, orig_dport = %d",
-                       client,
-                       orig_dport);
-        swap_connection_info_order(conn_info);
-        //dbg_print_http_connection_info(conn_info); // commented out since GitHub CI doesn't like this call
-    }
 }

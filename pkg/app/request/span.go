@@ -13,8 +13,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	trace2 "go.opentelemetry.io/otel/trace"
 
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
 	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
 )
 
 type EventType uint8
@@ -126,6 +126,7 @@ type DBError struct {
 // SpanPromGetters and getDefinitions in pkg/export/attributes/attr_defs.go
 type Span struct {
 	Type           EventType      `json:"type"`
+	Flags          uint8          `json:"-"`
 	Method         string         `json:"-"`
 	Path           string         `json:"-"`
 	Route          string         `json:"-"`
@@ -143,7 +144,7 @@ type Span struct {
 	TraceID        trace2.TraceID `json:"traceID"`
 	SpanID         trace2.SpanID  `json:"spanID"`
 	ParentSpanID   trace2.SpanID  `json:"parentSpanID"`
-	Flags          uint8          `json:"flags,string"`
+	TraceFlags     uint8          `json:"traceFlags,string"`
 	Pid            PidInfo        `json:"-"`
 	PeerName       string         `json:"peerName"`
 	HostName       string         `json:"hostName"`

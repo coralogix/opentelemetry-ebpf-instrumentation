@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/helpers/container"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/testutil"
 	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/helpers/container"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/testutil"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubecache/informer"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubecache/meta"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
@@ -26,7 +26,7 @@ func TestDecoration(t *testing.T) {
 	store := kube.NewStore(inf, kube.ResourceLabels{
 		"service.name":      []string{"app.kubernetes.io/name"},
 		"service.namespace": []string{"app.kubernetes.io/part-of"},
-	})
+	}, nil)
 	// pre-populated kubernetes metadata database
 	inf.Notify(&informer.Event{Type: informer.EventType_CREATED, Resource: &informer.ObjectMeta{
 		Name: "pod-12", Namespace: "the-ns", Kind: "Pod",
@@ -152,6 +152,7 @@ func TestDecoration(t *testing.T) {
 			"k8s.owner.name":      "deployment-12",
 			"k8s.pod.start_time":  "2020-01-02 12:12:56",
 			"k8s.cluster.name":    "the-cluster",
+			"k8s.kind":            "Deployment",
 		}, deco[0].Service.Metadata)
 	})
 	t.Run("pod info whose replicaset did not have an Owner should set the replicaSet name", func(t *testing.T) {
@@ -173,6 +174,7 @@ func TestDecoration(t *testing.T) {
 			"k8s.pod.uid":         "uid-34",
 			"k8s.pod.start_time":  "2020-01-02 12:34:56",
 			"k8s.cluster.name":    "the-cluster",
+			"k8s.kind":            "ReplicaSet",
 		}, deco[0].Service.Metadata)
 	})
 	t.Run("pod info with only pod name should set pod name as name", func(t *testing.T) {
@@ -288,6 +290,7 @@ func TestDecoration(t *testing.T) {
 			"k8s.owner.name":      "deployment-12",
 			"k8s.pod.start_time":  "2020-01-02 12:12:56",
 			"k8s.cluster.name":    "the-cluster",
+			"k8s.kind":            "Deployment",
 		}, deco[0].Service.Metadata)
 	})
 }

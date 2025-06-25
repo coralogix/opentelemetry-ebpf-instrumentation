@@ -7,11 +7,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/ebpf"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/expire"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/netolly/ebpf"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
 )
@@ -20,8 +20,8 @@ import (
 
 // NetPrometheusConfig for network metrics just wraps the global prom.NetPrometheusConfig as provided by the user
 type NetPrometheusConfig struct {
-	Config             *PrometheusConfig
-	AttributeSelectors attributes.Selection
+	Config      *PrometheusConfig
+	SelectorCfg *attributes.SelectorConfig
 	// Deprecated: to be removed in Beyla 3.0 with OTEL_EBPF_NETWORK_METRICS bool flag
 	GloballyEnabled bool
 }
@@ -78,7 +78,7 @@ func newNetReporter(
 	// OTEL exporter would report also some prometheus-exclusive attributes
 	group.Add(attributes.GroupPrometheus)
 
-	provider, err := attributes.NewAttrSelector(group, cfg.AttributeSelectors)
+	provider, err := attributes.NewAttrSelector(group, cfg.SelectorCfg)
 	if err != nil {
 		return nil, fmt.Errorf("network Prometheus exporter attributes enable: %w", err)
 	}
@@ -152,7 +152,7 @@ func (r *netMetricsReporter) observeFlowBytes(flow *ebpf.Record) {
 		return
 	}
 	r.flowBytes.WithLabelValues(labelValues(flow, r.flowAttrs)...).
-		metric.Add(float64(flow.Metrics.Bytes))
+		Metric.Add(float64(flow.Metrics.Bytes))
 }
 
 func (r *netMetricsReporter) observeInterZone(flow *ebpf.Record) {
@@ -160,5 +160,5 @@ func (r *netMetricsReporter) observeInterZone(flow *ebpf.Record) {
 		return
 	}
 	r.interZone.WithLabelValues(labelValues(flow, r.interZoneAttrs)...).
-		metric.Add(float64(flow.Metrics.Bytes))
+		Metric.Add(float64(flow.Metrics.Bytes))
 }

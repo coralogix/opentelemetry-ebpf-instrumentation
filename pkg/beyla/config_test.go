@@ -15,17 +15,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/ebpf/tcmanager"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/transform/cidr"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/traces"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
+	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/debug"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/prom"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/ebpf/tcmanager"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/netolly/transform/cidr"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/traces"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/kubeflags"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/services"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/transform"
@@ -68,6 +69,8 @@ attributes:
     beyla.network.flow:
       include: ["foo", "bar"]
       exclude: ["baz", "bae"]
+  extra_group_attributes:
+    k8s_app_meta: ["k8s.app.version"]	  
 network:
   enable: true
   cidrs:
@@ -193,6 +196,9 @@ network:
 					Exclude: []string{"baz", "bae"},
 				},
 			},
+			ExtraGroupAttributes: map[string][]attr.Name{
+				"k8s_app_meta": {"k8s.app.version"},
+			},
 		},
 		Routes: &transform.RoutesConfig{
 			Unmatch:      transform.UnmatchHeuristic,
@@ -209,10 +215,16 @@ network:
 				services.RegexSelector{
 					Path: services.NewPathRegexp(regexp.MustCompile("(?:^|/)(beyla$|alloy$|otelcol[^/]*$)")),
 				},
+				services.RegexSelector{
+					Metadata: map[string]*services.RegexpAttr{"k8s_namespace": &k8sDefaultNamespacesRegex},
+				},
 			},
 			DefaultExcludeInstrument: services.GlobDefinitionCriteria{
 				services.GlobAttributes{
 					Path: services.NewGlob(glob.MustCompile("{*beyla,*alloy,*ebpf-instrument,*otelcol,*otelcol-contrib,*otelcol-contrib[!/]*}")),
+				},
+				services.GlobAttributes{
+					Metadata: map[string]*services.GlobAttr{"k8s_namespace": &k8sDefaultNamespacesGlob},
 				},
 			},
 		},

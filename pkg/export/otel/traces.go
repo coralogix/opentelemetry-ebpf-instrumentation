@@ -14,6 +14,8 @@ import (
 	"time"
 
 	expirable2 "github.com/hashicorp/golang-lru/v2/expirable"
+	"go.opentelemetry.io/otel/attribute"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
@@ -27,7 +29,6 @@ import (
 	"go.opentelemetry.io/collector/exporter/otlphttpexporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -39,12 +40,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
 	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
 )
@@ -55,7 +56,10 @@ func tlog() *slog.Logger {
 
 const reporterName = "github.com/open-telemetry/opentelemetry-ebpf-instrumentation"
 
-var serviceAttrCache = expirable2.NewLRU[svc.UID, []attribute.KeyValue](1024, nil, 5*time.Minute)
+type TraceSpanAndAttributes struct {
+	Span       *request.Span
+	Attributes []attribute.KeyValue
+}
 
 type TracesConfig struct {
 	CommonEndpoint string `yaml:"-" env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
@@ -99,6 +103,13 @@ type TracesConfig struct {
 	// and the Info messages leak internal details that are not usually valuable for the final user.
 	//nolint:undoc
 	SDKLogLevel string `yaml:"otel_sdk_log_level" env:"OTEL_EBPF_OTEL_SDK_LOG_LEVEL"`
+
+	// OTLPEndpointProvider allows overriding the OTLP Endpoint. It needs to return an endpoint and
+	// a boolean indicating if the endpoint is common for both traces and metrics
+	OTLPEndpointProvider func() (string, bool) `yaml:"-" env:"-"`
+
+	// InjectHeaders allows injecting custom headers to the HTTP OTLP exporter
+	InjectHeaders func(dst map[string]string) `yaml:"-" env:"-"`
 }
 
 // Enabled specifies that the OTEL traces node is enabled if and only if
@@ -119,6 +130,9 @@ func (m *TracesConfig) GetProtocol() Protocol {
 }
 
 func (m *TracesConfig) OTLPTracesEndpoint() (string, bool) {
+	if m.OTLPEndpointProvider != nil {
+		return m.OTLPEndpointProvider()
+	}
 	return ResolveOTLPEndpoint(m.TracesEndpoint, m.CommonEndpoint)
 }
 
@@ -139,29 +153,36 @@ func (m *TracesConfig) guessProtocol() Protocol {
 }
 
 func makeTracesReceiver(
-	cfg TracesConfig, spanMetricsEnabled bool, ctxInfo *global.ContextInfo, userAttribSelection attributes.Selection,
+	cfg TracesConfig,
+	spanMetricsEnabled bool,
+	ctxInfo *global.ContextInfo,
+	selectorCfg *attributes.SelectorConfig,
 	input *msg.Queue[[]request.Span],
 ) *tracesOTELReceiver {
 	return &tracesOTELReceiver{
 		cfg:                cfg,
 		ctxInfo:            ctxInfo,
-		attributes:         userAttribSelection,
+		selectorCfg:        selectorCfg,
 		is:                 instrumentations.NewInstrumentationSelection(cfg.Instrumentations),
 		spanMetricsEnabled: spanMetricsEnabled,
 		input:              input.Subscribe(),
+		attributeCache:     expirable2.NewLRU[svc.UID, []attribute.KeyValue](1024, nil, 5*time.Minute),
 	}
 }
 
 // TracesReceiver creates a terminal node that consumes request.Spans and sends OpenTelemetry metrics to the configured consumers.
 func TracesReceiver(
-	ctxInfo *global.ContextInfo, cfg TracesConfig, spanMetricsEnabled bool, userAttribSelection attributes.Selection,
+	ctxInfo *global.ContextInfo,
+	cfg TracesConfig,
+	spanMetricsEnabled bool,
+	selectorCfg *attributes.SelectorConfig,
 	input *msg.Queue[[]request.Span],
 ) swarm.InstanceFunc {
 	return func(_ context.Context) (swarm.RunFunc, error) {
 		if !cfg.Enabled() {
 			return swarm.EmptyRunFunc()
 		}
-		tr := makeTracesReceiver(cfg, spanMetricsEnabled, ctxInfo, userAttribSelection, input)
+		tr := makeTracesReceiver(cfg, spanMetricsEnabled, ctxInfo, selectorCfg, input)
 		return tr.provideLoop, nil
 	}
 }
@@ -169,15 +190,16 @@ func TracesReceiver(
 type tracesOTELReceiver struct {
 	cfg                TracesConfig
 	ctxInfo            *global.ContextInfo
-	attributes         attributes.Selection
+	selectorCfg        *attributes.SelectorConfig
 	is                 instrumentations.InstrumentationSelection
 	spanMetricsEnabled bool
+	attributeCache     *expirable2.LRU[svc.UID, []attribute.KeyValue]
 	input              <-chan []request.Span
 }
 
-func GetUserSelectedAttributes(attrs attributes.Selection) (map[attr.Name]struct{}, error) {
+func GetUserSelectedAttributes(selectorCfg *attributes.SelectorConfig) (map[attr.Name]struct{}, error) {
 	// Get user attributes
-	attribProvider, err := attributes.NewAttrSelector(attributes.GroupTraces, attrs)
+	attribProvider, err := attributes.NewAttrSelector(attributes.GroupTraces, selectorCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +213,7 @@ func GetUserSelectedAttributes(attrs attributes.Selection) (map[attr.Name]struct
 }
 
 func (tr *tracesOTELReceiver) getConstantAttributes() (map[attr.Name]struct{}, error) {
-	traceAttrs, err := GetUserSelectedAttributes(tr.attributes)
+	traceAttrs, err := GetUserSelectedAttributes(tr.selectorCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -202,27 +224,29 @@ func (tr *tracesOTELReceiver) getConstantAttributes() (map[attr.Name]struct{}, e
 	return traceAttrs, nil
 }
 
-func (tr *tracesOTELReceiver) spanDiscarded(span *request.Span) bool {
-	return span.Service.ExportsOTelTraces() || !tr.acceptSpan(span)
+func spanDiscarded(span *request.Span, is instrumentations.InstrumentationSelection) bool {
+	return request.IgnoreTraces(span) || span.Service.ExportsOTelTraces() || !acceptSpan(is, span)
 }
 
-func (tr *tracesOTELReceiver) processSpans(ctx context.Context, exp exporter.Traces, spans []request.Span, traceAttrs map[attr.Name]struct{}, sampler trace.Sampler) {
+func GroupSpans(ctx context.Context, spans []request.Span, traceAttrs map[attr.Name]struct{}, sampler trace.Sampler, is instrumentations.InstrumentationSelection) map[svc.UID][]TraceSpanAndAttributes {
+	spanGroups := map[svc.UID][]TraceSpanAndAttributes{}
+
 	for i := range spans {
 		span := &spans[i]
 		if span.InternalSignal() {
 			continue
 		}
-		if tr.spanDiscarded(span) {
+		if spanDiscarded(span, is) {
 			continue
 		}
 
-		finalAttrs := traceAttributes(span, traceAttrs)
+		finalAttrs := TraceAttributes(span, traceAttrs)
 
 		sr := sampler.ShouldSample(trace.SamplingParameters{
 			ParentContext: ctx,
 			Name:          span.TraceName(),
 			TraceID:       span.TraceID,
-			Kind:          spanKind(span),
+			Kind:          SpanKind(span),
 			Attributes:    finalAttrs,
 		})
 
@@ -230,11 +254,29 @@ func (tr *tracesOTELReceiver) processSpans(ctx context.Context, exp exporter.Tra
 			continue
 		}
 
-		envResourceAttrs := ResourceAttrsFromEnv(&span.Service)
-		traces := GenerateTracesWithAttributes(span, tr.ctxInfo.HostID, finalAttrs, envResourceAttrs)
-		err := exp.ConsumeTraces(ctx, traces)
-		if err != nil {
-			slog.Error("error sending trace to consumer", "error", err)
+		group, ok := spanGroups[span.Service.UID]
+		if !ok {
+			group = []TraceSpanAndAttributes{}
+		}
+		group = append(group, TraceSpanAndAttributes{Span: span, Attributes: finalAttrs})
+		spanGroups[span.Service.UID] = group
+	}
+
+	return spanGroups
+}
+
+func (tr *tracesOTELReceiver) processSpans(ctx context.Context, exp exporter.Traces, spans []request.Span, traceAttrs map[attr.Name]struct{}, sampler trace.Sampler) {
+	spanGroups := GroupSpans(ctx, spans, traceAttrs, sampler, tr.is)
+
+	for _, spanGroup := range spanGroups {
+		if len(spanGroup) > 0 {
+			sample := spanGroup[0]
+			envResourceAttrs := ResourceAttrsFromEnv(&sample.Span.Service)
+			traces := generateTracesWithAttributes(tr.attributeCache, &sample.Span.Service, envResourceAttrs, tr.ctxInfo.HostID, spanGroup, tr.ctxInfo.ExtraResourceAttributes)
+			err := exp.ConsumeTraces(ctx, traces)
+			if err != nil {
+				slog.Error("error sending trace to consumer", "error", err)
+			}
 		}
 	}
 }
@@ -305,7 +347,7 @@ func getTracesExporter(ctx context.Context, cfg TracesConfig, ctxInfo *global.Co
 		config.RetryConfig = getRetrySettings(cfg)
 		config.ClientConfig = confighttp.ClientConfig{
 			Endpoint: opts.Scheme + "://" + opts.Endpoint + opts.BaseURLPath,
-			TLSSetting: configtls.ClientConfig{
+			TLS: configtls.ClientConfig{
 				Insecure:           opts.Insecure,
 				InsecureSkipVerify: cfg.InsecureSkipVerify,
 			},
@@ -359,7 +401,7 @@ func getTracesExporter(ctx context.Context, cfg TracesConfig, ctxInfo *global.Co
 		config.RetryConfig = getRetrySettings(cfg)
 		config.ClientConfig = configgrpc.ClientConfig{
 			Endpoint: endpoint.String(),
-			TLSSetting: configtls.ClientConfig{
+			TLS: configtls.ClientConfig{
 				Insecure:           opts.Insecure,
 				InsecureSkipVerify: cfg.InsecureSkipVerify,
 			},
@@ -451,79 +493,101 @@ func getRetrySettings(cfg TracesConfig) configretry.BackOffConfig {
 	return backOffCfg
 }
 
-func traceAppResourceAttrs(hostID string, service *svc.Attrs) []attribute.KeyValue {
+func traceAppResourceAttrs(cache *expirable2.LRU[svc.UID, []attribute.KeyValue], hostID string, service *svc.Attrs) []attribute.KeyValue {
 	// TODO: remove?
 	if service.UID == emptyUID {
-		return getAppResourceAttrs(hostID, service)
+		return GetAppResourceAttrs(hostID, service)
 	}
 
-	attrs, ok := serviceAttrCache.Get(service.UID)
+	attrs, ok := cache.Get(service.UID)
 	if ok {
 		return attrs
 	}
-	attrs = getAppResourceAttrs(hostID, service)
-	serviceAttrCache.Add(service.UID, attrs)
+	attrs = GetAppResourceAttrs(hostID, service)
+	cache.Add(service.UID, attrs)
 
 	return attrs
 }
 
-func GenerateTracesWithAttributes(span *request.Span, hostID string, attrs []attribute.KeyValue, envResourceAttrs []attribute.KeyValue) ptrace.Traces {
-	t := span.Timings()
-	start := spanStartTime(t)
-	hasSubSpans := t.Start.After(start)
+func generateTracesWithAttributes(
+	cache *expirable2.LRU[svc.UID, []attribute.KeyValue],
+	svc *svc.Attrs,
+	envResourceAttrs []attribute.KeyValue,
+	hostID string,
+	spans []TraceSpanAndAttributes,
+	extraResAttrs []attribute.KeyValue,
+) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	rs := traces.ResourceSpans().AppendEmpty()
-	ss := rs.ScopeSpans().AppendEmpty()
-	resourceAttrs := traceAppResourceAttrs(hostID, &span.Service)
+	resourceAttrs := traceAppResourceAttrs(cache, hostID, svc)
 	resourceAttrs = append(resourceAttrs, envResourceAttrs...)
 	resourceAttrsMap := attrsToMap(resourceAttrs)
 	resourceAttrsMap.PutStr(string(semconv.OTelLibraryNameKey), reporterName)
-	resourceAttrsMap.CopyTo(rs.Resource().Attributes())
+	addAttrsToMap(extraResAttrs, resourceAttrsMap)
+	resourceAttrsMap.MoveTo(rs.Resource().Attributes())
 
-	traceID := pcommon.TraceID(span.TraceID)
-	spanID := pcommon.SpanID(RandomSpanID())
-	// This should never happen
-	if traceID.IsEmpty() {
-		traceID = pcommon.TraceID(RandomTraceID())
+	for _, spanWithAttributes := range spans {
+		span := spanWithAttributes.Span
+		attrs := spanWithAttributes.Attributes
+
+		ss := rs.ScopeSpans().AppendEmpty()
+
+		t := span.Timings()
+		start := spanStartTime(t)
+		hasSubSpans := t.Start.After(start)
+
+		traceID := pcommon.TraceID(span.TraceID)
+		spanID := pcommon.SpanID(RandomSpanID())
+		// This should never happen
+		if traceID.IsEmpty() {
+			traceID = pcommon.TraceID(RandomTraceID())
+		}
+
+		if hasSubSpans {
+			createSubSpans(span, spanID, traceID, &ss, t)
+		} else if span.SpanID.IsValid() {
+			spanID = pcommon.SpanID(span.SpanID)
+		}
+
+		// Create a parent span for the whole request session
+		s := ss.Spans().AppendEmpty()
+		s.SetName(span.TraceName())
+		s.SetKind(ptrace.SpanKind(SpanKind(span)))
+		s.SetStartTimestamp(pcommon.NewTimestampFromTime(start))
+
+		// Set trace and span IDs
+		s.SetSpanID(spanID)
+		s.SetTraceID(traceID)
+		if span.ParentSpanID.IsValid() {
+			s.SetParentSpanID(pcommon.SpanID(span.ParentSpanID))
+		}
+
+		// Set span attributes
+		m := attrsToMap(attrs)
+		m.MoveTo(s.Attributes())
+
+		// Set status code
+		statusCode := codeToStatusCode(request.SpanStatusCode(span))
+		s.Status().SetCode(statusCode)
+		statusMessage := request.SpanStatusMessage(span)
+		if statusMessage != "" {
+			s.Status().SetMessage(statusMessage)
+		}
+		s.SetEndTimestamp(pcommon.NewTimestampFromTime(t.End))
 	}
-
-	if hasSubSpans {
-		createSubSpans(span, spanID, traceID, &ss, t)
-	} else if span.SpanID.IsValid() {
-		spanID = pcommon.SpanID(span.SpanID)
-	}
-
-	// Create a parent span for the whole request session
-	s := ss.Spans().AppendEmpty()
-	s.SetName(span.TraceName())
-	s.SetKind(ptrace.SpanKind(spanKind(span)))
-	s.SetStartTimestamp(pcommon.NewTimestampFromTime(start))
-
-	// Set trace and span IDs
-	s.SetSpanID(spanID)
-	s.SetTraceID(traceID)
-	if span.ParentSpanID.IsValid() {
-		s.SetParentSpanID(pcommon.SpanID(span.ParentSpanID))
-	}
-
-	// Set span attributes
-	m := attrsToMap(attrs)
-	m.CopyTo(s.Attributes())
-
-	// Set status code
-	statusCode := codeToStatusCode(request.SpanStatusCode(span))
-	s.Status().SetCode(statusCode)
-	statusMessage := request.SpanStatusMessage(span)
-	if statusMessage != "" {
-		s.Status().SetMessage(statusMessage)
-	}
-	s.SetEndTimestamp(pcommon.NewTimestampFromTime(t.End))
 	return traces
 }
 
 // GenerateTraces creates a ptrace.Traces from a request.Span
-func GenerateTraces(span *request.Span, hostID string, userAttrs map[attr.Name]struct{}, envResourceAttrs []attribute.KeyValue) ptrace.Traces {
-	return GenerateTracesWithAttributes(span, hostID, traceAttributes(span, userAttrs), envResourceAttrs)
+func GenerateTraces(
+	cache *expirable2.LRU[svc.UID, []attribute.KeyValue],
+	svc *svc.Attrs,
+	envResourceAttrs []attribute.KeyValue,
+	hostID string,
+	spans []TraceSpanAndAttributes,
+	extraResAttrs ...attribute.KeyValue,
+) ptrace.Traces {
+	return generateTracesWithAttributes(cache, svc, envResourceAttrs, hostID, spans, extraResAttrs)
 }
 
 // createSubSpans creates the internal spans for a request.Span
@@ -556,19 +620,24 @@ func createSubSpans(span *request.Span, parentSpanID pcommon.SpanID, traceID pco
 // attrsToMap converts a slice of attribute.KeyValue to a pcommon.Map
 func attrsToMap(attrs []attribute.KeyValue) pcommon.Map {
 	m := pcommon.NewMap()
+	addAttrsToMap(attrs, m)
+	return m
+}
+
+func addAttrsToMap(attrs []attribute.KeyValue, dst pcommon.Map) {
+	dst.EnsureCapacity(dst.Len() + len(attrs))
 	for _, attr := range attrs {
 		switch v := attr.Value.AsInterface().(type) {
 		case string:
-			m.PutStr(string(attr.Key), v)
+			dst.PutStr(string(attr.Key), v)
 		case int64:
-			m.PutInt(string(attr.Key), v)
+			dst.PutInt(string(attr.Key), v)
 		case float64:
-			m.PutDouble(string(attr.Key), v)
+			dst.PutDouble(string(attr.Key), v)
 		case bool:
-			m.PutBool(string(attr.Key), v)
+			dst.PutBool(string(attr.Key), v)
 		}
 	}
-	return m
 }
 
 // codeToStatusCode converts a codes.Code to a ptrace.StatusCode
@@ -608,18 +677,18 @@ func grpcTracer(ctx context.Context, opts otlpOptions) (*otlptrace.Exporter, err
 	return texp, nil
 }
 
-func (tr *tracesOTELReceiver) acceptSpan(span *request.Span) bool {
+func acceptSpan(is instrumentations.InstrumentationSelection, span *request.Span) bool {
 	switch span.Type {
 	case request.EventTypeHTTP, request.EventTypeHTTPClient:
-		return tr.is.HTTPEnabled()
+		return is.HTTPEnabled()
 	case request.EventTypeGRPC, request.EventTypeGRPCClient:
-		return tr.is.GRPCEnabled()
+		return is.GRPCEnabled()
 	case request.EventTypeSQLClient:
-		return tr.is.SQLEnabled()
+		return is.SQLEnabled()
 	case request.EventTypeRedisClient, request.EventTypeRedisServer:
-		return tr.is.RedisEnabled()
+		return is.RedisEnabled()
 	case request.EventTypeKafkaClient, request.EventTypeKafkaServer:
-		return tr.is.KafkaEnabled()
+		return is.KafkaEnabled()
 	}
 
 	return false
@@ -632,7 +701,7 @@ var (
 )
 
 //nolint:cyclop
-func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) []attribute.KeyValue {
+func TraceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
 
 	switch span.Type {
@@ -740,7 +809,7 @@ func traceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 	return attrs
 }
 
-func spanKind(span *request.Span) trace2.SpanKind {
+func SpanKind(span *request.Span) trace2.SpanKind {
 	switch span.Type {
 	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeKafkaServer:
 		return trace2.SpanKindServer
@@ -816,6 +885,9 @@ func getHTTPTracesEndpointOptions(cfg *TracesConfig) (otlpOptions, error) {
 		opts.SkipTLSVerify = true
 	}
 
+	if cfg.InjectHeaders != nil {
+		cfg.InjectHeaders(opts.Headers)
+	}
 	maps.Copy(opts.Headers, HeadersFromEnv(envHeaders))
 	maps.Copy(opts.Headers, HeadersFromEnv(envTracesHeaders))
 
@@ -843,6 +915,9 @@ func getGRPCTracesEndpointOptions(cfg *TracesConfig) (otlpOptions, error) {
 		opts.SkipTLSVerify = true
 	}
 
+	if cfg.InjectHeaders != nil {
+		cfg.InjectHeaders(opts.Headers)
+	}
 	maps.Copy(opts.Headers, HeadersFromEnv(envHeaders))
 	maps.Copy(opts.Headers, HeadersFromEnv(envTracesHeaders))
 	return opts, nil

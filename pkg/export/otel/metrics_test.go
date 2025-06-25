@@ -16,13 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/exec"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
 	attr "github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes/names"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/instrumentations"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/exec"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/svc"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/msg"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/pipe/swarm"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/collector"
@@ -122,7 +122,7 @@ func TestMetrics_InternalInstrumentation(t *testing.T) {
 	}, &MetricsConfig{
 		CommonEndpoint: coll.URL, Interval: 10 * time.Millisecond, ReportersCacheLen: 16,
 		Features: []string{FeatureApplication}, Instrumentations: []string{instrumentations.InstrumentationHTTP},
-	}, attributes.Selection{}, exportMetrics, processEvents,
+	}, &attributes.SelectorConfig{}, exportMetrics, processEvents,
 	)(t.Context())
 	require.NoError(t, err)
 	go reporter(t.Context())
@@ -510,6 +510,14 @@ func TestMetricsConfig_Enabled(t *testing.T) {
 	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication, FeatureNetwork}, CommonEndpoint: "foo"}).Enabled())
 	assert.True(t, (&MetricsConfig{Features: []string{FeatureApplication}, MetricsEndpoint: "foo"}).Enabled())
 	assert.True(t, (&MetricsConfig{MetricsEndpoint: "foo", Features: []string{FeatureNetwork}}).Enabled())
+	assert.True(t, (&MetricsConfig{
+		Features:             []string{FeatureNetwork},
+		OTLPEndpointProvider: func() (string, bool) { return "something", false },
+	}).Enabled())
+	assert.True(t, (&MetricsConfig{
+		Features:             []string{FeatureNetwork},
+		OTLPEndpointProvider: func() (string, bool) { return "something", true },
+	}).Enabled())
 }
 
 func TestMetricsConfig_Disabled(t *testing.T) {
@@ -519,9 +527,13 @@ func TestMetricsConfig_Disabled(t *testing.T) {
 	// application feature is not enabled
 	assert.False(t, (&MetricsConfig{CommonEndpoint: "foo"}).Enabled())
 	assert.False(t, (&MetricsConfig{}).Enabled())
+	assert.False(t, (&MetricsConfig{
+		Features:             []string{FeatureApplication},
+		OTLPEndpointProvider: func() (string, bool) { return "", false },
+	}).Enabled())
 }
 
-func TestSpanMetricsDiscarded(t *testing.T) {
+func TestMetricsDiscarded(t *testing.T) {
 	mc := MetricsConfig{
 		Features: []string{FeatureApplication},
 	}
@@ -561,7 +573,52 @@ func TestSpanMetricsDiscarded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.discarded, !otelSpanAccepted(&tt.span, &mr), tt.name)
+			assert.Equal(t, tt.discarded, !otelMetricsAccepted(&tt.span, &mr), tt.name)
+		})
+	}
+}
+
+func TestSpanMetricsDiscarded(t *testing.T) {
+	mc := MetricsConfig{
+		Features: []string{FeatureApplication},
+	}
+	mr := MetricsReporter{
+		cfg: &mc,
+	}
+
+	svcNoExport := svc.Attrs{}
+
+	svcExportMetrics := svc.Attrs{}
+	svcExportMetrics.SetExportsOTelMetrics()
+
+	svcExportSpanMetrics := svc.Attrs{}
+	svcExportSpanMetrics.SetExportsOTelMetricsSpan()
+
+	tests := []struct {
+		name      string
+		span      request.Span
+		discarded bool
+	}{
+		{
+			name:      "Foo span is not filtered",
+			span:      request.Span{Service: svcNoExport, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/foo", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/metrics span is not filtered",
+			span:      request.Span{Service: svcExportMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/metrics", RequestStart: 100, End: 200},
+			discarded: false,
+		},
+		{
+			name:      "/v1/traces span is filtered",
+			span:      request.Span{Service: svcExportSpanMetrics, Type: request.EventTypeHTTPClient, Method: "GET", Route: "/v1/traces", RequestStart: 100, End: 200},
+			discarded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.discarded, !otelSpanMetricsAccepted(&tt.span, &mr), tt.name)
 		})
 	}
 }
@@ -577,6 +634,48 @@ func TestMetricsInterval(t *testing.T) {
 	t.Run("Beyla interval takes precedence over OTEL", func(t *testing.T) {
 		assert.Equal(t, 5*time.Second, cfg.GetInterval())
 	})
+}
+
+func TestProcessPIDEvents(t *testing.T) {
+	mc := MetricsConfig{
+		Features: []string{FeatureApplication},
+	}
+	mr := MetricsReporter{
+		cfg:        &mc,
+		pidTracker: NewPidServiceTracker(),
+	}
+
+	svcA := svc.Attrs{
+		UID: svc.UID{Name: "A", Instance: "A"},
+	}
+	svcB := svc.Attrs{
+		UID: svc.UID{Name: "B", Instance: "B"},
+	}
+
+	mr.setupPIDToServiceRelationship(1, svcA.UID)
+	mr.setupPIDToServiceRelationship(2, svcA.UID)
+	mr.setupPIDToServiceRelationship(3, svcB.UID)
+	mr.setupPIDToServiceRelationship(4, svcB.UID)
+
+	deleted, uid := mr.disassociatePIDFromService(1)
+	assert.Equal(t, false, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(1)
+	assert.Equal(t, false, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(2)
+	assert.Equal(t, true, deleted)
+	assert.Equal(t, svcA.UID, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(3)
+	assert.Equal(t, false, deleted)
+	assert.Equal(t, svc.UID{}, uid)
+
+	deleted, uid = mr.disassociatePIDFromService(4)
+	assert.Equal(t, true, deleted)
+	assert.Equal(t, svcB.UID, uid)
 }
 
 func (f *fakeInternalMetrics) OTELMetricExport(length int) {
@@ -633,9 +732,11 @@ func makeExporter(
 			TTL:               30 * time.Minute,
 			ReportersCacheLen: 100,
 			Instrumentations:  instrumentations,
-		}, attributes.Selection{
-			attributes.HTTPServerDuration.Section: attributes.InclusionLists{
-				Include: []string{"url.path"},
+		}, &attributes.SelectorConfig{
+			SelectionCfg: attributes.Selection{
+				attributes.HTTPServerDuration.Section: attributes.InclusionLists{
+					Include: []string{"url.path"},
+				},
 			},
 		}, input, processEvents)(ctx)
 
@@ -672,7 +773,7 @@ func TestMetricResourceAttributes(t *testing.T) {
 			},
 			attributeSelect: attributes.Selection{},
 			expectedAttrs: []string{
-				"service",
+				"service.name",
 				"service.instance.id",
 				"service.namespace",
 				"telemetry.sdk.language",
@@ -710,7 +811,7 @@ func TestMetricResourceAttributes(t *testing.T) {
 				},
 			},
 			expectedAttrs: []string{
-				"service",
+				"service.name",
 				"service.instance.id",
 				"service.namespace",
 				"telemetry.sdk.language",
@@ -749,7 +850,7 @@ func TestMetricResourceAttributes(t *testing.T) {
 				},
 			},
 			expectedAttrs: []string{
-				"service",
+				"service.name",
 				"service.instance.id",
 				"service.namespace",
 				"telemetry.sdk.language",
@@ -788,7 +889,7 @@ func TestMetricResourceAttributes(t *testing.T) {
 				},
 			},
 			expectedAttrs: []string{
-				"service",
+				"service.name",
 				"service.instance.id",
 				"service.namespace",
 				"telemetry.sdk.language",

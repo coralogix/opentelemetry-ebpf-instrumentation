@@ -176,6 +176,22 @@ static __always_inline u64 find_parent_goroutine(go_addr_key_t *current) {
     return 0;
 }
 
+static __always_inline u64 find_parent_goroutine_in_chain(go_addr_key_t *current) {
+    if (!current) {
+        return 0;
+    }
+
+    // Let's find the parent scope
+    goroutine_metadata *g_metadata =
+        (goroutine_metadata *)bpf_map_lookup_elem(&ongoing_goroutines, current);
+    if (g_metadata) {
+        // Lookup now to see if the parent was a request
+        return g_metadata->parent.addr;
+    }
+
+    return 0;
+}
+
 static __always_inline void decode_go_traceparent(unsigned char *buf,
                                                   unsigned char *trace_id,
                                                   unsigned char *span_id,
@@ -429,7 +445,7 @@ static __always_inline void process_meta_frame_headers(void *frame, tp_info_t *t
             //bpf_dbg_printk("grpc header %s:%s", field.key_ptr, field.val_ptr);
             //bpf_dbg_printk("grpc sizes %d:%d", field.key_len, field.val_len);
             if (field.key_len == W3C_KEY_LENGTH && field.val_len == W3C_VAL_LENGTH) {
-                u8 temp[W3C_VAL_LENGTH];
+                unsigned char temp[W3C_VAL_LENGTH];
 
                 bpf_probe_read(&temp, W3C_KEY_LENGTH, field.key_ptr);
                 if (!bpf_memicmp((const char *)temp, "traceparent", W3C_KEY_LENGTH)) {

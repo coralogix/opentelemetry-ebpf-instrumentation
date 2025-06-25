@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"text/template"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/beyla"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/appolly"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/connector"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/imetrics"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/kube"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/agent"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/netolly/flow"
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/components/pipe/global"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/attributes"
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/export/otel"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/appolly"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/connector"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/imetrics"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/kube"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/netolly/agent"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/netolly/flow"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/internal/pipe/global"
 )
 
 // Run in the foreground process. This is a blocking function and won't exit
@@ -61,7 +62,7 @@ func Run(
 	if err := g.Wait(); err != nil {
 		return err
 	}
-
+	slog.Debug("OBI main node finished")
 	return nil
 }
 
@@ -74,27 +75,26 @@ func setupAppO11y(ctx context.Context, ctxInfo *global.ContextInfo, config *beyl
 		return fmt.Errorf("can't create new instrumenter: %w", err)
 	}
 
-	err = instr.FindAndInstrument(ctx)
-	if err != nil {
+	if err := instr.FindAndInstrument(ctx); err != nil {
 		slog.Debug("can't find target process", "error", err)
 		return fmt.Errorf("can't find target process: %w", err)
 	}
 
-	err = instr.ReadAndForward(ctx)
-	if err != nil {
-		slog.Debug("can't read and forward auto-instrumenter", "error", err)
-		return fmt.Errorf("can't read and forward auto-instrumente: %w", err)
+	if err := instr.ReadAndForward(ctx); err != nil {
+		slog.Debug("read and forward auto-instrumenter", "error", err)
+		return err
 	}
 
+	if err := instr.WaitUntilFinished(); err != nil {
+		slog.Error("waiting for App O11y pipeline to finish", "error", err)
+		return err
+	}
+
+	slog.Debug("Application O11y pipeline finished")
 	return nil
 }
 
 func setupNetO11y(ctx context.Context, ctxInfo *global.ContextInfo, cfg *beyla.Config) error {
-	if msg := mustSkip(cfg); msg != "" {
-		slog.Warn(msg + ". Skipping Network metrics component")
-		return nil
-	}
-
 	slog.Info("starting Beyla in Network metrics mode")
 	flowsAgent, err := agent.FlowsAgent(ctxInfo, cfg)
 	if err != nil {
@@ -111,12 +111,19 @@ func setupNetO11y(ctx context.Context, ctxInfo *global.ContextInfo, cfg *beyla.C
 	return nil
 }
 
-func mustSkip(cfg *beyla.Config) string {
-	enabled := cfg.Enabled(beyla.FeatureNetO11y)
-	if !enabled {
-		return "network not present neither in OTEL_EBPF_PROMETHEUS_FEATURES nor OTEL_EBPF_OTEL_METRICS_FEATURES"
+func buildServiceNameTemplate(config *beyla.Config) (*template.Template, error) {
+	var templ *template.Template
+
+	if config.Attributes.Kubernetes.ServiceNameTemplate != "" {
+		var err error
+
+		templ, err = template.New("serviceNameTemplate").Parse(config.Attributes.Kubernetes.ServiceNameTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse service name template: %w", err)
+		}
 	}
-	return ""
+
+	return templ, nil
 }
 
 // BuildContextInfo populates some globally shared components and properties
@@ -143,18 +150,24 @@ func buildCommonContextInfo(
 		showDeprecation()
 	}
 
+	templ, err := buildServiceNameTemplate(config)
+	if err != nil {
+		return nil, err
+	}
+
 	promMgr := &connector.PrometheusManager{}
 	ctxInfo := &global.ContextInfo{
 		Prometheus: promMgr,
 		K8sInformer: kube.NewMetadataProvider(kube.MetadataConfig{
-			Enable:            config.Attributes.Kubernetes.Enable,
-			KubeConfigPath:    config.Attributes.Kubernetes.KubeconfigPath,
-			SyncTimeout:       config.Attributes.Kubernetes.InformersSyncTimeout,
-			ResyncPeriod:      config.Attributes.Kubernetes.InformersResyncPeriod,
-			DisabledInformers: config.Attributes.Kubernetes.DisableInformers,
-			MetaCacheAddr:     config.Attributes.Kubernetes.MetaCacheAddress,
-			ResourceLabels:    resourceLabels,
-			RestrictLocalNode: config.Attributes.Kubernetes.MetaRestrictLocalNode,
+			Enable:              config.Attributes.Kubernetes.Enable,
+			KubeConfigPath:      config.Attributes.Kubernetes.KubeconfigPath,
+			SyncTimeout:         config.Attributes.Kubernetes.InformersSyncTimeout,
+			ResyncPeriod:        config.Attributes.Kubernetes.InformersResyncPeriod,
+			DisabledInformers:   config.Attributes.Kubernetes.DisableInformers,
+			MetaCacheAddr:       config.Attributes.Kubernetes.MetaCacheAddress,
+			ResourceLabels:      resourceLabels,
+			RestrictLocalNode:   config.Attributes.Kubernetes.MetaRestrictLocalNode,
+			ServiceNameTemplate: templ,
 		}),
 	}
 	if config.Attributes.HostID.Override == "" {

@@ -1,3 +1,5 @@
+//go:build obi_bpf_ignore
+
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_tracing.h>
@@ -7,43 +9,22 @@
 #include <common/ssl_helpers.h>
 #include <common/tcp_info.h>
 
-#include <generictracer/k_tracer_defs.h>
-#include <generictracer/ssl_defs.h>
 #include <generictracer/k_send_receive.h>
+#include <generictracer/k_tracer_defs.h>
 #include <generictracer/k_unix_sock.h>
+#include <generictracer/maps/active_accept_args.h>
+#include <generictracer/maps/active_connect_args.h>
+#include <generictracer/maps/tcp_connection_map.h>
+#include <generictracer/ssl_defs.h>
 
 #include <logger/bpf_dbg.h>
 
+#include <maps/fd_map.h>
+#include <maps/fd_to_connection.h>
 #include <maps/msg_buffers.h>
 #include <maps/sk_buffers.h>
 
 #include <pid/pid.h>
-
-// Temporary tracking of accept arguments
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, MAX_CONCURRENT_REQUESTS);
-    __type(key, u64);
-    __type(value, sock_args_t);
-} active_accept_args SEC(".maps");
-
-// Temporary tracking of connect arguments
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, MAX_CONCURRENT_REQUESTS);
-    __type(key, u64);
-    __type(value, sock_args_t);
-} active_connect_args SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(
-        key,
-        partial_connection_info_t); // key: the connection info without the destination address, but with the tcp sequence
-    __type(value, connection_info_t); // value: traceparent info
-    __uint(max_entries, 1024);
-    __uint(pinning, BEYLA_PIN_INTERNAL);
-} tcp_connection_map SEC(".maps");
 
 // Used by accept to grab the sock details
 SEC("kretprobe/sock_alloc")
@@ -119,7 +100,7 @@ int BPF_KPROBE(beyla_kprobe_tcp_rcv_established, struct sock *sk, struct sk_buff
 // Note: A current limitation is that likely we won't capture the first accept request. The
 // process may have already reached accept, before the instrumenter has launched.
 SEC("kretprobe/sys_accept4")
-int BPF_KRETPROBE(beyla_kretprobe_sys_accept4, uint fd) {
+int BPF_KRETPROBE(beyla_kretprobe_sys_accept4, s32 fd) {
     u64 id = bpf_get_current_pid_tgid();
 
     if (!valid_pid(id)) {
@@ -132,7 +113,7 @@ int BPF_KRETPROBE(beyla_kretprobe_sys_accept4, uint fd) {
 
     // The file descriptor is the value returned from the accept4 syscall.
     // If we got a negative file descriptor we don't have a connection
-    if ((int)fd < 0) {
+    if (fd < 0) {
         goto cleanup;
     }
 
@@ -145,6 +126,10 @@ int BPF_KRETPROBE(beyla_kretprobe_sys_accept4, uint fd) {
     ssl_pid_connection_info_t info = {};
 
     if (parse_accept_socket_info(args, &info.p_conn.conn)) {
+        u32 host_pid = pid_from_pid_tgid(id);
+        // store fd to connection mapping
+        store_accept_fd_info(host_pid, fd, &info.p_conn.conn);
+
         u16 orig_dport = info.p_conn.conn.d_port;
         //dbg_print_http_connection_info(&info.conn);
         sort_connection_info(&info.p_conn.conn);
@@ -153,10 +138,40 @@ int BPF_KRETPROBE(beyla_kretprobe_sys_accept4, uint fd) {
 
         // to support SSL on missing handshake
         bpf_map_update_elem(&pid_tid_to_conn, &id, &info, BPF_ANY);
+
+        const fd_key key = {.pid_tgid = id, .fd = fd};
+
+        // used by nodejs to track the fd of incoming connections - see
+        // find_nodejs_parent_trace() for usage
+        // TODO: try to merge with store_accept_fd_info() above
+        bpf_map_update_elem(&fd_to_connection, &key, &info.p_conn.conn, BPF_ANY);
     }
 
 cleanup:
     bpf_map_delete_elem(&active_accept_args, &id);
+    return 0;
+}
+
+SEC("kprobe/sys_connect")
+int BPF_KPROBE(beyla_kprobe_sys_connect) {
+    u64 id = bpf_get_current_pid_tgid();
+
+    if (!valid_pid(id)) {
+        return 0;
+    }
+
+    // unwrap fd because of sys call
+    int fd;
+    struct pt_regs *__ctx = (struct pt_regs *)PT_REGS_PARM1(ctx);
+    bpf_probe_read(&fd, sizeof(int), (void *)&PT_REGS_PARM1(__ctx));
+
+    bpf_dbg_printk("=== connect id=%d, fd=%d ===", id, fd);
+
+    sock_args_t args = {0};
+    args.fd = fd;
+
+    bpf_map_update_elem(&active_connect_args, &id, &args, BPF_ANY);
+
     return 0;
 }
 
@@ -169,16 +184,16 @@ int BPF_KPROBE(beyla_kprobe_tcp_connect, struct sock *sk) {
         return 0;
     }
 
-    bpf_dbg_printk("=== tcp connect %llx ===", id);
-
     u64 addr = (u64)sk;
 
-    sock_args_t args = {};
+    sock_args_t *args = bpf_map_lookup_elem(&active_connect_args, &id);
 
-    args.addr = addr;
-    args.accept_time = bpf_ktime_get_ns();
+    bpf_dbg_printk("=== tcp connect %llx args %llx ===", id, args);
 
-    bpf_map_update_elem(&active_connect_args, &id, &args, BPF_ANY);
+    if (args) {
+        args->addr = addr;
+        args->accept_time = bpf_ktime_get_ns();
+    }
 
     return 0;
 }
@@ -229,7 +244,12 @@ int BPF_KRETPROBE(beyla_kretprobe_sys_connect, int res) {
     ssl_pid_connection_info_t info = {};
 
     if (parse_connect_sock_info(args, &info.p_conn.conn)) {
-        bpf_dbg_printk("=== connect ret id=%d, pid=%d ===", id, pid_from_pid_tgid(id));
+        u32 host_pid = pid_from_pid_tgid(id);
+        bpf_dbg_printk(
+            "=== connect ret id=%d, pid=%d fd=%d ===", id, pid_from_pid_tgid(id), args->fd);
+        // store fd to connection mapping
+        store_connect_fd_info(host_pid, args->fd, &info.p_conn.conn);
+
         u16 orig_dport = info.p_conn.conn.d_port;
         dbg_print_http_connection_info(&info.p_conn.conn);
         sort_connection_info(&info.p_conn.conn);
@@ -299,9 +319,10 @@ int BPF_KPROBE(beyla_kprobe_tcp_sendmsg, struct sock *sk, struct msghdr *msg, si
         void *ssl = is_ssl_connection(&s_args.p_conn);
         if (size > 0) {
             if (!ssl) {
-                u8 *buf = iovec_memory();
+                unsigned char *buf = iovec_memory();
                 if (buf) {
                     size = read_msghdr_buf(msg, buf, size);
+
                     // If a sock_msg program is installed, this kprobe will fail to
                     // read anything, because the data is in bvec physical pages. However,
                     // the sock_msg will setup a buffer for us if this is the case. We
@@ -397,7 +418,7 @@ int BPF_KPROBE(beyla_kprobe_tcp_rate_check_app_limited, struct sock *sk) {
         if (!ssl) {
             msg_buffer_t *m_buf = bpf_map_lookup_elem(&msg_buffers, &e_key);
             if (m_buf) {
-                u8 *buf = m_buf->buf;
+                unsigned char *buf = m_buf->buf;
                 // The buffer setup for us by a sock_msg program is always the
                 // full buffer, but when we extend a packet to be able to inject
                 // a Traceparent field, it will actually be split in 3 chunks:
@@ -473,7 +494,7 @@ int BPF_KRETPROBE(beyla_kretprobe_tcp_sendmsg, int sent_len) {
                                            s_args->orig_dport);
             }
         }
-        // We don't want to delete the the backup buffer here, since with some
+        // We don't want to delete the backup buffer here, since with some
         // proxies the data is directly forwarded to the other side and
         // we need the buffer in recvmsg.
     }
@@ -647,7 +668,7 @@ static __always_inline int return_recvmsg(void *ctx, struct sock *in_sock, u64 i
         return 0;
     }
 
-    u8 *buf = 0;
+    unsigned char *buf = 0;
     if (args) {
         iovec_iter_ctx *iov_ctx = (iovec_iter_ctx *)&args->iovec_ctx;
 
@@ -796,10 +817,6 @@ int beyla_socket__http_filter(struct __sk_buff *skb) {
         //d_print_http_connection_info(&conn);
 
         if (packet_type == PACKET_TYPE_REQUEST) {
-            u32 full_len = skb->len - tcp.hdr_len;
-            if (full_len > FULL_BUF_SIZE) {
-                full_len = FULL_BUF_SIZE;
-            }
             u64 cookie = bpf_get_socket_cookie(skb);
             //bpf_printk("=== http_filter cookie = %llx, len=%d %s ===", cookie, len, buf);
             //dbg_print_http_connection_info(&conn);
