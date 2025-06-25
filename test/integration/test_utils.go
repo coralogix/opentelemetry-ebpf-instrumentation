@@ -27,19 +27,6 @@ import (
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/prom"
 )
 
-type TestCaseSpan struct {
-	Name       string
-	Attributes []attribute.KeyValue
-}
-
-type TestCase struct {
-	Route     string
-	Subpath   string
-	Comm      string
-	Namespace string
-	Spans     []TestCaseSpan
-}
-
 var tr = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
