@@ -8,14 +8,16 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
-	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/jaeger"
-	"go.opentelemetry.io/otel/attribute"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/test/integration/components/jaeger"
 
 	"github.com/mariomac/guara/pkg/test"
 	"github.com/stretchr/testify/assert"
@@ -320,11 +322,10 @@ func waitForTestComponentsHTTP2Sub(t *testing.T, url, subpath string, minutes in
 
 func otelAttributeToJaegerTag(attr attribute.KeyValue) jaeger.Tag {
 	var value any
+	value = attr.Value.AsInterface()
 	if attr.Value.Type() == attribute.INT64 {
 		// jaeger encodes int64 as float64
 		value = float64(attr.Value.AsInt64())
-	} else {
-		value = attr.Value.AsInterface()
 	}
 	return jaeger.Tag{
 		Key:   string(attr.Key),

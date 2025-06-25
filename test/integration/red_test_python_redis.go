@@ -4,10 +4,11 @@ package integration
 
 import (
 	"encoding/json"
-	"go.opentelemetry.io/otel/attribute"
 	"net/http"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/mariomac/guara/pkg/test"
 	"github.com/stretchr/testify/assert"
