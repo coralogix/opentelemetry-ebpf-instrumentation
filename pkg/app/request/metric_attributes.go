@@ -109,10 +109,6 @@ func ErrorType(val string) attribute.KeyValue {
 	return attribute.Key(attr.ErrorType).String(val)
 }
 
-func OtelStatusDescription(val string) attribute.KeyValue {
-	return attribute.Key(attr.OtelStatusDescription).String(val)
-}
-
 func MessagingOperationType(val string) attribute.KeyValue {
 	return attribute.Key(attr.MessagingOpType).String(val)
 }

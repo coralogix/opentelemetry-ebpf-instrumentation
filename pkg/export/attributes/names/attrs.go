@@ -46,7 +46,6 @@ const (
 	DBCollectionName       = Name("db.collection.name")
 	DBSystemName           = Name("db.system.name")
 	ErrorType              = Name("error.type")
-	OtelStatusDescription  = Name(semconv.OTelStatusDescriptionKey)
 	RPCMethod              = Name(semconv.RPCMethodKey)
 	RPCSystem              = Name(semconv.RPCSystemKey)
 	RPCGRPCStatusCode      = Name(semconv.RPCGRPCStatusCodeKey)

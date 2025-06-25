@@ -343,6 +343,16 @@ func SpanStatusCode(span *Span) string {
 	return StatusCodeUnset
 }
 
+func SpanStatusMessage(span *Span) string {
+	switch span.Type {
+	case EventTypeRedisClient, EventTypeRedisServer:
+		if span.Status != 0 && span.DBError.Description != "" {
+			return span.DBError.Description
+		}
+	}
+	return ""
+}
+
 // HTTPSpanStatusCode https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/http/#status
 func HTTPSpanStatusCode(span *Span) string {
 	if span.Status == 0 {
