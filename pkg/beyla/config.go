@@ -68,7 +68,7 @@ var DefaultConfig = Config{
 		ContextPropagationEnabled: false,
 		ContextPropagation:        config.ContextPropagationDisabled,
 		RedisDBCache: config.RedisDBCacheConfig{
-			Enabled: true,
+			Enabled: false,
 			MaxSize: 1000,
 		},
 	},
