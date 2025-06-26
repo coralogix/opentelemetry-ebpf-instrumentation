@@ -122,6 +122,10 @@ network:
 			TCBackend:                 tcmanager.TCBackendAuto,
 			ContextPropagationEnabled: false,
 			ContextPropagation:        config.ContextPropagationDisabled,
+			RedisDBCache: config.RedisDBCacheConfig{
+				Enabled: true,
+				MaxSize: 1000,
+			},
 		},
 		NetworkFlows: nc,
 		Metrics: otel.MetricsConfig{

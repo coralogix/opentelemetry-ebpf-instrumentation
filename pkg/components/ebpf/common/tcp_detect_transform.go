@@ -78,7 +78,7 @@ func ReadTCPRequestIntoSpan(parseContext *EBPFParseContext, cfg *config.EBPFTrac
 				redisErr, status = redisStatus(event.Rbuf[:rl])
 			}
 
-			db, found := getRedisDB(event.ConnInfo, op, text, parseContext.redisDbCache)
+			db, found := getRedisDB(event.ConnInfo, op, text, parseContext.redisDBCache)
 			if !found {
 				db = -1 // if we don't have the db in cache, we assume it's not set
 			}

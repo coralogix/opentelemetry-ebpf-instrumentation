@@ -209,7 +209,6 @@ func getRedisDB(connInfo BpfConnectionInfoT, op, text string, dbCache *simplelru
 				}
 			}
 		}
-		break
 	case "QUIT":
 		dbCache.Remove(connInfo)
 	}

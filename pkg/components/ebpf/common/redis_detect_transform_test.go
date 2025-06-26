@@ -89,21 +89,21 @@ func TestGetRedisDb(t *testing.T) {
 	var found bool
 
 	_, found = getRedisDB(connInfo, "GET", "GET obi", cache)
-	assert.Equal(t, found, false, "Expected Redis DB to not be found for non tracked connection")
+	assert.False(t, found, "Expected Redis DB to not be found for non tracked connection")
 
 	_, found = getRedisDB(connInfo, "SELECT", "SELECT 0", cache)
-	assert.Equal(t, found, false, "Expected Redis DB to be when selecting a db")
+	assert.False(t, found, "Expected Redis DB to be when selecting a db")
 	db, found = getRedisDB(connInfo, "GET", "GET obi", cache)
-	assert.Equal(t, found, false, "Expected Redis DB to be 0 after selecting db 0")
-	assert.Equal(t, db, 0, "Expected Redis DB to be 0 after selecting db 0")
+	assert.True(t, found, "Expected Redis DB to be 0 after selecting db 0")
+	assert.Equal(t, 0, db, "Expected Redis DB to be 0 after selecting db 0")
 
 	db, found = getRedisDB(connInfo, "SELECT", "SELECT 1", cache)
-	assert.Equal(t, found, true, "Expected Redis DB to be 0 after selecting a db")
-	assert.Equal(t, db, 0, "Expected Redis DB to be 0 after selecting a db")
+	assert.True(t, found, "Expected Redis DB to be 0 after selecting a db")
+	assert.Equal(t, 0, db, "Expected Redis DB to be 0 after selecting a db")
 
 	db, found = getRedisDB(connInfo, "GET", "GET obi", cache)
-	assert.Equal(t, found, true, "Expected Redis DB to be 1 after selecting a db 1")
-	assert.Equal(t, db, 0, "Expected Redis DB to be 1 after selecting a db 1")
+	assert.True(t, found, "Expected Redis DB to be 1 after selecting a db 1")
+	assert.Equal(t, 1, db, "Expected Redis DB to be 1 after selecting a db 1")
 
 	connInfo2 := BpfConnectionInfoT{
 		S_addr: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 0, 1},
@@ -112,12 +112,12 @@ func TestGetRedisDb(t *testing.T) {
 		D_port: 6380,
 	}
 	_, found = getRedisDB(connInfo2, "GET", "GET obi", cache)
-	assert.Equal(t, found, false, "Expected Redis DB to not be found for different connection")
+	assert.False(t, found, "Expected Redis DB to not be found for different connection")
 
 	db, found = getRedisDB(connInfo, "QUIT", "QUIT", cache)
-	assert.Equal(t, found, true, "Expected Redis DB to be found when quitting the connection")
-	assert.Equal(t, db, 1, "Expected Redis DB to be 1 when quitting the connection")
+	assert.True(t, found, "Expected Redis DB to be found when quitting the connection")
+	assert.Equal(t, 1, db, "Expected Redis DB to be 1 when quitting the connection")
 	// After quitting the connection, the db should be removed from the cache
 	_, found = getRedisDB(connInfo, "GET", "GET OBI", cache)
-	assert.Equal(t, found, false, "Expected Redis DB to not be found after quitting the connection")
+	assert.False(t, found, "Expected Redis DB to not be found after quitting the connection")
 }

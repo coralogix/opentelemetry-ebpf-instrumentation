@@ -101,7 +101,7 @@ type MisclassifiedEvent struct {
 
 type EBPFParseContext struct {
 	h2c          *lru.Cache[uint64, h2Connection]
-	redisDbCache *simplelru.LRU[BpfConnectionInfoT, int]
+	redisDBCache *simplelru.LRU[BpfConnectionInfoT, int]
 }
 
 type EBPFEventContext struct {
@@ -118,19 +118,19 @@ var MisclassifiedEvents = make(chan MisclassifiedEvent)
 func ptlog() *slog.Logger { return slog.With("component", "ebpf.ProcessTracer") }
 
 func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
-	var redisDbCache *simplelru.LRU[BpfConnectionInfoT, int]
+	var redisDBCache *simplelru.LRU[BpfConnectionInfoT, int]
 	h2c, _ := lru.New[uint64, h2Connection](1024 * 10)
 	if cfg != nil && cfg.RedisDBCache.Enabled {
 		var err error
-		redisDbCache, err = simplelru.NewLRU[BpfConnectionInfoT, int](cfg.RedisDBCache.MaxSize, nil)
+		redisDBCache, err = simplelru.NewLRU[BpfConnectionInfoT, int](cfg.RedisDBCache.MaxSize, nil)
 		if err != nil {
 			ptlog().Error("failed to create Redis DB cache", "error", err)
-			redisDbCache = nil
+			redisDBCache = nil
 		}
 	}
 	return &EBPFParseContext{
 		h2c:          h2c,
-		redisDbCache: redisDbCache,
+		redisDBCache: redisDBCache,
 	}
 }
 
