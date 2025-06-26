@@ -2,6 +2,7 @@ package ebpfcommon
 
 import (
 	"fmt"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"testing"
 
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/config"
@@ -78,12 +79,8 @@ func TestIsRedis(t *testing.T) {
 }
 
 func TestGetRedisDb(t *testing.T) {
-	dbCacheConfig := config.RedisDBCacheConfig{
-		Enabled: true,
-		MaxSize: 1000,
-	}
-	cache := dbCacheConfig.NewCache()
-	connInfo := bpfConnectionInfoT{
+	cache, _ := simplelru.NewLRU[BpfConnectionInfoT, int](1000, nil)
+	connInfo := BpfConnectionInfoT{
 		S_addr: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 0, 1},
 		D_addr: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 8, 8, 8, 8},
 		S_port: 6379,
@@ -95,7 +92,7 @@ func TestGetRedisDb(t *testing.T) {
 	assert.Equal(t, getRedisDB(connInfo, "GET", "GET obi", cache), 0, "Expected Redis DB to be 0 after selecting a db")
 	assert.Equal(t, getRedisDB(connInfo, "SELECT", "SELECT 1", cache), 0, "Expected Redis DB to be 0 after selecting a db")
 	assert.Equal(t, getRedisDB(connInfo, "GET", "GET obi", cache), 1, "Expected Redis DB to be 1 after selecting different db")
-	connInfo2 := bpfConnectionInfoT{
+	connInfo2 := BpfConnectionInfoT{
 		S_addr: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 192, 168, 0, 1},
 		D_addr: [16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 8, 8, 8, 8},
 		S_port: 6380,
