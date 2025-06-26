@@ -11,7 +11,7 @@ import (
 // ReadTCPRequestIntoSpan returns a request.Span from the provided ring buffer record
 //
 //nolint:cyclop
-func ReadTCPRequestIntoSpan(cfg *config.EBPFTracer, record *ringbuf.Record, filter ServiceFilter) (request.Span, bool, error) {
+func ReadTCPRequestIntoSpan(parseContext *EBPFParseContext, cfg *config.EBPFTracer, record *ringbuf.Record, filter ServiceFilter) (request.Span, bool, error) {
 	event, err := ReinterpretCast[TCPRequestInfo](record.RawSample)
 	if err != nil {
 		return request.Span{}, true, err
@@ -78,7 +78,8 @@ func ReadTCPRequestIntoSpan(cfg *config.EBPFTracer, record *ringbuf.Record, filt
 				redisErr, status = redisStatus(event.Rbuf[:rl])
 			}
 
-			return TCPToRedisToSpan(event, op, text, status, redisErr), false, nil
+			db := getRedisDB(event.ConnInfo, op, text, parseContext.redisDbCache)
+			return TCPToRedisToSpan(event, op, text, status, db, redisErr), false, nil
 		}
 	default:
 		// Kafka and gRPC can look very similar in terms of bytes. We can mistake one for another.
