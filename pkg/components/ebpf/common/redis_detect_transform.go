@@ -193,21 +193,18 @@ func redisStatus(buf []byte) (request.DBError, int) {
 	return dbError, status
 }
 
-func getRedisDB(connInfo BpfConnectionInfoT, op, text string, dbCache *simplelru.LRU[BpfConnectionInfoT, int]) int {
+func getRedisDB(connInfo BpfConnectionInfoT, op, text string, dbCache *simplelru.LRU[BpfConnectionInfoT, int]) (int, bool) {
 	if dbCache == nil {
-		return -1
+		return -1, false
 	}
 	db, found := dbCache.Get(connInfo)
-	if !found {
-		db = -1
-	}
 	switch strings.ToUpper(op) {
 	case "SELECT":
 		// get db number from text after first space
 		if text != "" {
 			parts := strings.Split(text, " ")
 			if len(parts) > 1 {
-				if dbNum, err := strconv.Atoi(parts[1]); err == nil {
+				if dbNum, err := strconv.Atoi(parts[1]); err == nil && dbNum >= 0 {
 					dbCache.Add(connInfo, dbNum)
 				}
 			}
@@ -216,7 +213,7 @@ func getRedisDB(connInfo BpfConnectionInfoT, op, text string, dbCache *simplelru
 	case "QUIT":
 		dbCache.Remove(connInfo)
 	}
-	return db
+	return db, found
 }
 
 func TCPToRedisToSpan(trace *TCPRequestInfo, op, text string, status, db int, dbError request.DBError) request.Span {
