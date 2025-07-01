@@ -474,6 +474,7 @@ func TestHostPeerClientServer(t *testing.T) {
 			client: "client.far",
 			server: "server",
 		},
+		// TODO (mongo) add mongo tests
 	}
 
 	for _, tt := range tests {

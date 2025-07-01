@@ -12,6 +12,8 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
+
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -100,8 +102,9 @@ type MisclassifiedEvent struct {
 }
 
 type EBPFParseContext struct {
-	h2c          *lru.Cache[uint64, h2Connection]
-	redisDBCache *simplelru.LRU[BpfConnectionInfoT, int]
+	h2c               *lru.Cache[uint64, h2Connection]
+	redisDBCache      *simplelru.LRU[BpfConnectionInfoT, int]
+	mongoRequestCache *PendingMongoDbRequests
 }
 
 type EBPFEventContext struct {
@@ -128,9 +131,11 @@ func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 			redisDBCache = nil
 		}
 	}
+	mongoRequestCache := expirable.NewLRU[MongoRequestKey, *MongoRequestValue](1000, nil, 0)
 	return &EBPFParseContext{
-		h2c:          h2c,
-		redisDBCache: redisDBCache,
+		h2c:               h2c,
+		redisDBCache:      redisDBCache,
+		mongoRequestCache: &mongoRequestCache,
 	}
 }
 
