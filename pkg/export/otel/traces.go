@@ -612,7 +612,7 @@ func acceptSpan(is instrumentations.InstrumentationSelection, span *request.Span
 		return is.RedisEnabled()
 	case request.EventTypeKafkaClient, request.EventTypeKafkaServer:
 		return is.KafkaEnabled()
-	case request.EventTypeMongoClient, request.EventTypeMongoServer:
+	case request.EventTypeMongoClient:
 		return is.MongoEnabled()
 	}
 
@@ -729,7 +729,7 @@ func TraceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 			semconv.MessagingClientID(span.Statement),
 			operation,
 		}
-	case request.EventTypeMongoClient, request.EventTypeMongoServer:
+	case request.EventTypeMongoClient:
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
@@ -759,7 +759,7 @@ func TraceAttributes(span *request.Span, optionalAttrs map[attr.Name]struct{}) [
 
 func SpanKind(span *request.Span) trace2.SpanKind {
 	switch span.Type {
-	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeKafkaServer, request.EventTypeMongoServer:
+	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeKafkaServer:
 		return trace2.SpanKindServer
 	case request.EventTypeHTTPClient, request.EventTypeGRPCClient, request.EventTypeSQLClient, request.EventTypeRedisClient, request.EventTypeMongoClient:
 		return trace2.SpanKindClient

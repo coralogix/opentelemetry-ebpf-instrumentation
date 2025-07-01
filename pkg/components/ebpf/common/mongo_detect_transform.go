@@ -14,7 +14,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-ebpf-instrumentation/pkg/app/request"
 )
 
-type MongoSpanInfo struct {
+type mongoSpanInfo struct {
 	OpName        string
 	Collection    string
 	DB            string
@@ -24,20 +24,8 @@ type MongoSpanInfo struct {
 	ErrorCodeName string
 }
 
-func newMongoSpanInfo() *MongoSpanInfo {
-	return &MongoSpanInfo{
-		OpName:        "",
-		Collection:    "",
-		DB:            "",
-		Success:       true,
-		Error:         "",
-		ErrorCode:     0,
-		ErrorCodeName: "",
-	}
-}
-
 // https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#standard-message-header
-type MsgHeader struct {
+type msgHeader struct {
 	MessageLength int32
 	RequestID     int32
 	ResponseTo    int32
@@ -48,39 +36,39 @@ type MsgHeader struct {
 type SectionType uint8
 
 const (
-	SectionTypeBody SectionType = iota
-	SectionTypeDocumentSequence
+	sectionTypeBody SectionType = iota
+	sectionTypeDocumentSequence
 )
 
-type Section struct {
+type mongoSection struct {
 	Type SectionType
-	Body bson.D // in case of SectionTypeBody, this will contain the BSON document
+	Body bson.D // in case of sectionTypeBody, this will contain the BSON document
 }
 
 const (
-	MsgHeaderSize = 16
-	Int32Size     = 4
+	msgHeaderSize = 16
+	int32Size     = 4
 	// Flags https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#flag-bits
 
-	FlagCheckSumPreset = 0x1 // indicates that the checksum is present
-	FlagMoreToCome     = 0x2 // indicates that there are more sections to come in the message
-	AllowedFlags       = FlagCheckSumPreset | FlagMoreToCome
-	FlagExhaustAllowed = 0x10000 // indicates that the request is allowed to be sent with moreToCome set
+	flagCheckSumPreset = 0x1 // indicates that the checksum is present
+	flagMoreToCome     = 0x2 // indicates that there are more sections to come in the message
+	allowedFlags       = flagCheckSumPreset | flagMoreToCome
+	flagExhaustAllowed = 0x10000 // indicates that the request is allowed to be sent with moreToCome set
 
 	// OpCodes https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#opcodes
-	OpMsg = 2013
+	opMsg = 2013
 	// TODO (mongo) support compressed messages (OP_COMPRESSED)
 	// TODO (mongo) support legacy messages (OP_QUERY, OP_GET_MORE, OP_INSERT, OP_UPDATE, OP_DELETE, OP_REPLY)
 
 	// TODO (mongo) maybe set?
-	CommHello             = "hello"
-	CommIsMaster          = "isMaster"
-	CommPing              = "ping"
-	CommIsWritablePrimary = "isWritablePrimary"
+	commHello             = "hello"
+	commIsMaster          = "isMaster"
+	commPing              = "ping"
+	commIsWritablePrimary = "isWritablePrimary"
 )
 
 func isHeartbeat(comm string) bool {
-	return comm == CommHello || comm == CommIsMaster || comm == CommPing || comm == CommIsWritablePrimary
+	return comm == commHello || comm == commIsMaster || comm == commPing || comm == commIsWritablePrimary
 }
 
 type MongoRequestKey struct {
@@ -89,8 +77,8 @@ type MongoRequestKey struct {
 }
 
 type MongoRequestValue struct {
-	RequestSections  []Section
-	ResponseSections []Section
+	RequestSections  []mongoSection
+	ResponseSections []mongoSection
 	StartTime        int64 // timestamp when the request was received
 	EndTime          int64 // timestamp when the response was received
 	Flags            byte  // Flags to indicate the state of the request
@@ -99,7 +87,7 @@ type MongoRequestValue struct {
 type PendingMongoDBRequests = *expirable.LRU[MongoRequestKey, *MongoRequestValue]
 
 func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo BpfConnectionInfoT, requests PendingMongoDBRequests) (*MongoRequestValue, bool, error) {
-	if len(buf) < MsgHeaderSize {
+	if len(buf) < msgHeaderSize {
 		return nil, false, errors.New("packet too short for MongoDB header")
 	}
 
@@ -130,7 +118,7 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 	if !ok && !isRequest {
 		return nil, false, fmt.Errorf("no in-flight MongoDB request found for key %d", header.ResponseTo)
 	}
-	if !isRequest && len(buf) == MsgHeaderSize {
+	if !isRequest && len(buf) == msgHeaderSize {
 		// TODO (mongo) currently the response is only the header, since the client sends only the first 16 bytes at first,
 		// we need to fix the tcp path to send the response body as well
 		// for now we just dont add response section
@@ -154,16 +142,16 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 	return nil, true, nil
 }
 
-func parseMongoMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
+func parseMongoMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	switch hdr.OpCode {
-	case OpMsg:
+	case opMsg:
 		return parseOpMessage(buf, hdr, time, isRequest, pendingRequest)
 	default:
 		return nil, false, fmt.Errorf("unsupported MongoDB operation code %d", hdr.OpCode)
 	}
 }
 
-func parseOpMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
+func parseOpMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	// MONGODB_OP_MSG packet structure:
 	// +------------+-------------+------------------+
 	// | header      | flagBits    | sections  | checksum |
@@ -171,33 +159,33 @@ func parseOpMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pend
 	// |    16B      |     4B      |     ?     | optional 4B |
 	// +------------+-------------+------------------+
 	// TODO (mongo): plus checksum validation to avoid false positives? (only if we have the full packet)
-	flagBits := int32(binary.LittleEndian.Uint32(buf[MsgHeaderSize : MsgHeaderSize+Int32Size]))
+	flagBits := int32(binary.LittleEndian.Uint32(buf[msgHeaderSize : msgHeaderSize+int32Size]))
 	err := validateFlagBits(flagBits)
 	if err != nil {
 		return nil, false, err
 	}
 
-	moreToCome := flagBits&FlagMoreToCome != 0
-	exhaustAllowed := flagBits&FlagExhaustAllowed != 0
+	moreToCome := flagBits&flagMoreToCome != 0
+	exhaustAllowed := flagBits&flagExhaustAllowed != 0
 	// TODO (mongo) validations on moreToCome and exhaustAllowed Flags
 	if !isRequest && moreToCome && !exhaustAllowed {
 		return nil, false, errors.New("MongoDB response with moreToCome flag set but exhaustAllowed is not set")
 	}
-	if pendingRequest != nil && pendingRequest.Flags&FlagMoreToCome != 0 {
+	if pendingRequest != nil && pendingRequest.Flags&flagMoreToCome != 0 {
 		if pendingRequest.ResponseSections == nil && !isRequest {
 			return nil, false, errors.New("MongoDB request expects more sections but response is sent")
 		}
 	}
 
-	checkSumPreset := flagBits&FlagCheckSumPreset != 0
-	sectionsSize := hdr.MessageLength - MsgHeaderSize - Int32Size
+	checkSumPreset := flagBits&flagCheckSumPreset != 0
+	sectionsSize := hdr.MessageLength - msgHeaderSize - int32Size
 	if checkSumPreset {
-		sectionsSize -= Int32Size // subtract checksum size if present
+		sectionsSize -= int32Size // subtract checksum size if present
 	}
 	if sectionsSize < 0 {
 		return nil, false, errors.New("invalid MongoDB message length, sections size is negative")
 	}
-	sections, err := parseSections(buf[MsgHeaderSize+Int32Size : MsgHeaderSize+Int32Size+sectionsSize])
+	sections, err := parseSections(buf[msgHeaderSize+int32Size : msgHeaderSize+int32Size+sectionsSize])
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to parse MongoDB sections: %w", err)
 	}
@@ -234,12 +222,12 @@ func parseOpMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pend
 	return pendingRequest, moreToCome, nil
 }
 
-func parseSections(buf []uint8) ([]Section, error) {
+func parseSections(buf []uint8) ([]mongoSection, error) {
 	offSet := 0
-	sections := []Section{}
+	sections := []mongoSection{}
 	for offSet < len(buf) {
 
-		if len(buf[offSet:]) < Int32Size {
+		if len(buf[offSet:]) < int32Size {
 			return nil, errors.New("not enough data for section header")
 		}
 
@@ -248,11 +236,11 @@ func parseSections(buf []uint8) ([]Section, error) {
 
 		switch sectionType {
 		// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#kind-0--body
-		case SectionTypeBody:
-			if len(buf[offSet:]) < Int32Size {
+		case sectionTypeBody:
+			if len(buf[offSet:]) < int32Size {
 				return nil, errors.New("not enough data for section body length")
 			}
-			bodyLength := int(binary.LittleEndian.Uint32(buf[offSet : offSet+Int32Size]))
+			bodyLength := int(binary.LittleEndian.Uint32(buf[offSet : offSet+int32Size]))
 
 			if len(buf[offSet:]) < bodyLength {
 				return nil, errors.New("not enough data for section body")
@@ -265,14 +253,14 @@ func parseSections(buf []uint8) ([]Section, error) {
 			if err != nil {
 				return nil, err
 			}
-			sections = append(sections, Section{
+			sections = append(sections, mongoSection{
 				Type: sectionType,
 				Body: doc,
 			})
 			offSet += bodyLength
 		// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#kind-1--document-sequence
-		case SectionTypeDocumentSequence:
-			length := int(binary.LittleEndian.Uint32(buf[offSet : offSet+Int32Size]))
+		case sectionTypeDocumentSequence:
+			length := int(binary.LittleEndian.Uint32(buf[offSet : offSet+int32Size]))
 			offSet += length
 			// TODO (mongo) actually read documents? for now we just skip them
 		default:
@@ -285,12 +273,12 @@ func parseSections(buf []uint8) ([]Section, error) {
 	return sections, nil
 }
 
-func parseMongoHeader(pkt []byte) (*MsgHeader, error) {
-	header := &MsgHeader{
-		MessageLength: int32(binary.LittleEndian.Uint32(pkt[0:Int32Size])),
-		RequestID:     int32(binary.LittleEndian.Uint32(pkt[Int32Size : 2*Int32Size])),
-		ResponseTo:    int32(binary.LittleEndian.Uint32(pkt[2*Int32Size : 3*Int32Size])),
-		OpCode:        int32(binary.LittleEndian.Uint32(pkt[3*Int32Size : 4*Int32Size])),
+func parseMongoHeader(pkt []byte) (*msgHeader, error) {
+	header := &msgHeader{
+		MessageLength: int32(binary.LittleEndian.Uint32(pkt[0:int32Size])),
+		RequestID:     int32(binary.LittleEndian.Uint32(pkt[int32Size : 2*int32Size])),
+		ResponseTo:    int32(binary.LittleEndian.Uint32(pkt[2*int32Size : 3*int32Size])),
+		OpCode:        int32(binary.LittleEndian.Uint32(pkt[3*int32Size : 4*int32Size])),
 	}
 	err := validateMsgHeader(header)
 	if err != nil {
@@ -299,8 +287,8 @@ func parseMongoHeader(pkt []byte) (*MsgHeader, error) {
 	return header, nil
 }
 
-func validateMsgHeader(header *MsgHeader) error {
-	if header.MessageLength < MsgHeaderSize {
+func validateMsgHeader(header *msgHeader) error {
+	if header.MessageLength < msgHeaderSize {
 		return errors.New("invalid MongoDB message length")
 	}
 	if header.RequestID < 0 {
@@ -316,14 +304,14 @@ func validateMsgHeader(header *MsgHeader) error {
 The first 16 bits (0-15) are required and parsers MUST Error if an unknown bit is set.
 */
 func validateFlagBits(flagBits int32) error {
-	if flagBits&^AllowedFlags != 0 {
-		return fmt.Errorf("invalid MongoDB flag bits: %d, allowed bits are: %d", flagBits, AllowedFlags)
+	if flagBits&^allowedFlags != 0 {
+		return fmt.Errorf("invalid MongoDB flag bits: %d, allowed bits are: %d", flagBits, allowedFlags)
 	}
 	return nil
 }
 
-func GetMongoInfo(request *MongoRequestValue) (*MongoSpanInfo, error) {
-	spanInfo := newMongoSpanInfo()
+func getMongoInfo(request *MongoRequestValue) (*mongoSpanInfo, error) {
+	spanInfo := &mongoSpanInfo{}
 	if request == nil || len(request.RequestSections) == 0 {
 		return nil, errors.New("no MongoDB request sections found")
 	}
@@ -390,16 +378,13 @@ func GetMongoInfo(request *MongoRequestValue) (*MongoSpanInfo, error) {
 	return spanInfo, nil
 }
 
-func TCPToMongoToSpan(trace *TCPRequestInfo, info *MongoSpanInfo) request.Span {
+func TCPToMongoToSpan(trace *TCPRequestInfo, info *mongoSpanInfo) request.Span {
 	peer := ""
 	peerPort := 0
 	hostname := ""
 	hostPort := 0
 
 	reqType := request.EventTypeMongoClient
-	if trace.Direction == 0 {
-		reqType = request.EventTypeMongoServer
-	}
 
 	if trace.ConnInfo.S_port != 0 || trace.ConnInfo.D_port != 0 {
 		peer, hostname = (*BPFConnInfo)(unsafe.Pointer(&trace.ConnInfo)).reqHostInfo()

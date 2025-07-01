@@ -36,7 +36,6 @@ const (
 	EventTypeGPUKernelLaunch
 	EventTypeGPUMalloc
 	EventTypeMongoClient
-	EventTypeMongoServer
 )
 
 const (
@@ -87,8 +86,6 @@ func (t EventType) String() string {
 		return "CUDAMalloc"
 	case EventTypeMongoClient:
 		return "MongoClient"
-	case EventTypeMongoServer:
-		return "MongoServer"
 	default:
 		return fmt.Sprintf("UNKNOWN (%d)", t)
 	}
@@ -252,15 +249,6 @@ func spanAttributes(s *Span) SpanAttributes {
 			"serverPort": strconv.Itoa(s.HostPort),
 			"operation":  s.Method,
 			"table":      s.Path,
-			"statement":  s.Statement,
-		}
-	case EventTypeMongoServer:
-		return SpanAttributes{
-			"serverAddr": SpanHost(s),
-			"serverPort": strconv.Itoa(s.HostPort),
-			"operation":  s.Method,
-			"table":      s.Path,
-			"db":         s.DBNamespace,
 		}
 	}
 
@@ -358,7 +346,7 @@ func SpanStatusCode(span *Span) string {
 		return HTTPSpanStatusCode(span)
 	case EventTypeGRPC, EventTypeGRPCClient:
 		return GrpcSpanStatusCode(span)
-	case EventTypeSQLClient, EventTypeRedisClient, EventTypeRedisServer, EventTypeMongoClient, EventTypeMongoServer:
+	case EventTypeSQLClient, EventTypeRedisClient, EventTypeRedisServer, EventTypeMongoClient:
 		if span.Status != 0 {
 			return StatusCodeError
 		}
@@ -369,7 +357,7 @@ func SpanStatusCode(span *Span) string {
 
 func SpanStatusMessage(span *Span) string {
 	switch span.Type {
-	case EventTypeRedisClient, EventTypeRedisServer, EventTypeMongoClient, EventTypeMongoServer:
+	case EventTypeRedisClient, EventTypeRedisServer, EventTypeMongoClient:
 		if span.Status != 0 && span.DBError.Description != "" {
 			return span.DBError.Description
 		}
@@ -441,7 +429,7 @@ func (s *Span) ResponseBodyLength() int64 {
 // ServiceGraphKind returns the Kind string representation that is compliant with service graph metrics specification
 func (s *Span) ServiceGraphKind() string {
 	switch s.Type {
-	case EventTypeHTTP, EventTypeGRPC, EventTypeKafkaServer, EventTypeRedisServer, EventTypeMongoServer:
+	case EventTypeHTTP, EventTypeGRPC, EventTypeKafkaServer, EventTypeRedisServer:
 		return "SPAN_KIND_SERVER"
 	case EventTypeHTTPClient, EventTypeGRPCClient, EventTypeSQLClient, EventTypeRedisClient, EventTypeMongoClient:
 		return "SPAN_KIND_CLIENT"
@@ -486,7 +474,7 @@ func (s *Span) TraceName() string {
 			return s.Method
 		}
 		return fmt.Sprintf("%s %s", s.Path, s.Method)
-	case EventTypeMongoClient, EventTypeMongoServer:
+	case EventTypeMongoClient:
 		if s.Path != "" && s.Method != "" {
 			// TODO for database operations like listCollections, we need to use s.DbNamespace instead of s.Path
 			return fmt.Sprintf("%s %s", s.Method, s.Path)

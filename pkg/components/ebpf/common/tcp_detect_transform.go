@@ -62,18 +62,10 @@ func ReadTCPRequestIntoSpan(parseContext *EBPFParseContext, cfg *config.EBPFTrac
 	var moreToCome bool
 	_, _, err = ProcessMongoEvent(b, int64(event.StartMonotimeNs), int64(event.EndMonotimeNs), event.ConnInfo, *parseContext.mongoRequestCache)
 	if err == nil {
-		// log this
-		// parse response
 		mongoRequest, moreToCome, err = ProcessMongoEvent(event.Rbuf[:rl], int64(event.StartMonotimeNs), int64(event.EndMonotimeNs), event.ConnInfo, *parseContext.mongoRequestCache)
-	} else {
-		// try reverse
-		_, moreToCome, err = ProcessMongoEvent(event.Rbuf[:rl], int64(event.StartMonotimeNs), int64(event.EndMonotimeNs), event.ConnInfo, *parseContext.mongoRequestCache)
-		if err == nil && moreToCome {
-			mongoRequest, moreToCome, err = ProcessMongoEvent(b, int64(event.StartMonotimeNs), int64(event.EndMonotimeNs), event.ConnInfo, *parseContext.mongoRequestCache)
-		}
 	}
 	if err == nil && !moreToCome && mongoRequest != nil {
-		mongoInfo, err := GetMongoInfo(mongoRequest)
+		mongoInfo, err := getMongoInfo(mongoRequest)
 		if err == nil {
 			mongoSpan := TCPToMongoToSpan(event, mongoInfo)
 			return mongoSpan, false, nil
