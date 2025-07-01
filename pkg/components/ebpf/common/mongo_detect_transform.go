@@ -237,7 +237,7 @@ func parseOpMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pend
 func parseSections(buf []uint8) ([]Section, error) {
 	offSet := 0
 	sections := []Section{}
-	for offSet >= len(buf) {
+	for offSet < len(buf) {
 
 		if len(buf[offSet:]) < Int32Size {
 			return nil, errors.New("not enough data for section header")
