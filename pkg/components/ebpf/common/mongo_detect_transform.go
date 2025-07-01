@@ -48,7 +48,6 @@ type MsgHeader struct {
 type SectionType uint8
 
 const (
-	// EventTypeProcessAlive is an internal signal. It will be ignored by the metrics exporters.
 	SectionTypeBody SectionType = iota
 	SectionTypeDocumentSequence
 )
@@ -69,7 +68,7 @@ const (
 	FlagExhaustAllowed = 0x10000 // indicates that the request is allowed to be sent with moreToCome set
 
 	// OpCodes https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#opcodes
-	OP_MSG = 2013
+	OpMsg = 2013
 	// TODO (mongo) support compressed messages (OP_COMPRESSED)
 	// TODO (mongo) support legacy messages (OP_QUERY, OP_GET_MORE, OP_INSERT, OP_UPDATE, OP_DELETE, OP_REPLY)
 
@@ -86,7 +85,7 @@ func isHeartbeat(comm string) bool {
 
 type MongoRequestKey struct {
 	connInfo  BpfConnectionInfoT
-	requestId int32
+	requestID int32
 }
 
 type MongoRequestValue struct {
@@ -97,9 +96,9 @@ type MongoRequestValue struct {
 	Flags            byte  // Flags to indicate the state of the request
 }
 
-type PendingMongoDbRequests = *expirable.LRU[MongoRequestKey, *MongoRequestValue]
+type PendingMongoDBRequests = *expirable.LRU[MongoRequestKey, *MongoRequestValue]
 
-func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo BpfConnectionInfoT, requests PendingMongoDbRequests) (*MongoRequestValue, bool, error) {
+func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo BpfConnectionInfoT, requests PendingMongoDBRequests) (*MongoRequestValue, bool, error) {
 	if len(buf) < MsgHeaderSize {
 		return nil, false, errors.New("packet too short for MongoDB header")
 	}
@@ -117,13 +116,13 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 	if !isRequest {
 		key = MongoRequestKey{
 			connInfo:  connInfo,
-			requestId: header.ResponseTo,
+			requestID: header.ResponseTo,
 		}
 		time = endTime
 	} else {
 		key = MongoRequestKey{
 			connInfo:  connInfo,
-			requestId: header.RequestID,
+			requestID: header.RequestID,
 		}
 		time = startTime
 	}
@@ -157,7 +156,7 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 
 func parseMongoMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	switch hdr.OpCode {
-	case OP_MSG:
+	case OpMsg:
 		return parseOpMessage(buf, hdr, time, isRequest, pendingRequest)
 	default:
 		return nil, false, fmt.Errorf("unsupported MongoDB operation code %d", hdr.OpCode)
@@ -238,17 +237,14 @@ func parseOpMessage(buf []uint8, hdr MsgHeader, time int64, isRequest bool, pend
 func parseSections(buf []uint8) ([]Section, error) {
 	offSet := 0
 	sections := []Section{}
-	for {
-		if offSet >= len(buf) {
-			break
-		}
+	for offSet >= len(buf) {
 
 		if len(buf[offSet:]) < Int32Size {
 			return nil, errors.New("not enough data for section header")
 		}
 
 		sectionType := SectionType(buf[offSet])
-		offSet += 1
+		offSet++
 
 		switch sectionType {
 		// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#kind-0--body
@@ -335,7 +331,7 @@ func GetMongoInfo(request *MongoRequestValue) (*MongoSpanInfo, error) {
 	// For simplicity, we assume the first section is the main one.
 	// In a real-world scenario, you might want to handle multiple sections.
 	requestSection := request.RequestSections[0]
-	if requestSection.Body == nil || len(requestSection.Body) == 0 {
+	if len(requestSection.Body) == 0 {
 		return nil, errors.New("no MongoDB body found in the main section")
 	}
 	// first element in the request body is the operation name
@@ -365,7 +361,7 @@ func GetMongoInfo(request *MongoRequestValue) (*MongoSpanInfo, error) {
 		spanInfo.Success = true
 	} else {
 		responseSection := request.ResponseSections[0]
-		if responseSection.Body == nil || len(responseSection.Body) == 0 {
+		if len(responseSection.Body) == 0 {
 			return nil, errors.New("no MongoDB body found in the response section")
 		}
 		success, ok := findDoubleInBson(responseSection.Body, "ok")
@@ -453,7 +449,7 @@ func TCPToMongoToSpan(trace *TCPRequestInfo, info *MongoSpanInfo) request.Span {
 	}
 }
 
-func findInBson(doc bson.D, key string) (interface{}, bool) {
+func findInBson(doc bson.D, key string) (any, bool) {
 	for _, elem := range doc {
 		if elem.Key == key {
 			return elem.Value, true

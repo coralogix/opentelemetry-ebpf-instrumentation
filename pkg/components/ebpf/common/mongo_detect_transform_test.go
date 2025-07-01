@@ -5,19 +5,21 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-var requests PendingMongoDbRequests = expirable.NewLRU[MongoRequestKey, *MongoRequestValue](1000, nil, 0)
+var requests PendingMongoDBRequests = expirable.NewLRU[MongoRequestKey, *MongoRequestValue](1000, nil, 0)
 
 const (
-	START_TIME      = 1000
-	END_TIME        = 2000
-	MESSAGE_LENGTH  = 65
-	PRE_BODY_LENGTH = 21 // 16 for header + 5 for flags and section type
-	REQUEST_ID      = 1
+	StartTime     = 1000
+	EndTime       = 2000
+	MessageLength = 65
+	PreBodyLength = 21 // 16 for header + 5 for flags and section type
+	RequestID     = 1
 )
 
 func getConnInfo() BpfConnectionInfoT {
@@ -29,17 +31,19 @@ func getConnInfo() BpfConnectionInfoT {
 	}
 }
 
-func getRequestPayload(hdr *MsgHeader, flags uint32, section SectionType, data *bson.D) []byte {
-	if data == nil {
-		data = &bson.D{{"find", "my_collection"}, {"$db", "my_db"}}
-	}
+// func getRequestPayload(hdr *MsgHeader, flags uint32, section SectionType, data *bson.D) []byte {
+func getRequestPayload(hdr *MsgHeader, flags uint32, section SectionType) []byte {
+	// if data == nil {
+	// 	data := &bson.D{bson.E{Key: "find", Value: "my_collection"}, bson.E{Key: "$db", Value: "my_db"}}
+	// }
+	data := &bson.D{bson.E{Key: "find", Value: "my_collection"}, bson.E{Key: "$db", Value: "my_db"}}
 	bsonBytes, _ := bson.Marshal(*data)
 	if hdr == nil {
 		hdr = &MsgHeader{
-			MessageLength: PRE_BODY_LENGTH + int32(len(bsonBytes)),
-			RequestID:     REQUEST_ID,
+			MessageLength: PreBodyLength + int32(len(bsonBytes)),
+			RequestID:     RequestID,
 			ResponseTo:    0,
-			OpCode:        OP_MSG,
+			OpCode:        OpMsg,
 		}
 	}
 	byteBuffer := new(bytes.Buffer)
@@ -52,15 +56,15 @@ func getRequestPayload(hdr *MsgHeader, flags uint32, section SectionType, data *
 
 func getResponsePayload(hdr *MsgHeader, flags uint32, section SectionType, data *bson.D) []byte {
 	if data == nil {
-		data = &bson.D{{"ok", "1"}}
+		data = &bson.D{bson.E{Key: "ok", Value: "1"}}
 	}
 	bsonBytes, _ := bson.Marshal(*data)
 	if hdr == nil {
 		hdr = &MsgHeader{
-			MessageLength: PRE_BODY_LENGTH + int32(len(bsonBytes)),
-			RequestID:     REQUEST_ID + 1,
-			ResponseTo:    REQUEST_ID,
-			OpCode:        OP_MSG,
+			MessageLength: PreBodyLength + int32(len(bsonBytes)),
+			RequestID:     RequestID + 1,
+			ResponseTo:    RequestID,
+			OpCode:        OpMsg,
 		}
 	}
 	byteBuffer := new(bytes.Buffer)
@@ -74,8 +78,8 @@ func getResponsePayload(hdr *MsgHeader, flags uint32, section SectionType, data 
 func TestProcessMongoEventShorterThenHeader(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
-	_, _, err := ProcessMongoEvent([]uint8{0x00, 0x00, 0x00, 0x00}, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for short buffer")
+	_, _, err := ProcessMongoEvent([]uint8{0x00, 0x00, 0x00, 0x00}, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for short buffer")
 }
 
 func TestProcessMongoEventHdrMessageLengthLessThenHeaderLength(t *testing.T) {
@@ -83,92 +87,92 @@ func TestProcessMongoEventHdrMessageLengthLessThenHeaderLength(t *testing.T) {
 	connInfo := getConnInfo()
 	shortHdr := MsgHeader{
 		MessageLength: 3,
-		RequestID:     REQUEST_ID,
+		RequestID:     RequestID,
 		ResponseTo:    0,
-		OpCode:        OP_MSG,
+		OpCode:        OpMsg,
 	}
-	payload := getRequestPayload(&shortHdr, 0, SectionTypeBody, nil)
-	_, _, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for message length less than header length")
+	payload := getRequestPayload(&shortHdr, 0, SectionTypeBody)
+	_, _, err := ProcessMongoEvent(payload, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for message length less than header length")
 }
 
 func TestProcessMongoEventUnknownOp(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
 	invalidOpHdr := MsgHeader{
-		MessageLength: MESSAGE_LENGTH,
-		RequestID:     REQUEST_ID,
+		MessageLength: MessageLength,
+		RequestID:     RequestID,
 		ResponseTo:    0,
 		OpCode:        42,
 	}
-	payload := getRequestPayload(&invalidOpHdr, 0, SectionTypeBody, nil)
-	_, _, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for unknown opcode")
+	payload := getRequestPayload(&invalidOpHdr, 0, SectionTypeBody)
+	_, _, err := ProcessMongoEvent(payload, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for unknown opcode")
 }
 
 func TestProcessMongoEventInvalidFlags(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
-	payload := getRequestPayload(nil, 0|0x08, SectionTypeBody, nil)
-	_, _, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for invalid flags")
+	payload := getRequestPayload(nil, 0|0x08, SectionTypeBody)
+	_, _, err := ProcessMongoEvent(payload, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for invalid flags")
 }
 
 func TestProcessMongoEventInvalidSectionType(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
-	payload := getRequestPayload(nil, 0|0x08, 6, nil)
-	_, _, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for invalid section type")
+	payload := getRequestPayload(nil, 0|0x08, 6)
+	_, _, err := ProcessMongoEvent(payload, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for invalid section type")
 }
 
 func TestProcessMongoEventFailIfNoChecksumButItsExpected(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
-	payload := getRequestPayload(nil, 0|FlagCheckSumPreset, SectionTypeBody, nil)
-	_, _, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-	assert.NotNil(t, err, "Expected error for missing checksum when expected")
+	payload := getRequestPayload(nil, 0|FlagCheckSumPreset, SectionTypeBody)
+	_, _, err := ProcessMongoEvent(payload, StartTime, EndTime, connInfo, requests)
+	assert.Error(t, err, "Expected error for missing checksum when expected")
 }
 
-//func TestProcessMongoEventNoAdditionalRequestIfNoMoreToComeInRequest(t *testing.T) {
+// func TestProcessMongoEventNoAdditionalRequestIfNoMoreToComeInRequest(t *testing.T) {
 //	defer requests.Purge()
 //	connInfo := getConnInfo()
-//	payload := getRequestPayload(nil, 0, SectionTypeBody, nil)
+//	payload := getRequestPayload(nil, 0, SectionTypeBody)
 //	_, moreToCome, err := ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
 //	assert.Nil(t, err, "Expected no error for valid MongoDB event")
 //	assert.True(t, moreToCome)
 //
 //	// send the same request again, the connection should be expecting a response
 //	_, _, err = ProcessMongoEvent(payload, START_TIME, END_TIME, connInfo, requests)
-//	assert.NotNil(t, err, "Expected error when not expecting more request data but receiving it")
+//	assert.Error(t, err, "Expected error when not expecting more request data but receiving it")
 //}
 //
-//func TestProcessMongoEventExpectsMoreRequestToComeButGotResponse(t *testing.T) {
+// func TestProcessMongoEventExpectsMoreRequestToComeButGotResponse(t *testing.T) {
 //	defer requests.Purge()
 //	connInfo := getConnInfo()
-//	requestPayload := getRequestPayload(nil, 0|FlagMoreToCome, SectionTypeBody, nil)
+//	requestPayload := getRequestPayload(nil, 0|FlagMoreToCome, SectionTypeBody)
 //	_, moreToCome, err := ProcessMongoEvent(requestPayload, START_TIME, END_TIME, connInfo, requests)
 //	assert.Nil(t, err, "Expected no error for valid MongoDB event")
 //	assert.True(t, moreToCome)
 //
-//	responsePayload := getRequestPayload(nil, 0, SectionTypeBody, nil)
+//	responsePayload := getRequestPayload(nil, 0, SectionTypeBody)
 //	// send the same request again, the connection should be expecting a response
 //	_, _, err = ProcessMongoEvent(responsePayload, START_TIME, END_TIME, connInfo, requests)
-//	assert.NotNil(t, err, "Expected error when not expecting more request data but receiving it")
+//	assert.Error(t, err, "Expected error when not expecting more request data but receiving it")
 //}
 
 func TestProcessMongoEventShouldBeFine(t *testing.T) {
 	defer requests.Purge()
 	connInfo := getConnInfo()
-	requestPayload := getRequestPayload(nil, 0, SectionTypeBody, nil)
-	_, moreToCome, err := ProcessMongoEvent(requestPayload, START_TIME, END_TIME, connInfo, requests)
-	assert.Nil(t, err, "Expected no error for valid MongoDB event")
+	requestPayload := getRequestPayload(nil, 0, SectionTypeBody)
+	_, moreToCome, err := ProcessMongoEvent(requestPayload, StartTime, EndTime, connInfo, requests)
+	require.NoError(t, err, "Expected no error for valid MongoDB event")
 	assert.True(t, moreToCome)
 
 	responsePayload := getResponsePayload(nil, 0, SectionTypeBody, nil)
 	// send the same request again, the connection should be expecting a response
-	mongoRequestValue, moreToCome, err := ProcessMongoEvent(responsePayload, START_TIME, END_TIME, connInfo, requests)
-	assert.Nil(t, err, "Expected no error for valid MongoDB event")
+	mongoRequestValue, moreToCome, err := ProcessMongoEvent(responsePayload, StartTime, EndTime, connInfo, requests)
+	require.NoError(t, err, "Expected no error for valid MongoDB event")
 	assert.False(t, moreToCome, "Expected no more data to come after response")
 	assert.NotNil(t, mongoRequestValue, "Expected MongoRequestValue to be returned")
 }
@@ -176,21 +180,21 @@ func TestProcessMongoEventShouldBeFine(t *testing.T) {
 // GetMongoInfo
 
 func TestGetMongoInfoFindRequest(t *testing.T) {
-	mongo_request := MongoRequestValue{
+	mongoRequest := MongoRequestValue{
 		RequestSections: []Section{
 			{
 				Type: SectionTypeBody,
-				Body: bson.D{{"find", "my_collection"}, {"$db", "my_db"}},
+				Body: bson.D{bson.E{Key: "find", Value: "my_collection"}, bson.E{Key: "$db", Value: "my_db"}},
 			},
 		},
 		ResponseSections: []Section{
 			{
 				Type: SectionTypeBody,
-				Body: bson.D{{"ok", float64(1)}},
+				Body: bson.D{bson.E{Key: "ok", Value: float64(1)}},
 			},
 		},
 	}
-	res, err := GetMongoInfo(&mongo_request)
+	res, err := GetMongoInfo(&mongoRequest)
 	if err != nil {
 		t.Fatalf("GetMongoInfo failed: %v", err)
 	}
@@ -204,21 +208,21 @@ func TestGetMongoInfoFindRequest(t *testing.T) {
 }
 
 func TestGetMongoInfoErrorRequest(t *testing.T) {
-	mongo_request := MongoRequestValue{
+	mongoRequest := MongoRequestValue{
 		RequestSections: []Section{
 			{
 				Type: SectionTypeBody,
-				Body: bson.D{{"find", "my_collection"}, {"$db", "my_db"}},
+				Body: bson.D{bson.E{Key: "find", Value: "my_collection"}, bson.E{Key: "$db", Value: "my_db"}},
 			},
 		},
 		ResponseSections: []Section{
 			{
 				Type: SectionTypeBody,
-				Body: bson.D{{"ok", float64(0)}, {"errmsg", "some error"}, {"code", 12345}, {"codeName", "SomeError"}},
+				Body: bson.D{bson.E{Key: "ok", Value: float64(0)}, bson.E{Key: "errmsg", Value: "some error"}, bson.E{Key: "code", Value: 12345}, bson.E{Key: "codeName", Value: "SomeError"}},
 			},
 		},
 	}
-	res, err := GetMongoInfo(&mongo_request)
+	res, err := GetMongoInfo(&mongoRequest)
 	if err != nil {
 		t.Fatalf("GetMongoInfo failed: %v", err)
 	}

@@ -104,7 +104,7 @@ type MisclassifiedEvent struct {
 type EBPFParseContext struct {
 	h2c               *lru.Cache[uint64, h2Connection]
 	redisDBCache      *simplelru.LRU[BpfConnectionInfoT, int]
-	mongoRequestCache *PendingMongoDbRequests
+	mongoRequestCache *PendingMongoDBRequests
 }
 
 type EBPFEventContext struct {
@@ -131,6 +131,7 @@ func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 			redisDBCache = nil
 		}
 	}
+	// TODO expiry and size from config
 	mongoRequestCache := expirable.NewLRU[MongoRequestKey, *MongoRequestValue](1000, nil, 0)
 	return &EBPFParseContext{
 		h2c:               h2c,
