@@ -124,6 +124,14 @@ func testREDMetricsPythonMongoOnly(t *testing.T) {
 						attribute.String("db.namespace", "mydatabase"),
 					},
 				},
+				{
+					Name: "find mycollection",
+					Attributes: []attribute.KeyValue{
+						attribute.String("db.operation.name", "find"),
+						attribute.String("db.collection.name", "mycollection"),
+						attribute.String("db.namespace", "mydatabase"),
+					},
+				},
 			},
 		},
 	}

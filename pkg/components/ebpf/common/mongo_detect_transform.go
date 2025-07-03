@@ -60,16 +60,22 @@ const (
 	// TODO (mongo) support compressed messages (OP_COMPRESSED)
 	// TODO (mongo) support legacy messages (OP_QUERY, OP_GET_MORE, OP_INSERT, OP_UPDATE, OP_DELETE, OP_REPLY)
 
-	// TODO (mongo) maybe set?
 	commHello             = "hello"
 	commIsMaster          = "isMaster"
 	commPing              = "ping"
 	commIsWritablePrimary = "isWritablePrimary"
-)
 
-func isHeartbeat(comm string) bool {
-	return comm == commHello || comm == commIsMaster || comm == commPing || comm == commIsWritablePrimary
-}
+	commInsert = "insert"
+	commUpdate = "update"
+	commFind   = "find"
+	commDelete = "delete"
+
+	commFindAndModify = "findAndModify"
+	commAggregate     = "aggregate"
+	commCount         = "count"
+	commDistinct      = "distinct"
+	commMapReduce     = "mapReduce"
+)
 
 type MongoRequestKey struct {
 	connInfo  BpfConnectionInfoT
@@ -81,7 +87,11 @@ type MongoRequestValue struct {
 	ResponseSections []mongoSection
 	StartTime        int64 // timestamp when the request was received
 	EndTime          int64 // timestamp when the response was received
-	Flags            byte  // Flags to indicate the state of the request
+	Flags            int32 // Flags to indicate the state of the request
+}
+
+func (m *MongoRequestValue) inRequest() bool {
+	return len(m.ResponseSections) == 0
 }
 
 type PendingMongoDBRequests = *expirable.LRU[MongoRequestKey, *MongoRequestValue]
@@ -145,64 +155,47 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 func parseMongoMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	switch hdr.OpCode {
 	case opMsg:
-		return parseOpMessage(buf, hdr, time, isRequest, pendingRequest)
+		return parseOpMessage(buf, time, isRequest, pendingRequest)
 	default:
 		return nil, false, fmt.Errorf("unsupported MongoDB operation code %d", hdr.OpCode)
 	}
 }
 
-func parseOpMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
-	// MONGODB_OP_MSG packet structure:
-	// +------------+-------------+------------------+
-	// | header      | flagBits    | sections  | checksum |
-	// +------------+-------------+------------------+
-	// |    16B      |     4B      |     ?     | optional 4B |
-	// +------------+-------------+------------------+
-	// TODO (mongo): plus checksum validation to avoid false positives? (only if we have the full packet)
-	flagBits := int32(binary.LittleEndian.Uint32(buf[msgHeaderSize : msgHeaderSize+int32Size]))
-	err := validateFlagBits(flagBits)
-	if err != nil {
-		return nil, false, err
-	}
-
+func validateOpMsg(isRequest bool, flagBits int32, pendingRequest *MongoRequestValue) (bool, error) {
+	// TODO (mongo): maybe add checksum validation to avoid false positives? (only if we have the full packet)
 	moreToCome := flagBits&flagMoreToCome != 0
-	exhaustAllowed := flagBits&flagExhaustAllowed != 0
-	// TODO (mongo) validations on moreToCome and exhaustAllowed Flags
-	if !isRequest && moreToCome && !exhaustAllowed {
-		return nil, false, errors.New("MongoDB response with moreToCome flag set but exhaustAllowed is not set")
-	}
-	if pendingRequest != nil && pendingRequest.Flags&flagMoreToCome != 0 {
-		if pendingRequest.ResponseSections == nil && !isRequest {
-			return nil, false, errors.New("MongoDB request expects more sections but response is sent")
+	if isRequest {
+		switch {
+		case pendingRequest == nil:
+			return true, nil
+		case !pendingRequest.inRequest():
+			return false, errors.New("MongoDB request received already started receiving response")
+		case pendingRequest.Flags&flagMoreToCome == 0:
+			return false, errors.New("MongoDB request with moreToCome flag not set but got another request")
+		}
+	} else {
+		exhaustAllowed := pendingRequest.Flags&flagExhaustAllowed != 0
+		if moreToCome && !exhaustAllowed {
+			return false, errors.New("MongoDB response with moreToCome flag set but exhaustAllowed is not set")
+		}
+		if pendingRequest.inRequest() && pendingRequest.Flags&flagMoreToCome != 0 {
+			return false, errors.New("MongoDB request expects more sections but response is sent")
 		}
 	}
+	return moreToCome, nil
+}
 
-	checkSumPreset := flagBits&flagCheckSumPreset != 0
-	sectionsSize := hdr.MessageLength - msgHeaderSize - int32Size
-	if checkSumPreset {
-		sectionsSize -= int32Size // subtract checksum size if present
-	}
-	if sectionsSize < 0 {
-		return nil, false, errors.New("invalid MongoDB message length, sections size is negative")
-	}
-	sections, err := parseSections(buf[msgHeaderSize+int32Size : msgHeaderSize+int32Size+sectionsSize])
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse MongoDB sections: %w", err)
-	}
-	if len(sections) == 0 {
-		return nil, false, errors.New("no MongoDB sections found in the message")
-	}
-
+func addSectionToMessage(isRequest bool, pendingRequest *MongoRequestValue, sections []mongoSection, flagBits int32, time int64) (*MongoRequestValue, error) {
 	if isRequest {
 		if pendingRequest == nil {
 			pendingRequest = &MongoRequestValue{
 				RequestSections: sections,
 				StartTime:       time,
-				Flags:           byte(flagBits),
+				Flags:           flagBits,
 			}
 		} else {
 			pendingRequest.RequestSections = append(pendingRequest.RequestSections, sections...)
-			pendingRequest.Flags = byte(flagBits)
+			pendingRequest.Flags = flagBits
 			if pendingRequest.StartTime > time {
 				pendingRequest.StartTime = time
 			} else if pendingRequest.EndTime < time {
@@ -211,13 +204,45 @@ func parseOpMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pend
 		}
 	} else {
 		if pendingRequest == nil {
-			return nil, false, errors.New("MongoDB response received but no pending request found")
+			return nil, errors.New("MongoDB response received but no pending request found")
 		}
 		if pendingRequest.ResponseSections != nil {
 			pendingRequest.ResponseSections = append(pendingRequest.ResponseSections, sections...)
 		} else {
 			pendingRequest.ResponseSections = sections
 		}
+		pendingRequest.Flags = flagBits
+	}
+	return pendingRequest, nil
+}
+
+func parseOpMessage(buf []uint8, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
+	// MONGODB_OP_MSG packet structure:
+	// +------------+-------------+------------------+
+	// | header      | flagBits    | sections  | checksum |
+	// +------------+-------------+------------------+
+	// |    16B      |     4B      |     ?     | optional 4B |
+	// +------------+-------------+------------------+
+	flagBits := int32(binary.LittleEndian.Uint32(buf[msgHeaderSize : msgHeaderSize+int32Size]))
+	err := validateFlagBits(flagBits)
+	if err != nil {
+		return nil, false, err
+	}
+
+	moreToCome, err := validateOpMsg(isRequest, flagBits, pendingRequest)
+	if err != nil {
+		return nil, false, err
+	}
+	sections, err := parseSections(buf[msgHeaderSize+int32Size:])
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to parse MongoDB sections: %w", err)
+	}
+	if len(sections) == 0 {
+		return nil, false, errors.New("no MongoDB sections found in the message")
+	}
+	pendingRequest, err = addSectionToMessage(isRequest, pendingRequest, sections, flagBits, time)
+	if err != nil {
+		return nil, false, err
 	}
 	return pendingRequest, moreToCome, nil
 }
@@ -237,22 +262,7 @@ func parseSections(buf []uint8) ([]mongoSection, error) {
 		switch sectionType {
 		// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#kind-0--body
 		case sectionTypeBody:
-			if len(buf[offSet:]) < int32Size {
-				return nil, errors.New("not enough data for section body length")
-			}
-			bodyLength := int(binary.LittleEndian.Uint32(buf[offSet : offSet+int32Size]))
-
-			if len(buf[offSet:]) < bodyLength {
-				return nil, errors.New("not enough data for section body")
-			}
-
-			bodyData := buf[offSet : offSet+bodyLength]
-			// TODO (mongo) we need to parse partial bson parsing, we won't always get the full tcp payload, so we want to extract as many fields as we can
-			var doc bson.D
-			err := bson.Unmarshal(bodyData, &doc)
-			if err != nil {
-				return nil, err
-			}
+			doc, bodyLength := parseBodySection(buf[offSet:])
 			sections = append(sections, mongoSection{
 				Type: sectionType,
 				Body: doc,
@@ -260,6 +270,9 @@ func parseSections(buf []uint8) ([]mongoSection, error) {
 			offSet += bodyLength
 		// https://www.mongodb.com/docs/manual/reference/mongodb-wire-protocol/#kind-1--document-sequence
 		case sectionTypeDocumentSequence:
+			sections = append(sections, mongoSection{
+				Type: sectionTypeDocumentSequence,
+			})
 			length := int(binary.LittleEndian.Uint32(buf[offSet : offSet+int32Size]))
 			offSet += length
 			// TODO (mongo) actually read documents? for now we just skip them
@@ -271,6 +284,26 @@ func parseSections(buf []uint8) ([]mongoSection, error) {
 		return nil, errors.New("no MongoDB sections found in the message")
 	}
 	return sections, nil
+}
+
+func parseBodySection(buf []byte) (bson.D, int) {
+	if len(buf) < int32Size {
+		return bson.D{}, len(buf)
+	}
+	bodyLength := int(binary.LittleEndian.Uint32(buf[:int32Size]))
+
+	if len(buf) < bodyLength {
+		return bson.D{}, len(buf)
+	}
+
+	bodyData := buf[:bodyLength]
+	// TODO (mongo) we need to parse partial bson parsing, we won't always get the full tcp payload, so we want to extract as many fields as we can
+	var doc bson.D
+	err := bson.Unmarshal(bodyData, &doc)
+	if err != nil {
+		return bson.D{}, bodyLength
+	}
+	return doc, bodyLength
 }
 
 func parseMongoHeader(pkt []byte) (*msgHeader, error) {
@@ -304,7 +337,7 @@ func validateMsgHeader(header *msgHeader) error {
 The first 16 bits (0-15) are required and parsers MUST Error if an unknown bit is set.
 */
 func validateFlagBits(flagBits int32) error {
-	if flagBits&^allowedFlags != 0 {
+	if uint16(flagBits&0xFFFF)&^allowedFlags != 0 {
 		return fmt.Errorf("invalid MongoDB flag bits: %d, allowed bits are: %d", flagBits, allowedFlags)
 	}
 	return nil
@@ -319,29 +352,24 @@ func getMongoInfo(request *MongoRequestValue) (*mongoSpanInfo, error) {
 	// For simplicity, we assume the first section is the main one.
 	// In a real-world scenario, you might want to handle multiple sections.
 	requestSection := request.RequestSections[0]
+	if requestSection.Type != sectionTypeBody {
+		return nil, errors.New("first MongoDB section is not of type body")
+	}
 	if len(requestSection.Body) == 0 {
-		return nil, errors.New("no MongoDB body found in the main section")
-	}
-	// first element in the request body is the operation name
-	opE := requestSection.Body[0]
-	// TODO (mongo) do we want heartbeat configuration to be configurable?, or operation filtering?, or would this be done on the global filtering level?
-	if isHeartbeat(opE.Key) {
-		return nil, fmt.Errorf("MongoDB heartbeat operation '%s' is ignored", opE.Key)
-	}
-	spanInfo.OpName = opE.Key
-	/*
-		TODO (mongo): right now we decide that the value of the first element is the collection name
-		in most cases this is true, but it might not be the case for some operations like "listCollections" and "createUser"
-		we might want to have a list of known operations and their expected collection names
-	*/
-	collectionStr, ok := opE.Value.(string)
-	if !ok {
-		return nil, fmt.Errorf("expected string for Collection name, got %T", opE.Value)
-	}
-	spanInfo.Collection = collectionStr
-	db, ok := findStringInBson(requestSection.Body, "$db")
-	if ok {
-		spanInfo.DB = db
+		// couldn't parse mongodb section, assume operation is *
+		spanInfo.OpName = "*"
+	} else {
+		// first element in the request body is the operation name
+		op, collection, err := parseFirstField(requestSection.Body[0])
+		if err != nil {
+			return nil, err
+		}
+		spanInfo.OpName = op
+		spanInfo.Collection = collection
+		db, ok := findStringInBson(requestSection.Body, "$db")
+		if ok {
+			spanInfo.DB = db
+		}
 	}
 
 	if len(request.ResponseSections) == 0 {
@@ -432,6 +460,28 @@ func TCPToMongoToSpan(trace *TCPRequestInfo, info *mongoSpanInfo) request.Span {
 			Namespace: trace.Pid.Ns,
 		},
 	}
+}
+
+func isHeartbeat(comm string) bool {
+	return comm == commHello || comm == commIsMaster || comm == commPing || comm == commIsWritablePrimary
+}
+
+func isCollectionCommand(comm string) bool {
+	return comm == commInsert || comm == commUpdate || comm == commFind || comm == commDelete ||
+		comm == commFindAndModify || comm == commAggregate || comm == commCount || comm == commDistinct ||
+		comm == commMapReduce
+}
+
+func parseFirstField(field bson.E) (string, string, error) {
+	comm := field.Key
+	if isHeartbeat(comm) {
+		return "", "", fmt.Errorf("MongoDB heartbeat operation '%s' is ignored", comm)
+	}
+	if isCollectionCommand(comm) {
+		collection := field.Value.(string)
+		return comm, collection, nil
+	}
+	return comm, "", nil
 }
 
 func findInBson(doc bson.D, key string) (any, bool) {

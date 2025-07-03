@@ -21,8 +21,8 @@ async def query():
     collection.insert_one({"name": "Alice", "age": 30})
 
     # # Find one document
-    # doc = collection.find_one({"name": "Alice"})
-    # print(doc)
+    doc = collection.find_one({"name": "Alice"})
+    print(doc)
 
     # Update
     collection.update_one({"name": "Alice"}, {"$set": {"age": 31}})

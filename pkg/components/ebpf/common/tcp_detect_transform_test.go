@@ -40,8 +40,6 @@ func TestTCPReqSQLParsing(t *testing.T) {
 	assert.Equal(t, request.EventTypeSQLClient, s.Type)
 }
 
-// TODO (mongo) add mongo tests
-
 func TestTCPReqParsing(t *testing.T) {
 	sql := "Not a sql or any known protocol"
 	r := makeTCPReq(sql, tcpSend, 343534, 8080, 2000)
