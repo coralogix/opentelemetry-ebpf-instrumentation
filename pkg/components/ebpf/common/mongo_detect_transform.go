@@ -96,6 +96,27 @@ func (m *MongoRequestValue) inRequest() bool {
 
 type PendingMongoDBRequests = *expirable.LRU[MongoRequestKey, *MongoRequestValue]
 
+func makeRequestKey(isResponse bool, header *msgHeader, connInfo BpfConnectionInfoT) MongoRequestKey {
+	if isResponse {
+		return MongoRequestKey{
+			connInfo:  connInfo,
+			requestID: header.ResponseTo,
+		}
+	} else {
+		return MongoRequestKey{
+			connInfo:  connInfo,
+			requestID: header.RequestID,
+		}
+	}
+}
+
+func requestTime(isResponse bool, startTime int64, endTime int64) int64 {
+	if isResponse {
+		return endTime
+	}
+	return startTime
+}
+
 func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo BpfConnectionInfoT, requests PendingMongoDBRequests) (*MongoRequestValue, bool, error) {
 	if len(buf) < msgHeaderSize {
 		return nil, false, errors.New("packet too short for MongoDB header")
@@ -106,29 +127,16 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 		return nil, false, err
 	}
 
-	isRequest := header.ResponseTo == 0
+	isResponse := header.ResponseTo != 0
 	var pendingRequest *MongoRequestValue
 	var moreToCome bool
-	var time int64
-	var key MongoRequestKey
-	if !isRequest {
-		key = MongoRequestKey{
-			connInfo:  connInfo,
-			requestID: header.ResponseTo,
-		}
-		time = endTime
-	} else {
-		key = MongoRequestKey{
-			connInfo:  connInfo,
-			requestID: header.RequestID,
-		}
-		time = startTime
-	}
+	time := requestTime(isResponse, startTime, endTime)
+	key := makeRequestKey(isResponse, header, connInfo)
 	inFlightRequest, ok := requests.Get(key)
-	if !ok && !isRequest {
+	if !ok && isResponse {
 		return nil, false, fmt.Errorf("no in-flight MongoDB request found for key %d", header.ResponseTo)
 	}
-	if !isRequest && len(buf) == msgHeaderSize {
+	if isResponse && len(buf) == msgHeaderSize {
 		// TODO (mongo) currently the response is only the header, since the client sends only the first 16 bytes at first,
 		// we need to fix the tcp path to send the response body as well
 		// for now we just dont add response section
@@ -136,35 +144,42 @@ func ProcessMongoEvent(buf []uint8, startTime int64, endTime int64, connInfo Bpf
 		// If this is a response and there are no more sections to come, we can finalize the request
 		return inFlightRequest, false, nil
 	}
-	pendingRequest, moreToCome, err = parseMongoMessage(buf, *header, time, isRequest, inFlightRequest)
+	pendingRequest, moreToCome, err = parseMongoMessage(buf, *header, time, isResponse, inFlightRequest)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to parse MongoDB response: %w", err)
 	}
 	if pendingRequest == nil {
 		return nil, false, errors.New("no MongoDB request or response found in the message")
 	}
-	requests.Add(key, pendingRequest)
-	if !moreToCome && !isRequest {
-		requests.Remove(key)
+	if !moreToCome && isResponse {
 		// If this is a response and there are no more sections to come, we can finalize the request
 		return pendingRequest, false, nil
 	}
+	requests.Add(key, pendingRequest)
 	return nil, true, nil
 }
 
-func parseMongoMessage(buf []uint8, hdr msgHeader, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
+func parseMongoMessage(buf []uint8, hdr msgHeader, time int64, isResponse bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	switch hdr.OpCode {
 	case opMsg:
-		return parseOpMessage(buf, time, isRequest, pendingRequest)
+		return parseOpMessage(buf, time, isResponse, pendingRequest)
 	default:
 		return nil, false, fmt.Errorf("unsupported MongoDB operation code %d", hdr.OpCode)
 	}
 }
 
-func validateOpMsg(isRequest bool, flagBits int32, pendingRequest *MongoRequestValue) (bool, error) {
+func validateOpMsg(isResponse bool, flagBits int32, pendingRequest *MongoRequestValue) (bool, error) {
 	// TODO (mongo): maybe add checksum validation to avoid false positives? (only if we have the full packet)
 	moreToCome := flagBits&flagMoreToCome != 0
-	if isRequest {
+	if isResponse {
+		exhaustAllowed := pendingRequest.Flags&flagExhaustAllowed != 0
+		if moreToCome && !exhaustAllowed {
+			return false, errors.New("MongoDB response with moreToCome flag set but exhaustAllowed is not set")
+		}
+		if pendingRequest.inRequest() && pendingRequest.Flags&flagMoreToCome != 0 {
+			return false, errors.New("MongoDB request expects more sections but response is sent")
+		}
+	} else {
 		switch {
 		case pendingRequest == nil:
 			return true, nil
@@ -173,20 +188,21 @@ func validateOpMsg(isRequest bool, flagBits int32, pendingRequest *MongoRequestV
 		case pendingRequest.Flags&flagMoreToCome == 0:
 			return false, errors.New("MongoDB request with moreToCome flag not set but got another request")
 		}
-	} else {
-		exhaustAllowed := pendingRequest.Flags&flagExhaustAllowed != 0
-		if moreToCome && !exhaustAllowed {
-			return false, errors.New("MongoDB response with moreToCome flag set but exhaustAllowed is not set")
-		}
-		if pendingRequest.inRequest() && pendingRequest.Flags&flagMoreToCome != 0 {
-			return false, errors.New("MongoDB request expects more sections but response is sent")
-		}
 	}
 	return moreToCome, nil
 }
 
-func addSectionToMessage(isRequest bool, pendingRequest *MongoRequestValue, sections []mongoSection, flagBits int32, time int64) (*MongoRequestValue, error) {
-	if isRequest {
+func addSectionToMessage(isResponse bool, pendingRequest *MongoRequestValue, sections []mongoSection, flagBits int32, time int64) (*MongoRequestValue, error) {
+	if isResponse {
+		if pendingRequest == nil {
+			return nil, errors.New("MongoDB response received but no pending request found")
+		}
+		pendingRequest.ResponseSections = append(pendingRequest.ResponseSections, sections...)
+		pendingRequest.Flags = flagBits
+		if pendingRequest.EndTime < time {
+			pendingRequest.EndTime = time
+		}
+	} else {
 		if pendingRequest == nil {
 			pendingRequest = &MongoRequestValue{
 				RequestSections: sections,
@@ -198,38 +214,26 @@ func addSectionToMessage(isRequest bool, pendingRequest *MongoRequestValue, sect
 			pendingRequest.Flags = flagBits
 			if pendingRequest.StartTime > time {
 				pendingRequest.StartTime = time
-			} else if pendingRequest.EndTime < time {
-				pendingRequest.EndTime = time
 			}
 		}
-	} else {
-		if pendingRequest == nil {
-			return nil, errors.New("MongoDB response received but no pending request found")
-		}
-		if pendingRequest.ResponseSections != nil {
-			pendingRequest.ResponseSections = append(pendingRequest.ResponseSections, sections...)
-		} else {
-			pendingRequest.ResponseSections = sections
-		}
-		pendingRequest.Flags = flagBits
 	}
 	return pendingRequest, nil
 }
 
-func parseOpMessage(buf []uint8, time int64, isRequest bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
-	// MONGODB_OP_MSG packet structure:
-	// +------------+-------------+------------------+
-	// | header      | flagBits    | sections  | checksum |
-	// +------------+-------------+------------------+
-	// |    16B      |     4B      |     ?     | optional 4B |
-	// +------------+-------------+------------------+
+// MONGODB_OP_MSG packet structure:
+// +------------+-------------+------------------+
+// | header      | flagBits    | sections  | checksum |
+// +------------+-------------+------------------+
+// |    16B      |     4B      |     ?     | optional 4B |
+// +------------+-------------+------------------+
+func parseOpMessage(buf []uint8, time int64, isResponse bool, pendingRequest *MongoRequestValue) (*MongoRequestValue, bool, error) {
 	flagBits := int32(binary.LittleEndian.Uint32(buf[msgHeaderSize : msgHeaderSize+int32Size]))
 	err := validateFlagBits(flagBits)
 	if err != nil {
 		return nil, false, err
 	}
 
-	moreToCome, err := validateOpMsg(isRequest, flagBits, pendingRequest)
+	moreToCome, err := validateOpMsg(isResponse, flagBits, pendingRequest)
 	if err != nil {
 		return nil, false, err
 	}
@@ -240,7 +244,7 @@ func parseOpMessage(buf []uint8, time int64, isRequest bool, pendingRequest *Mon
 	if len(sections) == 0 {
 		return nil, false, errors.New("no MongoDB sections found in the message")
 	}
-	pendingRequest, err = addSectionToMessage(isRequest, pendingRequest, sections, flagBits, time)
+	pendingRequest, err = addSectionToMessage(isResponse, pendingRequest, sections, flagBits, time)
 	if err != nil {
 		return nil, false, err
 	}
