@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
 	"net/http"
@@ -69,8 +70,22 @@ func main() {
 		}()
 	}
 
-	// log out the running configuration
-	slog.Debug("Running OpenTelemetry eBPF Instrumentation with configuration", "config", *config)
+	shouldLogConfig := flag.Bool("log-config", false, "should log out configuration on startup")
+	flag.Parse()
+
+	if cfg := os.Getenv("OTEL_EBPF_LOG_CONFIG"); cfg == "true" {
+		*shouldLogConfig = true
+	}
+
+	if *shouldLogConfig {
+		configYaml, err := yaml.Marshal(config)
+		if err != nil {
+			slog.Warn("can't marshal configuration to YAML", "error", err)
+		}
+		// log out the running configuration
+		slog.Info("Running OpenTelemetry eBPF Instrumentation with configuration")
+		fmt.Println(string(configYaml))
+	}
 
 	// Adding shutdown hook for graceful stop.
 	// We must register the hook before we launch the pipe build, otherwise we won't clean up if the
