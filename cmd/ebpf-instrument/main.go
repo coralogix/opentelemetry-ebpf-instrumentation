@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	otelsdk "go.opentelemetry.io/otel/sdk"
 
