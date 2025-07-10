@@ -69,6 +69,9 @@ func main() {
 		}()
 	}
 
+	// log out the running configuration
+	slog.Debug("Running OpenTelemetry eBPF Instrumentation with configuration", "config", *config)
+
 	// Adding shutdown hook for graceful stop.
 	// We must register the hook before we launch the pipe build, otherwise we won't clean up if the
 	// child process isn't found.
