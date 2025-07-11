@@ -79,13 +79,7 @@ func main() {
 	}
 
 	if *shouldLogConfig {
-		configYaml, err := yaml.Marshal(config)
-		if err != nil {
-			slog.Warn("can't marshal configuration to YAML", "error", err)
-		}
-		// log out the running configuration
-		slog.Info("Running OpenTelemetry eBPF Instrumentation with configuration")
-		fmt.Println(string(configYaml))
+		printConfig(config)
 	}
 
 	// Adding shutdown hook for graceful stop.
@@ -121,4 +115,15 @@ func loadConfig(configPath *string) *beyla.Config {
 		os.Exit(-1)
 	}
 	return config
+}
+
+func printConfig(config *beyla.Config) {
+	configYaml, err := yaml.Marshal(config)
+	if err != nil {
+		slog.Warn("can't marshal configuration to YAML", "error", err)
+	}
+	// obfuscate sensitive information like endpoint with regex
+	// log out the running configuration
+	slog.Info("Running OpenTelemetry eBPF Instrumentation with configuration")
+	fmt.Println(string(configYaml))
 }
