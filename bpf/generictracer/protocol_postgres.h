@@ -56,7 +56,10 @@ static __always_inline int postgres_send_large_buffer(tcp_req_t *req,
                                                       u32 bytes_len,
                                                       u8 direction,
                                                       enum large_buf_action action) {
-    RET_IF_NOT_POW2(postgres_buffer_size, -1);
+    if (!is_pow2(postgres_buffer_size)) {
+        bpf_dbg_printk("postgres_send_large_buffer: bug: postgres_buffer_size is not a power of 2");
+        return -1;
+    }
     const u8 buf_len_mask = postgres_buffer_size - 1;
 
     tcp_large_buffer_t *large_buf = (tcp_large_buffer_t *)postgres_large_buffers_mem();

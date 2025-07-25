@@ -126,7 +126,10 @@ static __always_inline int mysql_read_fixup_buffer(const connection_info_t *conn
                                                    u32 data_len) {
     u8 offset = 0;
 
-    RET_IF_NOT_POW2(mysql_buffer_size, -1);
+    if (!is_pow2(mysql_buffer_size)) {
+        bpf_dbg_printk("mysql_read_fixup_buffer: bug: mysql_buffer_size is not a power of 2");
+        return -1;
+    }
     const u8 buf_len_mask = mysql_buffer_size - 1;
 
     struct mysql_state_data *state_data = bpf_map_lookup_elem(&mysql_state, conn_info);
