@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	PostgresHdrSize   = 4
+	PostgresHdrSize   = 5
 	PostgresErrMinLen = PostgresHdrSize + 6
 
 	PostgresMessageTypeQuery   = 'Q'

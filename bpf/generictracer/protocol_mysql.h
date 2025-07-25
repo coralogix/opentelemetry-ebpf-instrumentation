@@ -2,6 +2,7 @@
 
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
+#include <bpfcore/utils.h>
 
 #include <common/common.h>
 #include <common/connection_info.h>
@@ -124,8 +125,9 @@ static __always_inline int mysql_read_fixup_buffer(const connection_info_t *conn
                                                    const unsigned char *data,
                                                    u32 data_len) {
     u8 offset = 0;
-    const u8 buf_len_mask =
-        mysql_buffer_size - 1; // mysql_buffer_size is guaranteed to be a power of 2
+
+    RET_IF_NOT_POW2(mysql_buffer_size, -1);
+    const u8 buf_len_mask = mysql_buffer_size - 1;
 
     struct mysql_state_data *state_data = bpf_map_lookup_elem(&mysql_state, conn_info);
     if (state_data != NULL) {

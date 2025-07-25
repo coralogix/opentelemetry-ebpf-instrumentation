@@ -3,6 +3,7 @@
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_endian.h>
 #include <bpfcore/bpf_helpers.h>
+#include <bpfcore/utils.h>
 
 #include <common/common.h>
 #include <common/connection_info.h>
@@ -23,9 +24,10 @@
 #include <maps/active_ssl_connections.h>
 
 struct postgres_hdr {
-    uint8_t message_type;
-    uint32_t message_len;
-} __attribute__((packed));
+    u32 message_len;
+    u8 message_type;
+    u8 _pad[3];
+};
 
 enum {
     // Postgres header
@@ -54,8 +56,8 @@ static __always_inline int postgres_send_large_buffer(tcp_req_t *req,
                                                       u32 bytes_len,
                                                       u8 direction,
                                                       enum large_buf_action action) {
-    const u8 buf_len_mask =
-        postgres_buffer_size - 1; // postgres_buffer_size is guaranteed to be a power of 2
+    RET_IF_NOT_POW2(postgres_buffer_size, -1);
+    const u8 buf_len_mask = postgres_buffer_size - 1;
 
     tcp_large_buffer_t *large_buf = (tcp_large_buffer_t *)postgres_large_buffers_mem();
     if (!large_buf) {
@@ -70,8 +72,8 @@ static __always_inline int postgres_send_large_buffer(tcp_req_t *req,
     __builtin_memcpy((void *)&large_buf->tp, (void *)&req->tp, sizeof(tp_info_t));
 
     large_buf->len = bytes_len;
-    if (large_buf->len >= mysql_buffer_size) {
-        large_buf->len = mysql_buffer_size;
+    if (large_buf->len >= postgres_buffer_size) {
+        large_buf->len = postgres_buffer_size;
         bpf_dbg_printk("WARN: postgres_send_large_buffer: buffer is full, truncating data");
     }
     bpf_probe_read(large_buf->buf, large_buf->len & buf_len_mask, u_buf);
@@ -84,12 +86,19 @@ static __always_inline int postgres_send_large_buffer(tcp_req_t *req,
     return 0;
 }
 
-static __always_inline void postgres_parse_hdr(struct postgres_hdr *hdr,
-                                               const unsigned char *data) {
-    bpf_probe_read(&hdr->message_type, 1, data);
+static __always_inline struct postgres_hdr postgres_parse_hdr(const unsigned char *data) {
+    struct postgres_hdr hdr = {};
+
+    u8 header[k_pg_hdr_size] = {};
+    bpf_probe_read(header, k_pg_hdr_size, data);
+
     u32 message_len_le;
-    bpf_probe_read(&message_len_le, 4, data + 1);
-    hdr->message_len = bpf_ntohl(message_len_le);
+    __builtin_memcpy(&message_len_le, header + 1, sizeof(message_len_le));
+
+    hdr.message_type = header[0];
+    hdr.message_len = bpf_ntohl(message_len_le);
+
+    return hdr;
 }
 
 static __always_inline u8 is_postgres(connection_info_t *conn_info,
@@ -108,15 +117,14 @@ static __always_inline u8 is_postgres(connection_info_t *conn_info,
 
     size_t message_size = 0;
     struct postgres_hdr hdr;
-    int i;
     bool includes_known_command = false;
 
-    for (i = 0; i < k_pg_messages_in_packet_max; i++) {
+    for (u8 i = 0; i < k_pg_messages_in_packet_max; i++) {
         if (message_size + k_pg_hdr_size > data_len) {
             break;
         }
 
-        postgres_parse_hdr(&hdr, data + message_size);
+        hdr = postgres_parse_hdr(data + message_size);
 
         message_size += hdr.message_len + 1;
         if (hdr.message_len == 0) {
@@ -137,7 +145,7 @@ static __always_inline u8 is_postgres(connection_info_t *conn_info,
     }
 
     if (message_size != data_len) {
-        bpf_dbg_printk("is_postgres: message length mismatch: message_size=%d data_len=%d",
+        bpf_dbg_printk("is_postgres: message length mismatch: message_size=%d data_len=%u",
                        message_size,
                        data_len);
         return 0;
@@ -151,6 +159,6 @@ static __always_inline u8 is_postgres(connection_info_t *conn_info,
     *protocol_type = k_protocol_type_postgres;
     bpf_map_update_elem(&protocol_cache, conn_info, protocol_type, BPF_ANY);
 
-    bpf_dbg_printk("is_postgres: postgres! message_type=%d", hdr.message_type);
+    bpf_dbg_printk("is_postgres: postgres! message_type=%u", hdr.message_type);
     return 1;
 }

@@ -59,4 +59,14 @@
                  : "+r"(VAR)                                                                       \
                  : [max] "i"(UMAX))
 
+// Check if a number is a power of 2.
+#define IS_POW2(n) ((n) != 0 && (((n) & ((n) - 1)) == 0))
+
+// Return from function if the number is NOT a power of 2
+#define RET_IF_NOT_POW2(n, ret)                                                                    \
+    do {                                                                                           \
+        if (!IS_POW2(n))                                                                           \
+            return (ret);                                                                          \
+    } while (0)
+
 #endif /* __UTILS_H__ */

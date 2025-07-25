@@ -194,7 +194,7 @@ func handlePostgres(_ *EBPFParseContext, event *TCPRequestInfo, requestBuffer, r
 	switch sqlCommand {
 	// TODO(matt): prepared statements
 	case "QUERY":
-		op, table, stmt = detectSQL(string(requestBuffer[sqlprune.PostgresHdrSize+1:]))
+		op, table, stmt = detectSQL(string(requestBuffer[sqlprune.PostgresHdrSize:]))
 	default:
 		slog.Warn("Postgres message type unhandled", "messageType", requestBuffer[sqlprune.PostgresHdrSize])
 		return span, errFallback
