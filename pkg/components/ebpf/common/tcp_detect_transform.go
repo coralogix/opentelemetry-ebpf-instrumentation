@@ -69,6 +69,17 @@ func ReadTCPRequestIntoSpan(parseCtx *EBPFParseContext, cfg *config.EBPFTracer, 
 		return span, false, nil
 	case ProtocolTypePostgres:
 		span, err := handlePostgres(parseCtx, event, requestBuffer, responseBuffer)
+		if err != nil {
+			// First, try to reverse the event and buffers
+			var err2 error
+			reverseTCPEvent(event)
+			tmpRequestBuffer := responseBuffer
+			tmpResponseBuffer := requestBuffer
+			span, err2 = handlePostgres(parseCtx, event, tmpRequestBuffer, tmpResponseBuffer)
+			if err2 == nil {
+				return span, false, nil
+			}
+		}
 
 		// Proceed with error handling for the original buffers
 		if errors.Is(err, errFallback) {

@@ -22,7 +22,7 @@ const (
 )
 
 func parsePostgresMessageType(buf []uint8) uint8 {
-	if len(buf) < PostgresHdrSize+1 {
+	if len(buf) < PostgresHdrSize {
 		return 0
 	}
 	// The first byte of the header is the message type
