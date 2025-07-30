@@ -45,7 +45,8 @@ func ReadTCPRequestIntoSpan(parseCtx *EBPFParseContext, cfg *config.EBPFTracer, 
 		if err != nil {
 			// First, try to reverse the event and buffers
 			var err2 error
-			reverseTCPEvent(event)
+			// reverseTCPEvent(event)
+			// mysql-server buffers are swapped for some reason, investigate why
 			tmpRequestBuffer := responseBuffer
 			tmpResponseBuffer := requestBuffer
 			span, err2 = handleMySQL(parseCtx, event, tmpRequestBuffer, tmpResponseBuffer)
@@ -69,17 +70,6 @@ func ReadTCPRequestIntoSpan(parseCtx *EBPFParseContext, cfg *config.EBPFTracer, 
 		return span, false, nil
 	case ProtocolTypePostgres:
 		span, err := handlePostgres(parseCtx, event, requestBuffer, responseBuffer)
-		if err != nil {
-			// First, try to reverse the event and buffers
-			var err2 error
-			reverseTCPEvent(event)
-			tmpRequestBuffer := responseBuffer
-			tmpResponseBuffer := requestBuffer
-			span, err2 = handlePostgres(parseCtx, event, tmpRequestBuffer, tmpResponseBuffer)
-			if err2 == nil {
-				return span, false, nil
-			}
-		}
 
 		// Proceed with error handling for the original buffers
 		if errors.Is(err, errFallback) {
