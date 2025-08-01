@@ -4,6 +4,7 @@
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_tracing.h>
 
+#include <common/accepting_port.h>
 #include <common/pin_internal.h>
 #include <common/sockaddr.h>
 #include <common/ssl_helpers.h>
@@ -12,6 +13,7 @@
 #include <generictracer/k_send_receive.h>
 #include <generictracer/k_tracer_defs.h>
 #include <generictracer/k_unix_sock.h>
+#include <generictracer/maps/accepting_ports.h>
 #include <generictracer/maps/active_accept_args.h>
 #include <generictracer/maps/active_connect_args.h>
 #include <generictracer/maps/tcp_connection_map.h>
@@ -1048,5 +1050,21 @@ int obi_handle_buf_with_args(void *ctx) {
         }
     }
 
+    return 0;
+}
+
+SEC("kprobe/inet_csk_accept")
+int BPF_KPROBE(obi_kprobe_inet_csk_accept, struct sock *sk) {
+    (void)ctx;
+    struct accepting_port ap = accepting_port_from_sk(sk);
+    bpf_map_update_elem(&accepting_ports, &ap, &(bool){true}, BPF_ANY);
+    return 0;
+}
+
+SEC("kprobe/inet_csk_listen_stop")
+int BPF_KPROBE(obi_kprobe_inet_csk_listen_stop, struct sock *sk) {
+    (void)ctx;
+    struct accepting_port ap = accepting_port_from_sk(sk);
+    bpf_map_delete_elem(&accepting_ports, &ap);
     return 0;
 }
