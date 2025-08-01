@@ -7,15 +7,19 @@ package generictracer
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/gavv/monotime"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"go.opentelemetry.io/obi/pkg/app/request"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/components/ebpf/common"
@@ -46,6 +50,8 @@ type Tracer struct {
 	ingressFilters   map[ifaces.Interface]*netlink.BpfFilter
 	instrumentedLibs ebpfcommon.InstrumentedLibsT
 	libsMux          sync.Mutex
+
+	IterLinks map[string]link.Link // TODO: tmp solution, add helpers to tracer interface?
 }
 
 func tlog() *slog.Logger {
@@ -63,6 +69,7 @@ func New(pidFilter ebpfcommon.ServiceFilter, cfg *obi.Config, metrics imetrics.R
 		ingressFilters:   map[ifaces.Interface]*netlink.BpfFilter{},
 		instrumentedLibs: make(ebpfcommon.InstrumentedLibsT),
 		libsMux:          sync.Mutex{},
+		IterLinks:        make(map[string]link.Link),
 	}
 }
 
@@ -298,6 +305,14 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 			Start:    p.bpfObjects.ObiKprobeUnixStreamSendmsg,
 			End:      p.bpfObjects.ObiKretprobeUnixStreamSendmsg,
 		},
+		"inet_csk_accept": {
+			Required: true,
+			Start:    p.bpfObjects.ObiKprobeInetCskAccept,
+		},
+		"inet_csk_listen_stop": {
+			Required: true,
+			Start:    p.bpfObjects.ObiKprobeInetCskListenStop,
+		},
 	}
 
 	if p.cfg.EBPF.ContextPropagation != config.ContextPropagationDisabled {
@@ -382,6 +397,14 @@ func (p *Tracer) SockMsgs() []ebpfcommon.SockMsg { return nil }
 
 func (p *Tracer) SockOps() []ebpfcommon.SockOps { return nil }
 
+func (p *Tracer) Iters() map[string]ebpfcommon.Iter {
+	return map[string]ebpfcommon.Iter{
+		"obi_iter_tcp": {
+			Program: p.bpfObjects.ObiIterTcp,
+		},
+	}
+}
+
 func (p *Tracer) RecordInstrumentedLib(id uint64, closers []io.Closer) {
 	p.libsMux.Lock()
 	defer p.libsMux.Unlock()
@@ -436,6 +459,10 @@ func (p *Tracer) Run(ctx context.Context, ebpfEventContext *ebpfcommon.EBPFEvent
 	go p.watchForMisclassifedEvents(ctx)
 	go p.lookForTimeouts(ctx, timeoutTicker, eventsChan)
 	defer timeoutTicker.Stop()
+
+	if err := p.runIterator("obi_iter_tcp"); err != nil {
+		p.log.Error("error running TCP iterator", "error", err)
+	}
 
 	p.log.Info("Launching p.Tracer")
 
@@ -524,6 +551,42 @@ func (p *Tracer) watchForMisclassifedEvents(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (p *Tracer) runIterator(name string) error {
+	p.log.Debug("Running iterator", "name", name)
+
+	lnk, ok := p.IterLinks[name]
+	if !ok {
+		return fmt.Errorf("iterator %s not found", name)
+	}
+
+	rd, err := lnk.(*link.Iter).Open()
+	if err != nil {
+		return fmt.Errorf("open iterator %s: %w", name, err)
+	}
+	defer rd.Close()
+
+	buf := make([]byte, 8192)
+	for {
+		_, err := rd.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read iterator: %w", err)
+		}
+	}
+
+	for _, line := range strings.Split(unix.ByteSliceToString(buf), "\n") {
+		if line == "" {
+			continue
+		}
+		p.log.Debug("Iterator output", "line", line, "name", name)
+	}
+	p.log.Debug("Iterator finished", "name", name)
+
+	return nil
 }
 
 // Cilium 0.19.0+ is adding a new private field to all the BpfConnectionInfoT

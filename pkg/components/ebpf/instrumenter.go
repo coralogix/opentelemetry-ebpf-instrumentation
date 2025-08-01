@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	ebpfcommon "go.opentelemetry.io/obi/pkg/components/ebpf/common"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/generictracer"
 	"go.opentelemetry.io/obi/pkg/components/exec"
 	"go.opentelemetry.io/obi/pkg/components/goexec"
 	"go.opentelemetry.io/obi/pkg/components/imetrics"
@@ -427,6 +428,28 @@ func (i *instrumenter) tracepoint(funcName string, programs ebpfcommon.ProbeDesc
 			return fmt.Errorf("setting syscall: %w", err)
 		}
 		i.closables = append(i.closables, kp)
+	}
+
+	return nil
+}
+
+func (i *instrumenter) iters(p Tracer) error {
+	for name, iter := range p.Iters() {
+		slog.Debug("Attaching iterator", "name", name, "program", iter.Program.String())
+
+		lnk, err := link.AttachIter(link.IterOptions{
+			Program: iter.Program,
+		})
+		if err != nil {
+			if i.metrics != nil {
+				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingIter)
+			}
+			return fmt.Errorf("attaching iterator %s: %w", name, err)
+		}
+		iter.Link = lnk
+
+		p.(*generictracer.Tracer).IterLinks[name] = lnk
+		p.AddCloser(iter.Link)
 	}
 
 	return nil
