@@ -3,16 +3,16 @@
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 
-#include <common/accepting_port.h>
+#include <common/sock_port_ns.h>
 #include <common/http_types.h>
 #include <common/pin_internal.h>
 #include <common/ringbuf.h>
 
 #include <generictracer/iovec_len.h>
 
-#include <generictracer/maps/accepting_ports.h>
 #include <generictracer/maps/connection_meta_mem.h>
 #include <generictracer/maps/iovec_mem.h>
+#include <generictracer/maps/listening_ports.h>
 #include <generictracer/maps/protocol_args_mem.h>
 
 #include <logger/bpf_dbg.h>
@@ -22,15 +22,15 @@
 
 volatile const s32 capture_header_buffer = 0;
 
-static __always_inline bool is_accepting(const u16 port, const u32 netns) {
-    struct accepting_port ap = {
+static __always_inline bool is_listening(const u16 port, const u32 netns) {
+    const struct sock_port_ns pn = {
         .port = port,
         .netns = netns,
     };
 
-    bool *is_accepting = bpf_map_lookup_elem(&accepting_ports, &ap);
+    bool *is_listening = bpf_map_lookup_elem(&listening_ports, &pn);
 
-    return (is_accepting != NULL && *is_accepting);
+    return (is_listening != NULL && *is_listening);
 }
 
 static __always_inline u32 task_netns() {
@@ -40,7 +40,7 @@ static __always_inline u32 task_netns() {
 
 static __always_inline u8 infer_packet_type(u8 direction, u16 port) {
     u32 netns = task_netns();
-    bool is_server = is_accepting(port, netns);
+    bool is_server = is_listening(port, netns);
 
     if ((direction == TCP_RECV && is_server) || (direction == TCP_SEND && !is_server)) {
         return PACKET_TYPE_REQUEST;

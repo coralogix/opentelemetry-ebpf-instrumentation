@@ -117,7 +117,7 @@ func (p *Tracer) SockOps() []ebpfcommon.SockOps {
 	return nil
 }
 
-func (p *Tracer) Iters() map[string]ebpfcommon.Iter {
+func (p *Tracer) Iters() []*ebpfcommon.Iter {
 	return nil
 }
 

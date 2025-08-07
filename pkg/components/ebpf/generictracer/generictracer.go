@@ -6,11 +6,12 @@
 package generictracer
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -19,7 +20,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/gavv/monotime"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	"go.opentelemetry.io/obi/pkg/app/request"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/components/ebpf/common"
@@ -50,8 +50,7 @@ type Tracer struct {
 	ingressFilters   map[ifaces.Interface]*netlink.BpfFilter
 	instrumentedLibs ebpfcommon.InstrumentedLibsT
 	libsMux          sync.Mutex
-
-	IterLinks map[string]link.Link // TODO: tmp solution, add helpers to tracer interface?
+	iters            []*ebpfcommon.Iter
 }
 
 func tlog() *slog.Logger {
@@ -69,7 +68,7 @@ func New(pidFilter ebpfcommon.ServiceFilter, cfg *obi.Config, metrics imetrics.R
 		ingressFilters:   map[ifaces.Interface]*netlink.BpfFilter{},
 		instrumentedLibs: make(ebpfcommon.InstrumentedLibsT),
 		libsMux:          sync.Mutex{},
-		IterLinks:        make(map[string]link.Link),
+		iters:            []*ebpfcommon.Iter{},
 	}
 }
 
@@ -397,12 +396,16 @@ func (p *Tracer) SockMsgs() []ebpfcommon.SockMsg { return nil }
 
 func (p *Tracer) SockOps() []ebpfcommon.SockOps { return nil }
 
-func (p *Tracer) Iters() map[string]ebpfcommon.Iter {
-	return map[string]ebpfcommon.Iter{
-		"obi_iter_tcp": {
-			Program: p.bpfObjects.ObiIterTcp,
-		},
+func (p *Tracer) Iters() []*ebpfcommon.Iter {
+	if len(p.iters) == 0 {
+		p.iters = []*ebpfcommon.Iter{
+			{
+				Program: p.bpfObjects.ObiIterTcp,
+			},
+		}
 	}
+
+	return p.iters
 }
 
 func (p *Tracer) RecordInstrumentedLib(id uint64, closers []io.Closer) {
@@ -460,8 +463,12 @@ func (p *Tracer) Run(ctx context.Context, ebpfEventContext *ebpfcommon.EBPFEvent
 	go p.lookForTimeouts(ctx, timeoutTicker, eventsChan)
 	defer timeoutTicker.Stop()
 
-	if err := p.runIterator("obi_iter_tcp"); err != nil {
-		p.log.Error("error running TCP iterator", "error", err)
+	for _, it := range p.Iters() {
+		if it.Program == p.bpfObjects.ObiIterTcp {
+			if err := p.runIterator(it); err != nil {
+				p.log.Error("error running TCP iterator", "error", err)
+			}
+		}
 	}
 
 	p.log.Info("Launching p.Tracer")
@@ -553,38 +560,27 @@ func (p *Tracer) watchForMisclassifedEvents(ctx context.Context) {
 	}
 }
 
-func (p *Tracer) runIterator(name string) error {
-	p.log.Debug("Running iterator", "name", name)
+func (p *Tracer) runIterator(it *ebpfcommon.Iter) error {
+	p.log.Debug("Running iterator", "iterator", it.Program.String())
 
-	lnk, ok := p.IterLinks[name]
-	if !ok {
-		return fmt.Errorf("iterator %s not found", name)
+	if it.Link == nil {
+		return errors.New("iterator link is nil")
 	}
 
-	rd, err := lnk.(*link.Iter).Open()
+	rd, err := it.Link.(*link.Iter).Open()
 	if err != nil {
-		return fmt.Errorf("open iterator %s: %w", name, err)
+		return fmt.Errorf("open iterator: %w", err)
 	}
 	defer rd.Close()
 
-	buf := make([]byte, 8192)
-	for {
-		_, err := rd.Read(buf)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("read iterator: %w", err)
-		}
+	scanner := bufio.NewScanner(rd)
+	for scanner.Scan() {
+		p.log.Debug("Iterator output", "line", scanner.Text(), "iterator", it.Program.String())
 	}
-
-	for _, line := range strings.Split(unix.ByteSliceToString(buf), "\n") {
-		if line == "" {
-			continue
-		}
-		p.log.Debug("Iterator output", "line", line, "name", name)
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read iterator: %w", err)
 	}
-	p.log.Debug("Iterator finished", "name", name)
+	p.log.Debug("Iterator finished", "iterator", it.Program.String())
 
 	return nil
 }

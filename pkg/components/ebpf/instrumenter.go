@@ -25,7 +25,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	ebpfcommon "go.opentelemetry.io/obi/pkg/components/ebpf/common"
-	"go.opentelemetry.io/obi/pkg/components/ebpf/generictracer"
 	"go.opentelemetry.io/obi/pkg/components/exec"
 	"go.opentelemetry.io/obi/pkg/components/goexec"
 	"go.opentelemetry.io/obi/pkg/components/imetrics"
@@ -434,8 +433,8 @@ func (i *instrumenter) tracepoint(funcName string, programs ebpfcommon.ProbeDesc
 }
 
 func (i *instrumenter) iters(p Tracer) error {
-	for name, iter := range p.Iters() {
-		slog.Debug("Attaching iterator", "name", name, "program", iter.Program.String())
+	for _, iter := range p.Iters() {
+		slog.Debug("Attaching iterator", "program", iter.Program.String())
 
 		lnk, err := link.AttachIter(link.IterOptions{
 			Program: iter.Program,
@@ -444,11 +443,10 @@ func (i *instrumenter) iters(p Tracer) error {
 			if i.metrics != nil {
 				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingIter)
 			}
-			return fmt.Errorf("attaching iterator %s: %w", name, err)
+			return fmt.Errorf("attaching iterator: %w", err)
 		}
 		iter.Link = lnk
 
-		p.(*generictracer.Tracer).IterLinks[name] = lnk
 		p.AddCloser(iter.Link)
 	}
 

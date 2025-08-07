@@ -187,12 +187,12 @@ static __always_inline int mysql_send_large_buffer(tcp_req_t *req,
         return 0;
     }
 
+    u32 total_size = sizeof(tcp_large_buffer_t);
+    total_size += written > sizeof(void *) ? written : sizeof(void *);
+
     req->has_large_buffers = true;
-    bpf_ringbuf_output(&events,
-                       large_buf,
-                       (sizeof(tcp_large_buffer_t) + sizeof(void *) + written) &
-                           k_mysql_large_buf_max_size_mask,
-                       get_flags());
+    bpf_ringbuf_output(
+        &events, large_buf, total_size & k_mysql_large_buf_max_size_mask, get_flags());
     return 0;
 }
 

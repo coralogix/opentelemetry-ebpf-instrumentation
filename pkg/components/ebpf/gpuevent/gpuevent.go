@@ -185,7 +185,7 @@ func (p *Tracer) SockMsgs() []ebpfcommon.SockMsg { return nil }
 
 func (p *Tracer) SockOps() []ebpfcommon.SockOps { return nil }
 
-func (p *Tracer) Iters() map[string]ebpfcommon.Iter { return nil }
+func (p *Tracer) Iters() []*ebpfcommon.Iter { return nil }
 
 func (p *Tracer) RecordInstrumentedLib(id uint64, closers []io.Closer) {
 	p.libsMux.Lock()
