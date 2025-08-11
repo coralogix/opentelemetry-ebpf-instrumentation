@@ -20,7 +20,7 @@ WORKDIR /build
 COPY .mvn .mvn/
 COPY mvnw mvnw
 COPY src src/
-COPY pom.xml pom.xml
+COPY pom400.xml pom.xml
 
 RUN java -version
 RUN ./mvnw -version
