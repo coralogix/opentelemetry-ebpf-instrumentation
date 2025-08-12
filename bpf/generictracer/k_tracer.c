@@ -117,12 +117,9 @@ int BPF_KRETPROBE(obi_kretprobe_sys_accept4, s32 fd) {
     (void)ctx;
 
     u64 id = bpf_get_current_pid_tgid();
-
     if (!valid_pid(id)) {
         return 0;
     }
-
-    //bpf_dbg_printk("=== accept 4 ret id=%d ===", id);
 
     bpf_dbg_printk("=== accept 4 ret id=%d, fd=%d ===", id, fd);
 
@@ -137,6 +134,11 @@ int BPF_KRETPROBE(obi_kretprobe_sys_accept4, s32 fd) {
         bpf_dbg_printk("No accept sock info %d", id);
         goto cleanup;
     }
+
+    struct socket *sock = (struct socket *)args->addr;
+    struct sock *sk = BPF_CORE_READ(sock, sk);
+    struct sock_port_ns np = sock_port_ns_from_sk(sk);
+    bpf_map_update_elem(&listening_ports, &np, &(bool){true}, BPF_ANY);
 
     ssl_pid_connection_info_t info = {};
 
@@ -1050,20 +1052,6 @@ int obi_handle_buf_with_args(void *ctx) {
         }
     }
 
-    return 0;
-}
-
-SEC("kprobe/inet_csk_accept")
-int BPF_KPROBE(obi_kprobe_inet_csk_accept, struct sock *sk) {
-    (void)ctx;
-
-    u64 id = bpf_get_current_pid_tgid();
-    (void)id;
-
-    bpf_dbg_printk("=== inet_csk_accept id=%d ===", id);
-
-    struct sock_port_ns np = sock_port_ns_from_sk(sk);
-    bpf_map_update_elem(&listening_ports, &np, &(bool){true}, BPF_ANY);
     return 0;
 }
 

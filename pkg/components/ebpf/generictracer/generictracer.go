@@ -304,10 +304,6 @@ func (p *Tracer) KProbes() map[string]ebpfcommon.ProbeDesc {
 			Start:    p.bpfObjects.ObiKprobeUnixStreamSendmsg,
 			End:      p.bpfObjects.ObiKretprobeUnixStreamSendmsg,
 		},
-		"inet_csk_accept": {
-			Required: true,
-			Start:    p.bpfObjects.ObiKprobeInetCskAccept,
-		},
 		"inet_csk_listen_stop": {
 			Required: true,
 			Start:    p.bpfObjects.ObiKprobeInetCskListenStop,
