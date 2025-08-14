@@ -260,12 +260,13 @@ func spanAttributes(s *Span) SpanAttributes {
 			"statement":  s.Statement,
 			"query":      s.Path,
 		}
-	case EventTypeKafkaServer:
+	case EventTypeKafkaServer, EventTypeKafkaClient:
 		return SpanAttributes{
 			"serverAddr": SpanHost(s),
 			"serverPort": strconv.Itoa(s.HostPort),
 			"operation":  s.Method,
-			"clientId":   s.OtherNamespace,
+			"clientId":   s.Statement,
+			"topic":      s.Path,
 		}
 	case EventTypeGPUKernelLaunch:
 		return SpanAttributes{
