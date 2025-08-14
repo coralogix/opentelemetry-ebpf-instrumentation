@@ -1,3 +1,6 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -145,7 +148,7 @@ typedef struct tcp_req {
 
 typedef struct tcp_large_buffer {
     u8 type; // Must be first
-    u8 direction;
+    u8 packet_type;
     enum large_buf_action action;
     u8 _pad;
     u32 len;
