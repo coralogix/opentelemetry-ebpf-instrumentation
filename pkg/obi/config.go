@@ -168,7 +168,7 @@ var DefaultConfig = Config{
 		},
 		MinProcessAge: 5 * time.Second,
 	},
-	NodeJs: NodeJSConfig{
+	NodeJS: NodeJSConfig{
 		Enabled: true,
 	},
 }
@@ -237,7 +237,7 @@ type Config struct {
 	// LogConfig enables the logging of the configuration on startup.
 	LogConfig bool `yaml:"log_config" env:"OTEL_EBPF_LOG_CONFIG"`
 
-	NodeJs NodeJSConfig `yaml:"nodejs"`
+	NodeJS NodeJSConfig `yaml:"nodejs"`
 }
 
 // Attributes configures the decoration of some extra attributes that will be
