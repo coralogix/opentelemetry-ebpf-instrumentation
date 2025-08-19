@@ -5,7 +5,6 @@ package obi
 
 import (
 	"fmt"
-	"go.opentelemetry.io/obi/pkg/components/nodejs"
 	"io"
 	"log/slog"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"go.opentelemetry.io/obi/pkg/components/ebpf/tcmanager"
 	"go.opentelemetry.io/obi/pkg/components/imetrics"
 	"go.opentelemetry.io/obi/pkg/components/kube"
+	"go.opentelemetry.io/obi/pkg/components/nodejs"
 	"go.opentelemetry.io/obi/pkg/components/traces"
 	"go.opentelemetry.io/obi/pkg/config"
 	"go.opentelemetry.io/obi/pkg/export/attributes"
