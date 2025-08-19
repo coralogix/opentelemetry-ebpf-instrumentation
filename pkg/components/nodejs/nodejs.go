@@ -6,17 +6,13 @@ package nodejs
 import (
 	_ "embed"
 	"errors"
-	"go.opentelemetry.io/obi/pkg/obi"
 	"log/slog"
 	"syscall"
 
 	"go.opentelemetry.io/obi/pkg/components/ebpf"
 	"go.opentelemetry.io/obi/pkg/components/svc"
+	"go.opentelemetry.io/obi/pkg/obi"
 )
-
-type NodeInjectorConfig struct {
-	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_NODEJS_ENABLED"`
-}
 
 type NodeInjector struct {
 	log *slog.Logger
@@ -31,7 +27,7 @@ func NewNodeInjector(cfg *obi.Config) *NodeInjector {
 }
 
 func (i *NodeInjector) Enabled() bool {
-	return i.cfg.NodeInjector.Enabled
+	return i.cfg.Node.Enabled
 }
 
 func (i *NodeInjector) NewExecutable(ie *ebpf.Instrumentable) {
