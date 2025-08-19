@@ -11,15 +11,19 @@ import (
 
 	"go.opentelemetry.io/obi/pkg/components/ebpf"
 	"go.opentelemetry.io/obi/pkg/components/svc"
-	"go.opentelemetry.io/obi/pkg/obi"
 )
+
+type NodeInjectorConfig struct {
+	// LogConfig enables the logging of the configuration on startup.
+	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_NODE_INJECTOR_ENABLED"`
+}
 
 type NodeInjector struct {
 	log *slog.Logger
-	cfg *obi.Config
+	cfg *NodeInjectorConfig
 }
 
-func NewNodeInjector(cfg *obi.Config) *NodeInjector {
+func NewNodeInjector(cfg *NodeInjectorConfig) *NodeInjector {
 	return &NodeInjector{
 		cfg: cfg,
 		log: slog.With("component", "nodejs.Injector"),
@@ -27,7 +31,7 @@ func NewNodeInjector(cfg *obi.Config) *NodeInjector {
 }
 
 func (i *NodeInjector) Enabled() bool {
-	return i.cfg.Traces.Enabled() || i.cfg.TracePrinter.Enabled()
+	return i.cfg.Enabled
 }
 
 func (i *NodeInjector) NewExecutable(ie *ebpf.Instrumentable) {
