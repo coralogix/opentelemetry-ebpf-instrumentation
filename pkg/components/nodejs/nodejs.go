@@ -15,7 +15,7 @@ import (
 )
 
 type NodeInjectorConfig struct {
-	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_NODE_INJECTOR_ENABLED"`
+	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_NODEJS_ENABLED"`
 }
 
 type NodeInjector struct {

@@ -238,7 +238,7 @@ type Config struct {
 	// LogConfig enables the logging of the configuration on startup.
 	LogConfig bool `yaml:"log_config" env:"OTEL_EBPF_LOG_CONFIG"`
 
-	NodeInjector nodejs.NodeInjectorConfig `yaml:"node_injector"`
+	NodeInjector nodejs.NodeInjectorConfig `yaml:"nodejs"`
 }
 
 // Attributes configures the decoration of some extra attributes that will be
