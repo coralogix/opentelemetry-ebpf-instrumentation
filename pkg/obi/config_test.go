@@ -243,7 +243,7 @@ discovery:
 				},
 			},
 		},
-		NodeJs: NodeJsConfig{
+		NodeJs: NodeJSConfig{
 			Enabled: true,
 		},
 	}, cfg)
