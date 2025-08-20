@@ -104,9 +104,9 @@ func logConfig(config *obi.Config) {
 		return
 	}
 	switch config.LogConfig {
-	case obi.LogConfigOptionYaml:
+	case obi.LogConfigOptionYAML:
 		configString = string(configYaml)
-	case obi.LogConfigOptionJson:
+	case obi.LogConfigOptionJSON:
 		var configMap map[string]any
 		err = yaml.Unmarshal(configYaml, &configMap)
 		if err != nil {

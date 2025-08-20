@@ -243,8 +243,8 @@ type Config struct {
 type LogConfigOption string
 
 const (
-	LogConfigOptionYaml = LogConfigOption("yaml")
-	LogConfigOptionJson = LogConfigOption("json")
+	LogConfigOptionYAML = LogConfigOption("yaml")
+	LogConfigOptionJSON = LogConfigOption("json")
 )
 
 // Attributes configures the decoration of some extra attributes that will be
