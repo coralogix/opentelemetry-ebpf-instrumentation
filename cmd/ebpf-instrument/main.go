@@ -94,30 +94,28 @@ func main() {
 }
 
 func logConfig(config *obi.Config) {
+	if config.LogConfig == "" {
+		return
+	}
 	var configString string
+	configYaml, err := yaml.Marshal(config)
+	if err != nil {
+		slog.Warn("can't marshal configuration to YAML", "error", err)
+		return
+	}
 	switch config.LogConfig {
 	case obi.LogConfigOptionYaml:
-		configYaml, err := yaml.Marshal(config)
-		if err != nil {
-			slog.Warn("can't marshal configuration to YAML", "error", err)
-			break
-		}
 		configString = string(configYaml)
 	case obi.LogConfigOptionJson:
-		rawConfigYaml, err := yaml.Marshal(config)
+		var configMap map[string]any
+		err = yaml.Unmarshal(configYaml, &configMap)
+		if err != nil {
+			slog.Warn("can't unmarshal yaml configuration to map", "error", err)
+			break
+		}
+		configJson, err := json.Marshal(configMap)
 		if err != nil {
 			slog.Warn("can't marshal configuration to JSON", "error", err)
-			break
-		}
-		var m map[string]any
-		err = yaml.Unmarshal(rawConfigYaml, &m)
-		if err != nil {
-			slog.Warn("can't unmarshal configuration to JSON", "error", err)
-			break
-		}
-		configJson, err := json.Marshal(m)
-		if err != nil {
-			slog.Warn("can't unmarshal configuration to JSON", "error", err)
 			break
 		}
 		configString = string(configJson)
