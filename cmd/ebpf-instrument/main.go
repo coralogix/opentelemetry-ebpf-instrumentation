@@ -113,12 +113,12 @@ func logConfig(config *obi.Config) {
 			slog.Warn("can't unmarshal yaml configuration to map", "error", err)
 			break
 		}
-		configJson, err := json.Marshal(configMap)
+		configJSON, err := json.Marshal(configMap)
 		if err != nil {
 			slog.Warn("can't marshal configuration to JSON", "error", err)
 			break
 		}
-		configString = string(configJson)
+		configString = string(configJSON)
 	}
 	if configString != "" {
 		slog.Info("Running OpenTelemetry eBPF Instrumentation with configuration")
