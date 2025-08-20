@@ -107,6 +107,7 @@ func logConfig(config *obi.Config) {
 	case obi.LogConfigOptionYAML:
 		configString = string(configYaml)
 	case obi.LogConfigOptionJSON:
+		// instead of annotating the config with json tags, we unmarshal the YAML to a map[string]any, and marshal that map to
 		var configMap map[string]any
 		err = yaml.Unmarshal(configYaml, &configMap)
 		if err != nil {
