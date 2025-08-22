@@ -25,8 +25,8 @@ services:
 
   testserver:
     build:
-      context: ../../test/integration/components/javakafka/
-      dockerfile: Dockerfile_400
+      context: ../..
+      dockerfile: ./test/integration/components/javakafka/Dockerfile_400
     image: hatest-testserver-java-kafka
     ports:
       - "${TEST_SERVICE_PORTS}"
