@@ -1,0 +1,27 @@
+log_config: true
+#executable_path: '*'
+open_port: '9092,8080,6379'
+ebpf:
+  track_request_headers: true
+  context_propagation: all
+  bpf_debug: true
+  protocol_debug: true
+  wakeup_len: 1
+  redis_db_cache:
+    enabled: true
+  buffer_sizes:
+    mysql: 1024
+
+trace_printer: "json_indent"
+internal_metrics:
+  exporter: "otel"
+
+otel_traces_export:
+  endpoint: https://localhost:4317
+
+otel_metrics_export:
+  endpoint: https://localhost:4317
+
+#prometheus_export:
+#  port: 8999
+#  path: /metrics 
