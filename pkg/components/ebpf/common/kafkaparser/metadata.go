@@ -6,7 +6,7 @@ package kafkaparser
 import "errors"
 
 const partitionLen = // 26
-Int16Len + // error_code
+Int16Len +           // error_code
 	Int32Len + // partition_index
 	Int32Len + // leader_id
 	Int32Len + // leader_epoch

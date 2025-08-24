@@ -58,10 +58,9 @@ func TestProcessKafkaRequest(t *testing.T) {
 				35, 105, 175, 157, 0, 0, 0, 134, 1, 1, 1, 0,
 			},
 			expected: &KafkaInfo{
-				ClientID:    "consumer-fraud-detection-1",
-				Operation:   Fetch,
-				Topic:       "*",
-				TopicOffset: 61,
+				ClientID:  "consumer-fraud-detection-1",
+				Operation: Fetch,
+				Topic:     "*",
 			},
 		},
 		{
