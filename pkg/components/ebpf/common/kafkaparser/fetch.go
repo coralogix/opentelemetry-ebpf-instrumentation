@@ -9,7 +9,7 @@ type FetchPartition struct {
 type FetchTopic struct {
 	Name      string
 	UUID      *UUID
-	partition *FetchPartition
+	Partition *FetchPartition
 }
 
 type FetchRequest struct {
@@ -155,11 +155,11 @@ func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*Fe
 	}
 	partitionCount, offset, err := readArrayLength(pkt, header, offset)
 	if err != nil {
-		// if we fail to read partition count, we can still return the topic
+		// if we fail to read Partition count, we can still return the topic
 		return &topic, offset, nil
 	}
 	if partitionCount != 1 {
-		// no need to capture multiple partitions for fetch request, if its 1 partition we can add it to the span
+		// no need to capture multiple partitions for fetch request, if its 1 Partition we can add it to the span
 		offset, err = skipFetchPartitions(pkt, header, offset, partitionCount)
 		if err != nil {
 			// if we fail to skip partitions, we can still return the topic
@@ -169,18 +169,18 @@ func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*Fe
 		var partition *FetchPartition
 		partition, offset, err = parseFetchPartition(pkt, header, offset)
 		if err != nil {
-			// if we fail to parse partition, we can still return the topic
+			// if we fail to parse Partition, we can still return the topic
 			return &topic, offset, nil
 		}
-		topic.partition = partition
+		topic.Partition = partition
 	}
 	return &topic, offset, nil
 }
 
 func parseFetchPartition(pkt []byte, header *KafkaRequestHeader, offset Offset) (*FetchPartition, Offset, error) {
 	/*
-	   partitions => partition fetch_offset log_start_offset partition_max_bytes
-	     partition => INT32
+	   partitions => Partition fetch_offset log_start_offset partition_max_bytes
+	     Partition => INT32
 	     fetch_offset => INT64
 	*/
 	partition, offset, err := readInt32(pkt, offset)
@@ -189,9 +189,9 @@ func parseFetchPartition(pkt []byte, header *KafkaRequestHeader, offset Offset) 
 	}
 	if header.APIVersion >= 9 {
 		/*
-				fetch request version 9 and above include current_leader_epoch between partition and fetch_offset.
-			    partitions => partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes _tagged_fields
-			      partition => INT32
+				fetch request version 9 and above include current_leader_epoch between Partition and fetch_offset.
+			    partitions => Partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes _tagged_fields
+			      Partition => INT32
 			      current_leader_epoch => INT32
 			      fetch_offset => INT64
 		*/
@@ -215,15 +215,15 @@ func skipFetchPartitions(pkt []byte, header *KafkaRequestHeader, offset Offset, 
 	switch {
 	case header.APIVersion >= 12:
 		/*
-		   partitions => partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes _tagged_fields
-		     partition => INT32
+		   partitions => Partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes _tagged_fields
+		     Partition => INT32
 		     current_leader_epoch => INT32
 		     fetch_offset => INT64
 		     last_fetched_epoch => INT32
 		     log_start_offset => INT64
 		     partition_max_bytes => INT32
 		*/
-		fetchPartitionLen = Int32Len + // partition
+		fetchPartitionLen = Int32Len + // Partition
 			Int32Len + // current_leader_epoch
 			Int64Len + // fetch_offset
 			Int32Len + // last_fetched_epoch
@@ -231,38 +231,38 @@ func skipFetchPartitions(pkt []byte, header *KafkaRequestHeader, offset Offset, 
 			Int32Len // partition_max_bytes
 	case header.APIVersion >= 9:
 		/*
-		   partitions => partition current_leader_epoch fetch_offset log_start_offset partition_max_bytes
-		     partition => INT32
+		   partitions => Partition current_leader_epoch fetch_offset log_start_offset partition_max_bytes
+		     Partition => INT32
 		     current_leader_epoch => INT32
 		     fetch_offset => INT64
 		     log_start_offset => INT64
 		     partition_max_bytes => INT32
 		*/
-		fetchPartitionLen = Int32Len + // partition
+		fetchPartitionLen = Int32Len + // Partition
 			Int32Len + // current_leader_epoch
 			Int64Len + // fetch_offset
 			Int64Len + // log_start_offset
 			Int32Len // partition_max_bytes
 	case header.APIVersion >= 5:
 		/*
-		   partitions => partition fetch_offset log_start_offset partition_max_bytes
-		     partition => INT32
+		   partitions => Partition fetch_offset log_start_offset partition_max_bytes
+		     Partition => INT32
 		     fetch_offset => INT64
 		     log_start_offset => INT64
 		     partition_max_bytes => INT32
 		*/
-		fetchPartitionLen = Int32Len + // partition
+		fetchPartitionLen = Int32Len + // Partition
 			Int64Len + // fetch_offset
 			Int64Len + // log_start_offset
 			Int32Len // partition_max_bytes
 	default:
 		/*
-		   partitions => partition fetch_offset partition_max_bytes
-		     partition => INT32
+		   partitions => Partition fetch_offset partition_max_bytes
+		     Partition => INT32
 		     fetch_offset => INT64
 		     partition_max_bytes => INT32
 		*/
-		fetchPartitionLen = Int32Len + // partition
+		fetchPartitionLen = Int32Len + // Partition
 			Int64Len + // fetch_offset
 			Int32Len // partition_max_bytes
 	}

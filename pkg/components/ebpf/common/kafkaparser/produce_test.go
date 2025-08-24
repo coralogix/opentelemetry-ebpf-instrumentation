@@ -205,10 +205,10 @@ func TestParseProduceRequest(t *testing.T) {
 				copy(pkt[offset:], "topic1")
 				offset += 6
 				// Partition array (flexible)
-				pkt[offset] = 0x02 // varint for 1 partition (1+1)
+				pkt[offset] = 0x02 // varint for 1 Partition (1+1)
 				offset++
 				// Partition
-				binary.BigEndian.PutUint32(pkt[offset:], 5) // partition
+				binary.BigEndian.PutUint32(pkt[offset:], 5) // Partition
 				offset += 4
 				return pkt[:offset]
 			}(),
@@ -296,7 +296,7 @@ func TestParseProduceRequest(t *testing.T) {
 					assert.Equal(t, tt.expectedTopicName, firstTopic.Name)
 				}
 				if tt.expectedTopicPartition != 0 {
-					assert.Equal(t, tt.expectedTopicPartition, firstTopic.partition)
+					assert.Equal(t, tt.expectedTopicPartition, firstTopic.Partition)
 				}
 			}
 		})

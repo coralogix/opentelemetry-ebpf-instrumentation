@@ -31,10 +31,11 @@ type Header struct {
 }
 
 type KafkaInfo struct {
-	Operation   Operation
-	Topic       string
-	ClientID    string
-	TopicOffset int
+	Operation Operation
+	Topic     string
+	ClientID  string
+	Partition *int
+	Offset    *int64
 }
 
 func (k Operation) String() string {
@@ -89,7 +90,8 @@ func processProduceRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offs
 		ClientID:  hdr.ClientID,
 		Operation: Produce,
 		// TODO: handle multiple topics
-		Topic: produceReq.Topics[0].Name,
+		Topic:     produceReq.Topics[0].Name,
+		Partition: produceReq.Topics[0].Partition,
 	}, false, nil
 }
 
@@ -107,6 +109,16 @@ func processFetchRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offset
 		if !found {
 			topicName = "*"
 		}
+	}
+	kafkaInfo := KafkaInfo{
+		ClientID:  hdr.ClientID,
+		Operation: Fetch,
+		// TODO: handle multiple topics
+		Topic: topicName,
+	}
+	if firstTopic.Partition != nil {
+		kafkaInfo.Partition = &firstTopic.Partition.Partition
+		kafkaInfo.Offset = &firstTopic.Partition.FetchOffset
 	}
 	return &KafkaInfo{
 		ClientID:  hdr.ClientID,
@@ -162,6 +174,16 @@ func TCPToKafkaToSpan(trace *TCPRequestInfo, data *KafkaInfo) request.Span {
 		reqType = request.EventTypeKafkaServer
 	}
 
+	var messagingInfo *request.MessagingInfo
+
+	if data.Partition != nil {
+		messagingInfo = &request.MessagingInfo{}
+		messagingInfo.Partition = *data.Partition
+		if data.Offset != nil {
+			messagingInfo.Offset = *data.Offset
+		}
+	}
+
 	return request.Span{
 		Type:          reqType,
 		Method:        data.Operation.String(),
@@ -185,5 +207,6 @@ func TCPToKafkaToSpan(trace *TCPRequestInfo, data *KafkaInfo) request.Span {
 			UserPID:   trace.Pid.UserPid,
 			Namespace: trace.Pid.Ns,
 		},
+		MessagingInfo: messagingInfo,
 	}
 }

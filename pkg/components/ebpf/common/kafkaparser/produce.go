@@ -4,7 +4,7 @@ import "errors"
 
 type ProduceTopic struct {
 	Name      string
-	partition int
+	Partition *int
 }
 
 type ProduceRequest struct {
@@ -90,14 +90,15 @@ func parseProduceTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*
 		// return the topic even if partitions can't be read
 		return &topic, offset, nil
 	}
-	if partitionsLen <= 0 {
+	if partitionsLen != 1 {
+		// if more then 1 Partition, we just won't report Partition
 		return &topic, offset, nil
 	}
-	// read single partition for now, because skipping records is complicated
+	// read single Partition for now, because skipping records is complicated
 	firstPartition, offset, err := readInt32(pkt, offset)
 	if err != nil {
 		return &topic, offset, nil
 	}
-	topic.partition = firstPartition
+	topic.Partition = &firstPartition
 	return &topic, offset, nil
 }

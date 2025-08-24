@@ -42,7 +42,6 @@ func TestProcessKafkaRequest(t *testing.T) {
 		//		ClientID:    "consumer-frauddetectionservice-1",
 		//		Operation:   Fetch,
 		//		Topic:       "*",
-		//		TopicOffset: 67,
 		//	},
 		// },
 		{
