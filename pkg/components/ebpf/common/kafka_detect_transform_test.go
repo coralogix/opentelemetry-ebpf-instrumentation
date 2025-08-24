@@ -23,6 +23,10 @@ func TestProcessKafkaRequest(t *testing.T) {
 				ClientID:  "sarama",
 				Operation: Fetch,
 				Topic:     "important",
+				PartitionInfo: &PartitionInfo{
+					Partition: 0,
+					Offset:    19,
+				},
 			},
 		},
 		// TODO these tests don't seem like valid kafka packets, check that
@@ -51,6 +55,9 @@ func TestProcessKafkaRequest(t *testing.T) {
 				ClientID:  "sarama",
 				Operation: Produce,
 				Topic:     "important",
+				PartitionInfo: &PartitionInfo{
+					Partition: 0,
+				},
 			},
 		},
 		{
@@ -60,6 +67,9 @@ func TestProcessKafkaRequest(t *testing.T) {
 				ClientID:  "producer-1",
 				Operation: Produce,
 				Topic:     "my-topic",
+				PartitionInfo: &PartitionInfo{
+					Partition: 0,
+				},
 			},
 		},
 		{

@@ -296,7 +296,7 @@ func TestParseProduceRequest(t *testing.T) {
 					assert.Equal(t, tt.expectedTopicName, firstTopic.Name)
 				}
 				if tt.expectedTopicPartition != 0 {
-					assert.Equal(t, tt.expectedTopicPartition, firstTopic.Partition)
+					assert.Equal(t, tt.expectedTopicPartition, *firstTopic.Partition)
 				}
 			}
 		})

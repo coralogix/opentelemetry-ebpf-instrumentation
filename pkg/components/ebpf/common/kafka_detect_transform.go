@@ -22,20 +22,16 @@ const (
 	Fetch   Operation = 1
 )
 
-type Header struct {
-	MessageSize   int32
-	APIKey        int16
-	APIVersion    int16
-	CorrelationID int32
-	ClientIDSize  int16
+type PartitionInfo struct {
+	Partition int
+	Offset    int64
 }
 
 type KafkaInfo struct {
-	Operation Operation
-	Topic     string
-	ClientID  string
-	Partition *int
-	Offset    *int64
+	Operation     Operation
+	Topic         string
+	ClientID      string
+	PartitionInfo *PartitionInfo
 }
 
 func (k Operation) String() string {
@@ -86,12 +82,18 @@ func processProduceRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offs
 	if err != nil {
 		return nil, true, err
 	}
+	var partitionInfo *PartitionInfo
+	if produceReq.Topics[0].Partition != nil {
+		partitionInfo = &PartitionInfo{
+			Partition: *produceReq.Topics[0].Partition,
+		}
+	}
 	return &KafkaInfo{
 		ClientID:  hdr.ClientID,
 		Operation: Produce,
 		// TODO: handle multiple topics
-		Topic:     produceReq.Topics[0].Name,
-		Partition: produceReq.Topics[0].Partition,
+		Topic:         produceReq.Topics[0].Name,
+		PartitionInfo: partitionInfo,
 	}, false, nil
 }
 
@@ -110,21 +112,19 @@ func processFetchRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offset
 			topicName = "*"
 		}
 	}
-	kafkaInfo := KafkaInfo{
-		ClientID:  hdr.ClientID,
-		Operation: Fetch,
-		// TODO: handle multiple topics
-		Topic: topicName,
-	}
+	var partitionInfo *PartitionInfo
 	if firstTopic.Partition != nil {
-		kafkaInfo.Partition = &firstTopic.Partition.Partition
-		kafkaInfo.Offset = &firstTopic.Partition.FetchOffset
+		partitionInfo = &PartitionInfo{
+			Partition: firstTopic.Partition.Partition,
+			Offset:    firstTopic.Partition.FetchOffset,
+		}
 	}
 	return &KafkaInfo{
 		ClientID:  hdr.ClientID,
 		Operation: Fetch,
 		// TODO: handle multiple topics
-		Topic: topicName,
+		Topic:         topicName,
+		PartitionInfo: partitionInfo,
 	}, false, nil
 }
 
@@ -176,11 +176,10 @@ func TCPToKafkaToSpan(trace *TCPRequestInfo, data *KafkaInfo) request.Span {
 
 	var messagingInfo *request.MessagingInfo
 
-	if data.Partition != nil {
-		messagingInfo = &request.MessagingInfo{}
-		messagingInfo.Partition = *data.Partition
-		if data.Offset != nil {
-			messagingInfo.Offset = *data.Offset
+	if data.PartitionInfo != nil {
+		messagingInfo = &request.MessagingInfo{
+			Partition: data.PartitionInfo.Partition,
+			Offset:    data.PartitionInfo.Offset,
 		}
 	}
 
