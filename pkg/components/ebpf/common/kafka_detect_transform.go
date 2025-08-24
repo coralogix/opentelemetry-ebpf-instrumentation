@@ -144,7 +144,7 @@ func processMetadataResponse(rpkt []byte, hdr *kafkaparser.KafkaRequestHeader, k
 	return nil, true, nil
 }
 
-func ProcessKafkaRequest(pkt []byte) (*KafkaInfo, bool, error) {
+func ProcessKafkaRequest(pkt []byte, kafkaTopicUUIDToName *simplelru.LRU[kafkaparser.UUID, string]) (*KafkaInfo, bool, error) {
 	hdr, offset, err := kafkaparser.ParseKafkaRequestHeader(pkt)
 	if err != nil {
 		return nil, true, err
@@ -153,7 +153,7 @@ func ProcessKafkaRequest(pkt []byte) (*KafkaInfo, bool, error) {
 	case kafkaparser.APIKeyProduce:
 		return processProduceRequest(pkt, hdr, offset)
 	case kafkaparser.APIKeyFetch:
-		return processFetchRequest(pkt, hdr, offset, nil)
+		return processFetchRequest(pkt, hdr, offset, kafkaTopicUUIDToName)
 	default:
 		return nil, true, errors.New("unsupported Kafka API key")
 	}
