@@ -144,11 +144,11 @@ func testJavaKafka(t *testing.T) {
 					},
 				},
 				{
-					Name: "process *",
+					Name: "my-topic",
 					Attributes: []attribute.KeyValue{
 						attribute.String("span.kind", "consumer"),
 						attribute.String("messaging.operation.type", "process"),
-						attribute.String("messaging.destination.name", "*"),
+						attribute.String("messaging.destination.name", "my-topic"),
 						attribute.String("messaging.client_id", "consumer-1-1"),
 					},
 				},
