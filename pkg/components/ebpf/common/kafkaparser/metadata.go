@@ -1,9 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package kafkaparser
 
 import "errors"
 
 const partitionLen = // 26
-Int16Len +           // error_code
+Int16Len + // error_code
 	Int32Len + // partition_index
 	Int32Len + // leader_id
 	Int32Len + // leader_epoch
