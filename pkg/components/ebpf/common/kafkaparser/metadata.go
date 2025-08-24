@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import "errors"
 
@@ -48,11 +48,11 @@ func metadataResponseSkipUntilTopics(pkt []byte, header *KafkaRequestHeader, off
 		return 0, err
 	}
 
-	clusterIdLen, offset, err := readStringLength(pkt, header, offset, true)
+	clusterIDLen, offset, err := readStringLength(pkt, header, offset, true)
 	if err != nil {
 		return 0, err
 	}
-	offset, err = skipBytes(pkt, offset, clusterIdLen+Int32Len) // cluster_id + controller_id
+	offset, err = skipBytes(pkt, offset, clusterIDLen+Int32Len) // cluster_id + controller_id
 	if err != nil {
 		return 0, err
 	}
@@ -139,7 +139,7 @@ func parseMetadataTopic(pkt []byte, header *KafkaRequestHeader, offset int, isLa
 		return nil, offset, err
 	}
 	topic.Name = topicName
-	topicUUID, offset, err := readUUID(pkt, header, offset)
+	topicUUID, offset, err := readUUID(pkt, offset)
 	if err != nil {
 		return nil, offset, err
 	}
@@ -160,5 +160,4 @@ func parseMetadataTopic(pkt []byte, header *KafkaRequestHeader, offset int, isLa
 		return &topic, offset, nil
 	}
 	return &topic, offset, nil
-
 }

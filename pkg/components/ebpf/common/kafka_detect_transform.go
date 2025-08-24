@@ -5,14 +5,14 @@ package ebpfcommon
 
 import (
 	"errors"
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-	"go.opentelemetry.io/obi/pkg/components/ebpf/common/kafka_parser"
-	"regexp"
 	"unsafe"
+
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	trace2 "go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/obi/pkg/app/request"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/common/kafkaparser"
 )
 
 type Operation int8
@@ -48,16 +48,9 @@ func (k Operation) String() string {
 	}
 }
 
-const (
-	KafkaMinLength  = 14
-	KafkaMaxPayload = 20 * 1024 * 1024 // 20 MB max, 1MB is default for most Kafka installations
-)
-
-var topicRegex = regexp.MustCompile("\x02\t(.*)\x02")
-
 // ProcessPossibleKafkaEvent processes a TCP packet and returns error if the packet is not a valid Kafka request.
 // Otherwise, return kafka.Info with the processed data.
-func ProcessPossibleKafkaEvent(event *TCPRequestInfo, pkt []byte, rpkt []byte, kafkaTopicUUIDToName *simplelru.LRU[kafka_parser.UUID, string]) (*KafkaInfo, bool, error) {
+func ProcessPossibleKafkaEvent(event *TCPRequestInfo, pkt []byte, rpkt []byte, kafkaTopicUUIDToName *simplelru.LRU[kafkaparser.UUID, string]) (*KafkaInfo, bool, error) {
 	k, ok, err := ProcessKafkaEvent(pkt, rpkt, kafkaTopicUUIDToName)
 	if err != nil {
 		// If we are getting the information in the response buffer, the event
@@ -70,25 +63,25 @@ func ProcessPossibleKafkaEvent(event *TCPRequestInfo, pkt []byte, rpkt []byte, k
 	return k, ok, err
 }
 
-func ProcessKafkaEvent(pkt []byte, rpkt []byte, kafkaTopicUUIDToName *simplelru.LRU[kafka_parser.UUID, string]) (*KafkaInfo, bool, error) {
-	hdr, offset, err := kafka_parser.ParseKafkaRequestHeader(pkt)
+func ProcessKafkaEvent(pkt []byte, rpkt []byte, kafkaTopicUUIDToName *simplelru.LRU[kafkaparser.UUID, string]) (*KafkaInfo, bool, error) {
+	hdr, offset, err := kafkaparser.ParseKafkaRequestHeader(pkt)
 	if err != nil {
 		return nil, true, err
 	}
 	switch hdr.APIKey {
-	case kafka_parser.ApiKeyProduce:
+	case kafkaparser.APIKeyProduce:
 		return processProduceRequest(pkt, hdr, offset)
-	case kafka_parser.ApiKeyFetch:
+	case kafkaparser.APIKeyFetch:
 		return processFetchRequest(pkt, hdr, offset, kafkaTopicUUIDToName)
-	case kafka_parser.ApiKeyMetadata:
+	case kafkaparser.APIKeyMetadata:
 		return processMetadataResponse(rpkt, hdr, kafkaTopicUUIDToName)
 	default:
 		return nil, true, errors.New("unsupported Kafka API key")
 	}
 }
 
-func processProduceRequest(pkt []byte, hdr *kafka_parser.KafkaRequestHeader, offset kafka_parser.Offset) (*KafkaInfo, bool, error) {
-	produceReq, err := kafka_parser.ParseProduceRequest(pkt, hdr, offset)
+func processProduceRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offset kafkaparser.Offset) (*KafkaInfo, bool, error) {
+	produceReq, err := kafkaparser.ParseProduceRequest(pkt, hdr, offset)
 	if err != nil {
 		return nil, true, err
 	}
@@ -100,13 +93,13 @@ func processProduceRequest(pkt []byte, hdr *kafka_parser.KafkaRequestHeader, off
 	}, false, nil
 }
 
-func processFetchRequest(pkt []byte, hdr *kafka_parser.KafkaRequestHeader, offset kafka_parser.Offset, kafkaTopicUUIDToName *simplelru.LRU[kafka_parser.UUID, string]) (*KafkaInfo, bool, error) {
-	fetchReq, err := kafka_parser.ParseFetchRequest(pkt, hdr, offset)
+func processFetchRequest(pkt []byte, hdr *kafkaparser.KafkaRequestHeader, offset kafkaparser.Offset, kafkaTopicUUIDToName *simplelru.LRU[kafkaparser.UUID, string]) (*KafkaInfo, bool, error) {
+	fetchReq, err := kafkaparser.ParseFetchRequest(pkt, hdr, offset)
 	if err != nil {
 		return nil, true, err
 	}
 	firstTopic := fetchReq.Topics[0]
-	var topicName = firstTopic.Name
+	topicName := firstTopic.Name
 	// get topic name from UUID if available
 	if firstTopic.UUID != nil {
 		var found bool
@@ -123,13 +116,13 @@ func processFetchRequest(pkt []byte, hdr *kafka_parser.KafkaRequestHeader, offse
 	}, false, nil
 }
 
-func processMetadataResponse(rpkt []byte, hdr *kafka_parser.KafkaRequestHeader, kafkaTopicUUIDToName *simplelru.LRU[kafka_parser.UUID, string]) (*KafkaInfo, bool, error) {
+func processMetadataResponse(rpkt []byte, hdr *kafkaparser.KafkaRequestHeader, kafkaTopicUUIDToName *simplelru.LRU[kafkaparser.UUID, string]) (*KafkaInfo, bool, error) {
 	// only interested in response
-	_, offset, err := kafka_parser.ParseKafkaResponseHeader(rpkt, hdr)
+	_, offset, err := kafkaparser.ParseKafkaResponseHeader(rpkt, hdr)
 	if err != nil {
 		return nil, true, err
 	}
-	metadataResponse, err := kafka_parser.ParseMetadataResponse(rpkt, hdr, offset)
+	metadataResponse, err := kafkaparser.ParseMetadataResponse(rpkt, hdr, offset)
 	if err != nil {
 		return nil, true, err
 	}
@@ -140,14 +133,14 @@ func processMetadataResponse(rpkt []byte, hdr *kafka_parser.KafkaRequestHeader, 
 }
 
 func ProcessKafkaRequest(pkt []byte) (*KafkaInfo, bool, error) {
-	hdr, offset, err := kafka_parser.ParseKafkaRequestHeader(pkt)
+	hdr, offset, err := kafkaparser.ParseKafkaRequestHeader(pkt)
 	if err != nil {
 		return nil, true, err
 	}
 	switch hdr.APIKey {
-	case kafka_parser.ApiKeyProduce:
+	case kafkaparser.APIKeyProduce:
 		return processProduceRequest(pkt, hdr, offset)
-	case kafka_parser.ApiKeyFetch:
+	case kafkaparser.APIKeyFetch:
 		return processFetchRequest(pkt, hdr, offset, nil)
 	default:
 		return nil, true, errors.New("unsupported Kafka API key")

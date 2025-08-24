@@ -1,9 +1,10 @@
-package kafka_parser
+package kafkaparser
 
 import "errors"
 
 type ProduceTopic struct {
-	Name string
+	Name      string
+	partition int
 }
 
 type ProduceRequest struct {
@@ -35,12 +36,12 @@ func produceRequestSkipUntilTopics(pkt []byte, header *KafkaRequestHeader, offse
 		  timeout_ms => INT32
 		  topic_data => Name [partition_data] _tagged_fields
 	*/
-	transactionIdSize, offset, err := readStringLength(pkt, header, offset, true)
+	transactionIDSize, offset, err := readStringLength(pkt, header, offset, true)
 	if err != nil {
 		return 0, err
 	}
 	offset, err = skipBytes(pkt, offset,
-		transactionIdSize+ // transactional_id
+		transactionIDSize+ // transactional_id
 			Int16Len+ // acks
 			Int32Len, // timeout_ms
 	)
@@ -57,20 +58,23 @@ func parseProduceTopics(pkt []byte, header *KafkaRequestHeader, offset Offset) (
 	}
 	var topics []*ProduceTopic
 	var topic *ProduceTopic
-	for i := 0; i < topicsLen; i++ {
-		topic, offset, err = parseProduceTopic(pkt, header, offset, i == topicsLen-1)
-		if err != nil {
-			// return the Topics parsed so far, even if one topic failed
-			return topics, nil
-		}
-		if topic != nil {
-			topics = append(topics, topic)
-		}
+	// parse each topic
+	if topicsLen <= 0 {
+		return topics, nil
+	}
+	// read single topic for now, because skipping records is complicated
+	topic, _, err = parseProduceTopic(pkt, header, offset)
+	if err != nil {
+		// return the Topics parsed so far, even if one topic failed
+		return topics, nil
+	}
+	if topic != nil {
+		topics = append(topics, topic)
 	}
 	return topics, err
 }
 
-func parseProduceTopic(pkt []byte, header *KafkaRequestHeader, offset Offset, isLast bool) (*ProduceTopic, Offset, error) {
+func parseProduceTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*ProduceTopic, Offset, error) {
 	var topic ProduceTopic
 	/*
 	  Topics => topic [partitions] _tagged_fields
@@ -81,9 +85,19 @@ func parseProduceTopic(pkt []byte, header *KafkaRequestHeader, offset Offset, is
 		return nil, offset, err
 	}
 	topic.Name = topicName
-	if isLast {
+	partitionsLen, offset, err := readArrayLength(pkt, header, offset)
+	if err != nil {
+		// return the topic even if partitions can't be read
 		return &topic, offset, nil
 	}
-	// TODO read / skip partitions if needed to know offset of next topic
+	if partitionsLen <= 0 {
+		return &topic, offset, nil
+	}
+	// read single partition for now, because skipping records is complicated
+	firstPartition, offset, err := readInt32(pkt, offset)
+	if err != nil {
+		return &topic, offset, nil
+	}
+	topic.partition = firstPartition
 	return &topic, offset, nil
 }

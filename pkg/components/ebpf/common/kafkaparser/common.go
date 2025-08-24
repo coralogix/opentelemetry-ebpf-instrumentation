@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import (
 	"encoding/binary"
@@ -10,7 +10,7 @@ const (
 	Int16Len           = 2
 	Int32Len           = 4
 	Int64Len           = 8
-	UuidLen            = 16
+	UUIDLen            = 16
 	MinKafkaRequestLen = // 14
 	Int32Len +         // MessageSize
 		Int16Len + // APIKey
@@ -22,20 +22,22 @@ const (
 	KafkaMaxPayloadLen = 20 * 1024 * 1024 // 20 MB max, 1MB is default for most Kafka installations
 )
 
-type KafkaApiKey int8
+type KafkaAPIKey int8
 
 const (
-	ApiKeyProduce  KafkaApiKey = 0
-	ApiKeyFetch    KafkaApiKey = 1
-	ApiKeyMetadata KafkaApiKey = 3
+	APIKeyProduce  KafkaAPIKey = 0
+	APIKeyFetch    KafkaAPIKey = 1
+	APIKeyMetadata KafkaAPIKey = 3
 )
 
-type UUID = [UuidLen]byte
-type Offset = int
+type (
+	UUID   = [UUIDLen]byte
+	Offset = int
+)
 
 type KafkaRequestHeader struct {
 	MessageSize   int32
-	APIKey        KafkaApiKey
+	APIKey        KafkaAPIKey
 	APIVersion    int16
 	CorrelationID int32
 	ClientID      string
@@ -52,29 +54,29 @@ func ParseKafkaRequestHeader(pkt []byte) (*KafkaRequestHeader, Offset, error) {
 	}
 	header := &KafkaRequestHeader{
 		MessageSize:   int32(binary.BigEndian.Uint32(pkt[0:4])),
-		APIKey:        KafkaApiKey(int16(binary.BigEndian.Uint16(pkt[4:6]))),
+		APIKey:        KafkaAPIKey(int16(binary.BigEndian.Uint16(pkt[4:6]))),
 		APIVersion:    int16(binary.BigEndian.Uint16(pkt[6:8])),
 		CorrelationID: int32(binary.BigEndian.Uint32(pkt[8:12])),
 	}
 
-	clientIdSize := int16(binary.BigEndian.Uint16(pkt[12:14]))
+	clientIDSize := int16(binary.BigEndian.Uint16(pkt[12:14]))
 	err := validateKafkaRequestHeader(header)
 	if err != nil {
 		return nil, 0, err
 	}
-	if clientIdSize < 0 {
+	if clientIDSize < 0 {
 		return nil, 0, errors.New("invalid client ID size")
 	}
 	offset := MinKafkaRequestLen
-	if clientIdSize == 0 {
+	if clientIDSize == 0 {
 		header.ClientID = ""
 		return header, offset, nil
 	}
-	if offset+int(clientIdSize) > len(pkt) {
+	if offset+int(clientIDSize) > len(pkt) {
 		return nil, 0, errors.New("packet too short for client ID")
 	}
-	header.ClientID = string(pkt[offset : offset+int(clientIdSize)])
-	offset += int(clientIdSize)
+	header.ClientID = string(pkt[offset : offset+int(clientIDSize)])
+	offset += int(clientIDSize)
 	offset, err = skipTaggedFields(pkt, header, offset)
 	if err != nil {
 		return nil, 0, err
@@ -140,15 +142,15 @@ func validateKafkaRequestHeader(header *KafkaRequestHeader) error {
 	}
 
 	switch header.APIKey {
-	case ApiKeyFetch:
+	case APIKeyFetch:
 		if header.APIVersion > 17 { // latest: Fetch Request (Version: 17)
 			return errors.New("invalid Kafka request header: unsupported API key version for Fetch")
 		}
-	case ApiKeyProduce:
+	case APIKeyProduce:
 		if header.APIVersion > 12 { // latest: Produce Request (Version: 12)
 			return errors.New("invalid Kafka request header: unsupported API key version for Produce")
 		}
-	case ApiKeyMetadata:
+	case APIKeyMetadata:
 		if header.APIVersion < 10 || header.APIVersion > 13 { // latest: Metadata Request (Version: 13), only versions 10-13 contain topic_id which we are interested in
 			return errors.New("invalid Kafka request header: unsupported API key version for Metadata")
 		}
@@ -184,13 +186,13 @@ func validateKafkaResponseHeader(header *KafkaResponseHeader, requestHeader *Kaf
 func isFlexible(header *KafkaRequestHeader) bool {
 	switch header.APIKey {
 	// https://github.com/apache/kafka/blob/9983331d917fe8f57c37c88f0749b757e5af0c87/clients/src/main/resources/common/message/ProduceRequest.json#L51
-	case ApiKeyProduce:
+	case APIKeyProduce:
 		return header.APIVersion >= 9
 	// https://github.com/apache/kafka/blob/9983331d917fe8f57c37c88f0749b757e5af0c87/clients/src/main/resources/common/message/FetchRequest.json#L62C4-L62C20
-	case ApiKeyFetch:
+	case APIKeyFetch:
 		return header.APIVersion >= 12
 	// https://github.com/apache/kafka/blob/9983331d917fe8f57c37c88f0749b757e5af0c87/clients/src/main/resources/common/message/MetadataRequest.json#L22
-	case ApiKeyMetadata:
+	case APIKeyMetadata:
 		return header.APIVersion >= 9
 	default:
 		return false
@@ -209,12 +211,12 @@ func readArrayLength(pkt []byte, header *KafkaRequestHeader, offset Offset) (int
 	}
 }
 
-func readUUID(pkt []byte, header *KafkaRequestHeader, offset Offset) (*UUID, Offset, error) {
-	if offset+UuidLen > len(pkt) {
+func readUUID(pkt []byte, offset Offset) (*UUID, Offset, error) {
+	if offset+UUIDLen > len(pkt) {
 		return nil, offset, errors.New("packet too short for topic UUID")
 	}
-	uuid := (UUID)(pkt[offset : offset+UuidLen])
-	return &uuid, offset + UuidLen, nil
+	uuid := (UUID)(pkt[offset : offset+UUIDLen])
+	return &uuid, offset + UUIDLen, nil
 }
 
 func readString(pkt []byte, header *KafkaRequestHeader, offset Offset, nullable bool) (string, Offset, error) {
@@ -239,11 +241,8 @@ func readStringLength(pkt []byte, header *KafkaRequestHeader, offset Offset, nul
 			return 0, 0, errors.New("packet too short for string length")
 		}
 		size := int16(binary.BigEndian.Uint16(pkt[offset:]))
-		if nullable && size == 0 {
+		if nullable && size == -1 {
 			return 0, offset + Int16Len, nil // return 0 for null
-		}
-		if size <= 0 {
-			return 0, 0, errors.New("invalid string size")
 		}
 		return int(size), offset + Int16Len, nil // size is stored as a varint, so we subtract 1
 	}

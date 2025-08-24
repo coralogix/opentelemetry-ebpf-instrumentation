@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import (
 	"encoding/binary"
@@ -31,14 +31,14 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// brokers array (flexible)
 				pkt[offset] = 0x02 // varint for 1 broker (1+1)
-				offset += 1
+				offset++
 
 				// Broker: node_id
 				binary.BigEndian.PutUint32(pkt[offset:], 2)
 				offset += 4
 				// Broker: host (compact string)
 				pkt[offset] = 0x0A // varint for length 9 (9+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "localhost")
 				offset += 9
 				// Broker: port
@@ -46,11 +46,11 @@ func TestParseMetadataResponse(t *testing.T) {
 				offset += 4
 				// Broker: rack (compact nullable string) - null
 				pkt[offset] = 0x00 // varint 0 for null
-				offset += 1
+				offset++
 
 				// cluster_id (compact nullable string) - with value
 				pkt[offset] = 0x08 // varint for length 7 (7+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "cluster")
 				offset += 7
 
@@ -60,34 +60,38 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// Topics array (flexible)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic: error_code
 				binary.BigEndian.PutUint16(pkt[offset:], 0)
 				offset += 2
 
 				pkt[offset] = 0x0B // varint for length 11 (10+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "topic-test")
 				offset += 10
 
 				// Topic: topic_id (UUID)
-				expectedUUID := UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}
+				expectedUUID := UUID{
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				}
 				copy(pkt[offset:], expectedUUID[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 12,
 			},
 			expectErr:          false,
 			expectedTopicCount: 1,
 			expectedTopicName:  "topic-test",
-			expectedTopicUUID: &UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20},
+			expectedTopicUUID: &UUID{
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
 		},
 		{
 			name: "metadata response v12 nullable topic Name",
@@ -101,14 +105,14 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// brokers array (flexible)
 				pkt[offset] = 0x02 // varint for 1 broker (1+1)
-				offset += 1
+				offset++
 
 				// Broker: node_id
 				binary.BigEndian.PutUint32(pkt[offset:], 2)
 				offset += 4
 				// Broker: host (compact string)
 				pkt[offset] = 0x0A // varint for length 9 (9+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "localhost")
 				offset += 9
 				// Broker: port
@@ -116,11 +120,11 @@ func TestParseMetadataResponse(t *testing.T) {
 				offset += 4
 				// Broker: rack (compact nullable string) - null
 				pkt[offset] = 0x00 // varint 0 for null
-				offset += 1
+				offset++
 
 				// cluster_id (compact nullable string) - with value
 				pkt[offset] = 0x08 // varint for length 7 (7+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "cluster")
 				offset += 7
 
@@ -130,7 +134,7 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// Topics array (flexible)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic: error_code
 				binary.BigEndian.PutUint16(pkt[offset:], 0)
@@ -138,25 +142,29 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// Topic: Name (compact nullable string) - null in v12+
 				pkt[offset] = 0x00 // varint 0 for null
-				offset += 1
+				offset++
 
 				// Topic: topic_id (UUID)
-				expectedUUID := UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}
+				expectedUUID := UUID{
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				}
 				copy(pkt[offset:], expectedUUID[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 12,
 			},
 			expectErr:          false,
 			expectedTopicCount: 1,
 			expectedTopicName:  "", // null Name in v12+
-			expectedTopicUUID: &UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20},
+			expectedTopicUUID: &UUID{
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
 		},
 		{
 			name: "metadata response v13 (latest)",
@@ -170,37 +178,37 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// brokers array (flexible)
 				pkt[offset] = 0x03 // varint for 2 brokers (2+1)
-				offset += 1
+				offset++
 
 				// First broker
 				binary.BigEndian.PutUint32(pkt[offset:], 1)
 				offset += 4
 				pkt[offset] = 0x0A // varint for length 9 (9+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "localhost")
 				offset += 9
 				binary.BigEndian.PutUint32(pkt[offset:], 9092)
 				offset += 4
 				pkt[offset] = 0x00 // null rack
-				offset += 1
+				offset++
 
 				// Second broker
 				binary.BigEndian.PutUint32(pkt[offset:], 2)
 				offset += 4
 				pkt[offset] = 0x0A // varint for length 9 (9+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "localhost")
 				offset += 9
 				binary.BigEndian.PutUint32(pkt[offset:], 9093)
 				offset += 4
 				pkt[offset] = 0x06 // varint for length 5 (5+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "rack1")
 				offset += 5
 
 				// cluster_id (compact nullable string) - null
 				pkt[offset] = 0x00
-				offset += 1
+				offset++
 
 				// controller_id
 				binary.BigEndian.PutUint32(pkt[offset:], 1)
@@ -208,22 +216,24 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				// Topics array (flexible) - multiple Topics
 				pkt[offset] = 0x03 // varint for 2 Topics (2+1)
-				offset += 1
+				offset++
 
 				// First topic
 				binary.BigEndian.PutUint16(pkt[offset:], 0) // error_code
 				offset += 2
 				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "topic1")
 				offset += 6
-				uuid1 := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+				uuid1 := UUID{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				}
 				copy(pkt[offset:], uuid1[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				pkt[offset] = 0x00 // varint for 0 partitions (0)
-				offset += 1
+				offset++
 
 				binary.BigEndian.PutUint32(pkt[offset:], 0) // topic_authorized_operations
 				offset += 4
@@ -232,30 +242,34 @@ func TestParseMetadataResponse(t *testing.T) {
 				binary.BigEndian.PutUint16(pkt[offset:], 0) // error_code
 				offset += 2
 				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "topic2")
 				offset += 6
-				uuid2 := UUID{0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
-					0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30}
+				uuid2 := UUID{
+					0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+					0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30,
+				}
 				copy(pkt[offset:], uuid2[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				pkt[offset] = 0x00 // varint for 0 partitions (0)
-				offset += 1
+				offset++
 
 				binary.BigEndian.PutUint32(pkt[offset:], 0) // topic_authorized_operations
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 13,
 			},
 			expectErr:          false,
 			expectedTopicCount: 2,
 			expectedTopicName:  "topic1", // We'll check the first topic
-			expectedTopicUUID: &UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10},
+			expectedTopicUUID: &UUID{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+			},
 		},
 		{
 			name: "metadata response with no Topics",
@@ -286,7 +300,7 @@ func TestParseMetadataResponse(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 10,
 			},
 			expectErr: true, // Should error on no Topics
@@ -295,7 +309,7 @@ func TestParseMetadataResponse(t *testing.T) {
 			name:   "metadata response packet too short",
 			packet: []byte{0x01, 0x02}, // Too short
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 10,
 			},
 			expectErr: true,
@@ -335,7 +349,7 @@ func TestParseMetadataResponseTruncation(t *testing.T) {
 	for _, version := range versions {
 		t.Run(fmt.Sprintf("version_%d_truncation", version), func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: version,
 			}
 
@@ -361,7 +375,7 @@ func TestParseMetadataResponseAllVersions(t *testing.T) {
 	for _, version := range versions {
 		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: version,
 			}
 
@@ -396,23 +410,23 @@ func createValidMetadataPacket(version int16) []byte {
 	if version >= 9 { // Flexible versions
 		// brokers array (flexible)
 		pkt[offset] = 0x02 // varint for 1 broker (1+1)
-		offset += 1
+		offset++
 
 		// Broker
 		binary.BigEndian.PutUint32(pkt[offset:], 1)
 		offset += 4
 		pkt[offset] = 0x0A // varint for length 9 (9+1)
-		offset += 1
+		offset++
 		copy(pkt[offset:], "localhost")
 		offset += 9
 		binary.BigEndian.PutUint32(pkt[offset:], 9092)
 		offset += 4
 		pkt[offset] = 0x00 // null rack
-		offset += 1
+		offset++
 
 		// cluster_id (compact nullable string) - null
 		pkt[offset] = 0x00
-		offset += 1
+		offset++
 
 		// controller_id
 		binary.BigEndian.PutUint32(pkt[offset:], 1)
@@ -420,7 +434,7 @@ func createValidMetadataPacket(version int16) []byte {
 
 		// Topics array (flexible)
 		pkt[offset] = 0x02 // varint for 1 topic (1+1)
-		offset += 1
+		offset++
 
 		// Topic
 		binary.BigEndian.PutUint16(pkt[offset:], 0) // error_code
@@ -429,20 +443,22 @@ func createValidMetadataPacket(version int16) []byte {
 		if version >= 12 {
 			// Name (compact nullable string) - null in v12+
 			pkt[offset] = 0x00 // varint 0 for null
-			offset += 1
+			offset++
 		} else {
 			// Name (compact string)
 			pkt[offset] = 0x09 // varint for length 8 (8+1)
-			offset += 1
+			offset++
 			copy(pkt[offset:], "my-topic")
 			offset += 8
 		}
 
 		// topic_id (UUID)
-		uuid := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-			0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+		uuid := UUID{
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		}
 		copy(pkt[offset:], uuid[:])
-		offset += UuidLen
+		offset += UUIDLen
 	} else {
 		// Non-flexible versions (not used since we only support v10+)
 		// This is just for completeness
@@ -482,10 +498,12 @@ func createValidMetadataPacket(version int16) []byte {
 		offset += 8
 
 		// topic_id (UUID)
-		uuid := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-			0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+		uuid := UUID{
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		}
 		copy(pkt[offset:], uuid[:])
-		offset += UuidLen
+		offset += UUIDLen
 	}
 
 	return pkt[:offset]

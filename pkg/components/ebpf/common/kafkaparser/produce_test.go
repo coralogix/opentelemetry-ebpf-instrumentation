@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import (
 	"encoding/binary"
@@ -11,12 +11,13 @@ import (
 
 func TestParseProduceRequest(t *testing.T) {
 	tests := []struct {
-		name               string
-		packet             []byte
-		header             *KafkaRequestHeader
-		expectErr          bool
-		expectedTopicCount int
-		expectedTopicName  string
+		name                   string
+		packet                 []byte
+		header                 *KafkaRequestHeader
+		expectErr              bool
+		expectedTopicCount     int
+		expectedTopicName      string
+		expectedTopicPartition int
 	}{
 		{
 			name: "produce request v3 non-flexible",
@@ -49,7 +50,7 @@ func TestParseProduceRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 3,
 			},
 			expectErr:          false,
@@ -89,7 +90,7 @@ func TestParseProduceRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 8,
 			},
 			expectErr:          false,
@@ -104,7 +105,7 @@ func TestParseProduceRequest(t *testing.T) {
 
 				// transactional_id (compact nullable string) - null
 				pkt[offset] = 0x00 // varint 0 for null
-				offset += 1
+				offset++
 
 				// acks
 				binary.BigEndian.PutUint16(pkt[offset:], 1) // acks
@@ -116,18 +117,18 @@ func TestParseProduceRequest(t *testing.T) {
 
 				// Topics array (flexible)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic Name (compact string)
 				pkt[offset] = 0x09 // varint for length 8 (8+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "my-topic")
 				offset += 8
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 9,
 			},
 			expectErr:          false,
@@ -142,7 +143,7 @@ func TestParseProduceRequest(t *testing.T) {
 
 				// transactional_id (compact nullable string) - with value
 				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "tx-456")
 				offset += 6
 
@@ -156,29 +157,69 @@ func TestParseProduceRequest(t *testing.T) {
 
 				// Topics array (flexible)
 				pkt[offset] = 0x03 // varint for 2 Topics (2+1)
-				offset += 1
+				offset++
 
 				// First topic Name (compact string)
 				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "topic1")
-				offset += 6
-
-				// Second topic Name (compact string)
-				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
-				copy(pkt[offset:], "topic2")
 				offset += 6
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 12,
 			},
 			expectErr:          false,
-			expectedTopicCount: 2,
+			expectedTopicCount: 1,
 			expectedTopicName:  "topic1", // We'll check the first topic
+		},
+		{
+			name: "produce request v12 flexible with Partition",
+			packet: func() []byte {
+				pkt := make([]byte, 100)
+				offset := 0
+
+				// transactional_id (compact nullable string) - with value
+				pkt[offset] = 0x07 // varint for length 6 (6+1)
+				offset++
+				copy(pkt[offset:], "tx-456")
+				offset += 6
+
+				// acks
+				binary.BigEndian.PutUint16(pkt[offset:], 1) // acks
+				offset += 2
+
+				// timeout_ms
+				binary.BigEndian.PutUint32(pkt[offset:], 30000) // timeout_ms
+				offset += 4
+
+				// Topics array (flexible)
+				pkt[offset] = 0x03 // varint for 2 Topics (2+1)
+				offset++
+
+				// First topic Name (compact string)
+				pkt[offset] = 0x07 // varint for length 6 (6+1)
+				offset++
+				copy(pkt[offset:], "topic1")
+				offset += 6
+				// Partition array (flexible)
+				pkt[offset] = 0x02 // varint for 1 partition (1+1)
+				offset++
+				// Partition
+				binary.BigEndian.PutUint32(pkt[offset:], 5) // partition
+				offset += 4
+				return pkt[:offset]
+			}(),
+			header: &KafkaRequestHeader{
+				APIKey:     APIKeyProduce,
+				APIVersion: 12,
+			},
+			expectErr:              false,
+			expectedTopicCount:     1,
+			expectedTopicName:      "topic1", // We'll check the first topic
+			expectedTopicPartition: 5,
 		},
 		{
 			name: "produce request with no Topics",
@@ -205,7 +246,7 @@ func TestParseProduceRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 3,
 			},
 			expectErr: true, // Should error on no Topics
@@ -214,7 +255,7 @@ func TestParseProduceRequest(t *testing.T) {
 			name:   "produce request packet too short",
 			packet: []byte{0x01, 0x02}, // Too short
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 3,
 			},
 			expectErr: true,
@@ -228,7 +269,7 @@ func TestParseProduceRequest(t *testing.T) {
 				return pkt
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 3,
 			},
 			expectErr: true,
@@ -253,6 +294,9 @@ func TestParseProduceRequest(t *testing.T) {
 				firstTopic := req.Topics[0]
 				if tt.expectedTopicName != "" {
 					assert.Equal(t, tt.expectedTopicName, firstTopic.Name)
+				}
+				if tt.expectedTopicPartition != 0 {
+					assert.Equal(t, tt.expectedTopicPartition, firstTopic.partition)
 				}
 			}
 		})
@@ -283,7 +327,6 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// timeout_ms
 				binary.BigEndian.PutUint32(pkt[offset:], 30000) // timeout_ms
-				offset += 4
 
 				return pkt
 			}(),
@@ -311,7 +354,6 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// timeout_ms
 				binary.BigEndian.PutUint32(pkt[offset:], 30000) // timeout_ms
-				offset += 4
 
 				return pkt
 			}(),
@@ -329,7 +371,7 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// transactional_id (compact nullable string) - null
 				pkt[offset] = 0x00 // varint 0 for null
-				offset += 1
+				offset++
 
 				// acks
 				binary.BigEndian.PutUint16(pkt[offset:], 1) // acks
@@ -337,7 +379,6 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// timeout_ms
 				binary.BigEndian.PutUint32(pkt[offset:], 30000) // timeout_ms
-				offset += 4
 
 				return pkt
 			}(),
@@ -355,7 +396,7 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// transactional_id (compact nullable string) - with value
 				pkt[offset] = 0x07 // varint for length 6 (6+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "tx-789")
 				offset += 6
 
@@ -365,7 +406,6 @@ func TestProduceRequestSkipUntilTopics(t *testing.T) {
 
 				// timeout_ms
 				binary.BigEndian.PutUint32(pkt[offset:], 30000) // timeout_ms
-				offset += 4
 
 				return pkt
 			}(),
@@ -428,7 +468,7 @@ func TestParseProduceRequestTruncation(t *testing.T) {
 	for _, version := range versions {
 		t.Run(fmt.Sprintf("version_%d_truncation", version), func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: version,
 			}
 
@@ -454,7 +494,7 @@ func TestParseProduceRequestAllVersions(t *testing.T) {
 	for _, version := range versions {
 		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: version,
 			}
 
@@ -479,7 +519,7 @@ func createValidProducePacket(version int16) []byte {
 	if version >= 9 { // Flexible versions
 		// transactional_id (compact nullable string) - null
 		pkt[offset] = 0x00 // varint 0 for null
-		offset += 1
+		offset++
 
 		// acks
 		binary.BigEndian.PutUint16(pkt[offset:], 1) // acks
@@ -491,11 +531,11 @@ func createValidProducePacket(version int16) []byte {
 
 		// Topics array (flexible)
 		pkt[offset] = 0x02 // varint for 1 topic (1+1)
-		offset += 1
+		offset++
 
 		// Topic Name (compact string)
 		pkt[offset] = 0x09 // varint for length 8 (8+1)
-		offset += 1
+		offset++
 		copy(pkt[offset:], "my-topic")
 		offset += 8
 	} else {
@@ -614,7 +654,7 @@ func TestParseProduceRequestEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: tt.version,
 			}
 

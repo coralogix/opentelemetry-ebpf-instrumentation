@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"go.opentelemetry.io/obi/pkg/components/ebpf/common/kafka_parser"
 	"io"
 	"log/slog"
 	"net"
@@ -24,6 +23,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"go.opentelemetry.io/obi/pkg/app/request"
+	"go.opentelemetry.io/obi/pkg/components/ebpf/common/kafkaparser"
 	"go.opentelemetry.io/obi/pkg/components/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/config"
 )
@@ -128,7 +128,7 @@ type EBPFParseContext struct {
 	mysqlPreparedStatements    *simplelru.LRU[mysqlPreparedStatementsKey, string]
 	postgresPreparedStatements *simplelru.LRU[postgresPreparedStatementsKey, string]
 	postgresPortals            *simplelru.LRU[postgresPortalsKey, string]
-	kafkaTopicUUIDToName       *simplelru.LRU[kafka_parser.UUID, string]
+	kafkaTopicUUIDToName       *simplelru.LRU[kafkaparser.UUID, string]
 }
 
 type EBPFEventContext struct {
@@ -151,7 +151,7 @@ func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 		mysqlPreparedStatements    *simplelru.LRU[mysqlPreparedStatementsKey, string]
 		postgresPreparedStatements *simplelru.LRU[postgresPreparedStatementsKey, string]
 		postgresPortals            *simplelru.LRU[postgresPortalsKey, string]
-		kafkaTopicUUIDToName       *simplelru.LRU[kafka_parser.UUID, string]
+		kafkaTopicUUIDToName       *simplelru.LRU[kafkaparser.UUID, string]
 		mongoRequestCache          PendingMongoDBRequests
 	)
 
@@ -183,7 +183,7 @@ func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 		}
 
 		// TODO size cfg.KafkaTopicUUIDToNameCacheSize
-		kafkaTopicUUIDToName, err = simplelru.NewLRU[kafka_parser.UUID, string](1000, nil)
+		kafkaTopicUUIDToName, err = simplelru.NewLRU[kafkaparser.UUID, string](1000, nil)
 		if err != nil {
 			ptlog().Error("failed to create Kafka topic UUID to name cache", "error", err)
 		}

@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import "errors"
 
@@ -58,7 +58,6 @@ func fetchRequestSkipUntilTopics(pkt []byte, header *KafkaRequestHeader, offset 
 				Int32Len+ // session_id
 				Int32Len, // session_epoch
 		)
-		break
 	case header.APIVersion >= 7:
 		/*
 				Fetch Request (Version: 7-14) => replica_id max_wait_ms min_bytes max_bytes isolation_level session_id session_epoch ...
@@ -80,7 +79,6 @@ func fetchRequestSkipUntilTopics(pkt []byte, header *KafkaRequestHeader, offset 
 				Int32Len+ // session_id
 				Int32Len, // session_epoch
 		)
-		break
 
 	case header.APIVersion >= 4:
 		/*
@@ -99,7 +97,6 @@ func fetchRequestSkipUntilTopics(pkt []byte, header *KafkaRequestHeader, offset 
 				Int32Len+ // max_bytes
 				Int8Len, // isolation_level
 		)
-		break
 	}
 	if err != nil {
 		return 0, err
@@ -115,7 +112,7 @@ func parseFetchTopics(pkt []byte, header *KafkaRequestHeader, offset Offset) ([]
 	var topics []*FetchTopic
 	var topic *FetchTopic
 	for i := 0; i < topicsLen; i++ {
-		topic, offset, err = parseFetchTopic(pkt, header, offset, i == topicsLen-1)
+		topic, offset, err = parseFetchTopic(pkt, header, offset)
 		if err != nil {
 			// return the Topics parsed so far, even if one topic failed
 			return topics, nil
@@ -127,7 +124,7 @@ func parseFetchTopics(pkt []byte, header *KafkaRequestHeader, offset Offset) ([]
 	return topics, err
 }
 
-func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset, isLast bool) (*FetchTopic, Offset, error) {
+func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*FetchTopic, Offset, error) {
 	var topic FetchTopic
 	var err error
 	if header.APIVersion >= 13 {
@@ -138,11 +135,11 @@ func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset, isLa
 		  Topics => topic_id [partitions] _tagged_fields
 		    topic_id => UUID
 		*/
-		if offset+UuidLen > len(pkt) {
+		if offset+UUIDLen > len(pkt) {
 			return nil, offset, errors.New("packet too short for topic UUID")
 		}
-		topicUUID := (UUID)(pkt[offset : offset+UuidLen])
-		offset += UuidLen
+		topicUUID := (UUID)(pkt[offset : offset+UUIDLen])
+		offset += UUIDLen
 		topic.UUID = &topicUUID
 	} else {
 		/*
@@ -232,7 +229,6 @@ func skipFetchPartitions(pkt []byte, header *KafkaRequestHeader, offset Offset, 
 			Int32Len + // last_fetched_epoch
 			Int64Len + // log_start_offset
 			Int32Len // partition_max_bytes
-		break
 	case header.APIVersion >= 9:
 		/*
 		   partitions => partition current_leader_epoch fetch_offset log_start_offset partition_max_bytes
@@ -247,7 +243,6 @@ func skipFetchPartitions(pkt []byte, header *KafkaRequestHeader, offset Offset, 
 			Int64Len + // fetch_offset
 			Int64Len + // log_start_offset
 			Int32Len // partition_max_bytes
-		break
 	case header.APIVersion >= 5:
 		/*
 		   partitions => partition fetch_offset log_start_offset partition_max_bytes
@@ -260,7 +255,6 @@ func skipFetchPartitions(pkt []byte, header *KafkaRequestHeader, offset Offset, 
 			Int64Len + // fetch_offset
 			Int64Len + // log_start_offset
 			Int32Len // partition_max_bytes
-		break
 	default:
 		/*
 		   partitions => partition fetch_offset partition_max_bytes

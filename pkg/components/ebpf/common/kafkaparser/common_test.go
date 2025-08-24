@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import (
 	"encoding/binary"
@@ -167,7 +167,7 @@ func TestParseKafkaRequestHeader(t *testing.T) {
 
 			expectedOffset := MinKafkaRequestLen + len(tt.expected.ClientID)
 			if tt.flexible {
-				expectedOffset += 1 // Account for tagged fields byte
+				expectedOffset++ // Account for tagged fields byte
 			}
 			assert.Equal(t, expectedOffset, offset)
 		})
@@ -184,7 +184,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "valid fetch header",
 			header: &KafkaRequestHeader{
 				MessageSize:   100,
-				APIKey:        ApiKeyFetch,
+				APIKey:        APIKeyFetch,
 				APIVersion:    5,
 				CorrelationID: 123,
 			},
@@ -194,7 +194,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "valid produce header",
 			header: &KafkaRequestHeader{
 				MessageSize:   200,
-				APIKey:        ApiKeyProduce,
+				APIKey:        APIKeyProduce,
 				APIVersion:    8,
 				CorrelationID: 456,
 			},
@@ -204,7 +204,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "valid metadata header",
 			header: &KafkaRequestHeader{
 				MessageSize:   150,
-				APIKey:        ApiKeyMetadata,
+				APIKey:        APIKeyMetadata,
 				APIVersion:    12,
 				CorrelationID: 789,
 			},
@@ -214,7 +214,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "message size too small",
 			header: &KafkaRequestHeader{
 				MessageSize:   5,
-				APIKey:        ApiKeyFetch,
+				APIKey:        APIKeyFetch,
 				APIVersion:    1,
 				CorrelationID: 123,
 			},
@@ -224,7 +224,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "message size too large",
 			header: &KafkaRequestHeader{
 				MessageSize:   KafkaMaxPayloadLen + 1,
-				APIKey:        ApiKeyFetch,
+				APIKey:        APIKeyFetch,
 				APIVersion:    1,
 				CorrelationID: 123,
 			},
@@ -234,7 +234,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "negative API version",
 			header: &KafkaRequestHeader{
 				MessageSize:   100,
-				APIKey:        ApiKeyFetch,
+				APIKey:        APIKeyFetch,
 				APIVersion:    -1,
 				CorrelationID: 123,
 			},
@@ -244,7 +244,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "negative correlation ID",
 			header: &KafkaRequestHeader{
 				MessageSize:   100,
-				APIKey:        ApiKeyFetch,
+				APIKey:        APIKeyFetch,
 				APIVersion:    1,
 				CorrelationID: -1,
 			},
@@ -254,7 +254,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "unsupported metadata version (too low)",
 			header: &KafkaRequestHeader{
 				MessageSize:   100,
-				APIKey:        ApiKeyMetadata,
+				APIKey:        APIKeyMetadata,
 				APIVersion:    9,
 				CorrelationID: 123,
 			},
@@ -264,7 +264,7 @@ func TestValidateKafkaHeader(t *testing.T) {
 			name: "unsupported metadata version (too high)",
 			header: &KafkaRequestHeader{
 				MessageSize:   100,
-				APIKey:        ApiKeyMetadata,
+				APIKey:        APIKeyMetadata,
 				APIVersion:    14,
 				CorrelationID: 123,
 			},
@@ -293,7 +293,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "produce v8 - not flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 8,
 			},
 			expected: false,
@@ -301,7 +301,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "produce v9 - flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyProduce,
+				APIKey:     APIKeyProduce,
 				APIVersion: 9,
 			},
 			expected: true,
@@ -309,7 +309,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "fetch v11 - not flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 11,
 			},
 			expected: false,
@@ -317,7 +317,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "fetch v12 - flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 12,
 			},
 			expected: true,
@@ -325,7 +325,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "metadata v8 - not flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 8,
 			},
 			expected: false,
@@ -333,7 +333,7 @@ func TestIsFlexible(t *testing.T) {
 		{
 			name: "metadata v9 - flexible",
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyMetadata,
+				APIKey:     APIKeyMetadata,
 				APIVersion: 9,
 			},
 			expected: true,
@@ -374,7 +374,7 @@ func TestReadArrayLength(t *testing.T) {
 				return pkt
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 5, // Non-flexible
 			},
 			offset:         0,
@@ -389,7 +389,7 @@ func TestReadArrayLength(t *testing.T) {
 				return []byte{0x06, 0x00, 0x00, 0x00}
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 12, // Flexible
 			},
 			offset:         0,
@@ -429,7 +429,7 @@ func TestReadUUID(t *testing.T) {
 			packet: func() []byte {
 				pkt := make([]byte, 20)
 				// Set some recognizable UUID bytes
-				for i := 0; i < UuidLen; i++ {
+				for i := 0; i < UUIDLen; i++ {
 					pkt[i] = byte(i)
 				}
 				return pkt
@@ -437,18 +437,18 @@ func TestReadUUID(t *testing.T) {
 			offset: 0,
 			expectedUUID: func() UUID {
 				var uuid UUID
-				for i := 0; i < UuidLen; i++ {
+				for i := 0; i < UUIDLen; i++ {
 					uuid[i] = byte(i)
 				}
 				return uuid
 			}(),
-			expectedOffset: UuidLen,
+			expectedOffset: UUIDLen,
 			expectErr:      false,
 		},
 		{
 			name: "packet too short for UUID",
 			packet: func() []byte {
-				return make([]byte, 10) // Less than UuidLen
+				return make([]byte, 10) // Less than UUIDLen
 			}(),
 			offset:    0,
 			expectErr: true,
@@ -458,7 +458,7 @@ func TestReadUUID(t *testing.T) {
 			packet: func() []byte {
 				pkt := make([]byte, 25)
 				// Set UUID starting at offset 5
-				for i := 0; i < UuidLen; i++ {
+				for i := 0; i < UUIDLen; i++ {
 					pkt[5+i] = byte(i + 10)
 				}
 				return pkt
@@ -466,20 +466,19 @@ func TestReadUUID(t *testing.T) {
 			offset: 5,
 			expectedUUID: func() UUID {
 				var uuid UUID
-				for i := 0; i < UuidLen; i++ {
+				for i := 0; i < UUIDLen; i++ {
 					uuid[i] = byte(i + 10)
 				}
 				return uuid
 			}(),
-			expectedOffset: 5 + UuidLen,
+			expectedOffset: 5 + UUIDLen,
 			expectErr:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			header := &KafkaRequestHeader{} // UUID reading doesn't depend on header
-			uuid, offset, err := readUUID(tt.packet, header, tt.offset)
+			uuid, offset, err := readUUID(tt.packet, tt.offset)
 
 			if tt.expectErr {
 				assert.Error(t, err)
@@ -514,7 +513,7 @@ func TestReadString(t *testing.T) {
 				return pkt
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 5, // Non-flexible
 			},
 			offset:         0,
@@ -532,7 +531,7 @@ func TestReadString(t *testing.T) {
 				return pkt
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 12, // Flexible
 			},
 			offset:         0,
@@ -549,7 +548,7 @@ func TestReadString(t *testing.T) {
 				return pkt
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 5,
 			},
 			offset:    0,

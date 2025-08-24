@@ -1,4 +1,4 @@
-package kafka_parser
+package kafkaparser
 
 import (
 	"encoding/binary"
@@ -35,7 +35,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 
 				// Topics array
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // Topics count
@@ -50,7 +50,7 @@ func TestParseFetchRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 4,
 			},
 			expectErr:          false,
@@ -73,7 +73,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 				offset += 4
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -81,24 +81,28 @@ func TestParseFetchRequest(t *testing.T) {
 
 				// Topics array (flexible version uses varint)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic UUID
-				expectedUUID := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+				expectedUUID := UUID{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				}
 				copy(pkt[offset:], expectedUUID[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 13,
 			},
 			expectErr:          false,
 			expectedTopicCount: 1,
-			expectedTopicUUID: &UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10},
+			expectedTopicUUID: &UUID{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+			},
 		},
 		{
 			name: "fetch request v15 with topic UUID",
@@ -114,7 +118,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 				offset += 4
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -122,24 +126,28 @@ func TestParseFetchRequest(t *testing.T) {
 
 				// Topics array (flexible version uses varint)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic UUID
-				expectedUUID := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+				expectedUUID := UUID{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+				}
 				copy(pkt[offset:], expectedUUID[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 15,
 			},
 			expectErr:          false,
 			expectedTopicCount: 1,
-			expectedTopicUUID: &UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10},
+			expectedTopicUUID: &UUID{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+			},
 		},
 		{
 			name: "fetch request v12 flexible with topic Name",
@@ -157,7 +165,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 				offset += 4
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -165,18 +173,18 @@ func TestParseFetchRequest(t *testing.T) {
 
 				// Topics array (flexible version uses varint)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic Name (flexible version uses varint for length)
 				pkt[offset] = 0x09 // varint for length 8 (8+1)
-				offset += 1
+				offset++
 				copy(pkt[offset:], "my-topic")
 				offset += 8
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 12,
 			},
 			expectErr:          false,
@@ -197,7 +205,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 				offset += 4
 				binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -205,24 +213,28 @@ func TestParseFetchRequest(t *testing.T) {
 
 				// Topics array (flexible version uses varint)
 				pkt[offset] = 0x02 // varint for 1 topic (1+1)
-				offset += 1
+				offset++
 
 				// Topic UUID
-				expectedUUID := UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}
+				expectedUUID := UUID{
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				}
 				copy(pkt[offset:], expectedUUID[:])
-				offset += UuidLen
+				offset += UUIDLen
 
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 17,
 			},
 			expectErr:          false,
 			expectedTopicCount: 1,
-			expectedTopicUUID: &UUID{0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20},
+			expectedTopicUUID: &UUID{
+				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
 		},
 		{
 			name: "fetch request with multiple Topics v5",
@@ -240,7 +252,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 
 				// Topics array
 				binary.BigEndian.PutUint32(pkt[offset:], 2) // Topics count
@@ -262,7 +274,7 @@ func TestParseFetchRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 5,
 			},
 			expectErr:          false,
@@ -285,7 +297,7 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 
 				// Topics array with zero Topics
 				binary.BigEndian.PutUint32(pkt[offset:], 0) // Topics count
@@ -294,7 +306,7 @@ func TestParseFetchRequest(t *testing.T) {
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 4,
 			},
 			expectErr: true, // Should error on no Topics
@@ -303,7 +315,7 @@ func TestParseFetchRequest(t *testing.T) {
 			name:   "fetch request packet too short for skip",
 			packet: []byte{0x01, 0x02}, // Too short
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 4,
 			},
 			expectErr: true,
@@ -324,13 +336,13 @@ func TestParseFetchRequest(t *testing.T) {
 				binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 				offset += 4
 				pkt[offset] = 0 // isolation_level
-				offset += 1
+				offset++
 
 				// No space for Topics array length
 				return pkt[:offset]
 			}(),
 			header: &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: 4,
 			},
 			expectErr: true,
@@ -372,7 +384,7 @@ func TestParseFetchRequestTruncation(t *testing.T) {
 	for _, version := range versions {
 		t.Run(fmt.Sprintf("version_%d_truncation", version), func(t *testing.T) {
 			header := &KafkaRequestHeader{
-				APIKey:     ApiKeyFetch,
+				APIKey:     APIKeyFetch,
 				APIVersion: version,
 			}
 
@@ -406,7 +418,7 @@ func createValidFetchPacket(version int16) []byte {
 		binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 		offset += 4
 		pkt[offset] = 0 // isolation_level
-		offset += 1
+		offset++
 		binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 		offset += 4
 		binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -422,7 +434,7 @@ func createValidFetchPacket(version int16) []byte {
 		binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 		offset += 4
 		pkt[offset] = 0 // isolation_level
-		offset += 1
+		offset++
 		binary.BigEndian.PutUint32(pkt[offset:], 1) // session_id
 		offset += 4
 		binary.BigEndian.PutUint32(pkt[offset:], 1) // session_epoch
@@ -438,24 +450,26 @@ func createValidFetchPacket(version int16) []byte {
 		binary.BigEndian.PutUint32(pkt[offset:], 1024) // max_bytes
 		offset += 4
 		pkt[offset] = 0 // isolation_level
-		offset += 1
+		offset++
 	}
 
 	// Add Topics
 	if version >= 12 { // Flexible versions
 		pkt[offset] = 0x02 // varint for 1 topic (1+1)
-		offset += 1
+		offset++
 
 		if version >= 13 {
 			// Topic UUID
-			uuid := UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
+			uuid := UUID{
+				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+			}
 			copy(pkt[offset:], uuid[:])
-			offset += UuidLen
+			offset += UUIDLen
 		} else {
 			// Topic Name with varint length
 			pkt[offset] = 0x09 // varint for length 8 (8+1)
-			offset += 1
+			offset++
 			copy(pkt[offset:], "my-topic")
 			offset += 8
 		}
