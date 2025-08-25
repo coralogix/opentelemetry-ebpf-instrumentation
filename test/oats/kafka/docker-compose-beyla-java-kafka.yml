@@ -23,8 +23,8 @@ services:
       - "9093:9093"
   testserver:
     build:
-      context: ../../..
-      dockerfile: ./test/integration/components/javakafka/Dockerfile
+      context: ../../../test/integration/components/javakafka
+      dockerfile: Dockerfile
     image: javakafka
     ports:
       - "8080:8080"

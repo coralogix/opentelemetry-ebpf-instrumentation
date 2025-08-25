@@ -153,7 +153,14 @@ func TestSerializeJSONSpans(t *testing.T) {
 		},
 		{
 			eventType: EventTypeKafkaClient,
-			attribs:   map[string]any{},
+			attribs: map[string]any{
+				"serverAddr": "hostname",
+				"serverPort": "5678",
+				"operation":  "method",
+				"clientId":   "statement",
+				"topic":      "path",
+				"partition":  "5",
+			},
 		},
 		{
 			eventType: EventTypeRedisServer,
@@ -171,7 +178,9 @@ func TestSerializeJSONSpans(t *testing.T) {
 				"serverAddr": "hostname",
 				"serverPort": "5678",
 				"operation":  "method",
-				"clientId":   "otherns",
+				"clientId":   "statement",
+				"topic":      "path",
+				"partition":  "5",
 			},
 		},
 		{
@@ -214,6 +223,9 @@ func TestSerializeJSONSpans(t *testing.T) {
 				SQLState: "s123",
 				Message:  "err123",
 				Code:     123,
+			},
+			MessagingInfo: &MessagingInfo{
+				Partition: 5,
 			},
 		}
 

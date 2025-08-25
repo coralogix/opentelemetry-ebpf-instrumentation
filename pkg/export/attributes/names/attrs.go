@@ -155,6 +155,13 @@ const (
 	DBNamespace          = Name("db.namespace")
 )
 
+// Messaging specific attributes
+const (
+	// SQL
+	MessagingPartition   = Name("messaging.destination.partition.id")
+	MessagingKafkaOffset = Name("messaging.kafka.offset")
+)
+
 // Beyla specific GPU events
 const (
 	// GPU/Cuda related attributes
