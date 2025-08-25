@@ -10,7 +10,7 @@ expected:
   traces:
     - traceql: '{ .messaging.operation.type = "process" }'
       spans:
-        - name: 'regex:^process$'
+        - name: 'regex:^process'
           attributes:
             messaging.operation.type: process
             messaging.system: kafka
