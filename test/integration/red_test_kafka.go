@@ -46,7 +46,7 @@ func runKafkaTestCase(t *testing.T, testCase TestCase) {
 	test.Eventually(t, testTimeout, func(t require.TestingT) {
 		for _, span := range testCase.Spans {
 			command := span.Name
-			resp, err := http.Get(jaegerQueryURL + "?service=" + comm)
+			resp, err := http.Get(jaegerQueryURL + "?service=" + comm + "&limit=1000")
 			require.NoError(t, err, "failed to query jaeger for %s", comm)
 			if resp == nil {
 				return

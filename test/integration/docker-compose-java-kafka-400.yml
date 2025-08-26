@@ -114,6 +114,9 @@ services:
     environment:
       - COLLECTOR_OTLP_ENABLED=true
       - LOG_LEVEL=debug
+    volumes:
+      - ./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json
+    command: ["--query.ui-config=/etc/jaeger/ui-config.json"]
 
 volumes:
   kafka-volume:
