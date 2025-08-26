@@ -182,8 +182,7 @@ func NewEBPFParseContext(cfg *config.EBPFTracer) *EBPFParseContext {
 			ptlog().Error("failed to create Postgres portals cache", "error", err)
 		}
 
-		// TODO size cfg.KafkaTopicUUIDToNameCacheSize
-		kafkaTopicUUIDToName, err = simplelru.NewLRU[kafkaparser.UUID, string](1000, nil)
+		kafkaTopicUUIDToName, err = simplelru.NewLRU[kafkaparser.UUID, string](cfg.KafkaTopicUUIDCacheSize, nil)
 		if err != nil {
 			ptlog().Error("failed to create Kafka topic UUID to name cache", "error", err)
 		}
