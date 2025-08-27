@@ -15,7 +15,7 @@ const (
 	Int64Len           = 8
 	UUIDLen            = 16
 	MinKafkaRequestLen = // 14
-	Int32Len +         // MessageSize
+	Int32Len + // MessageSize
 		Int16Len + // APIKey
 		Int16Len + // APIVersion
 		Int32Len + // CorrelationID
@@ -233,8 +233,22 @@ func readString(pkt []byte, header *KafkaRequestHeader, offset Offset, nullable 
 	if offset+size > len(pkt) {
 		return "", 0, errors.New("string size exceeds packet size")
 	}
+	if !validateKafkaString(pkt[offset:offset+size], size) {
+		return "", 0, errors.New("invalid characters in string")
+	}
 	str := string(pkt[offset : offset+size])
 	return str, offset + size, nil
+}
+
+func validateKafkaString(pkt []byte, size int) bool {
+	for j := 0; j < size; j++ {
+		ch := pkt[j]
+		if ('a' <= ch && ch <= 'z') || ('A' <= ch && ch <= 'Z') || ('0' <= ch && ch <= '9') || ch == '.' || ch == '_' || ch == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func readStringLength(pkt []byte, header *KafkaRequestHeader, offset Offset, nullable bool) (int, Offset, error) {

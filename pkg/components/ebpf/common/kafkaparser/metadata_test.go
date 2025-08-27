@@ -51,6 +51,10 @@ func TestParseMetadataResponse(t *testing.T) {
 				pkt[offset] = 0x00 // varint 0 for null
 				offset++
 
+				// tagged_fields (empty for this test)
+				pkt[offset] = 0x00 // varint 0 for null
+				offset++
+
 				// cluster_id (compact nullable string) - with value
 				pkt[offset] = 0x08 // varint for length 7 (7+1)
 				offset++
@@ -125,6 +129,10 @@ func TestParseMetadataResponse(t *testing.T) {
 				pkt[offset] = 0x00 // varint 0 for null
 				offset++
 
+				// tagged_fields (empty for this test)
+				pkt[offset] = 0x00 // varint 0 for null
+				offset++
+
 				// cluster_id (compact nullable string) - with value
 				pkt[offset] = 0x08 // varint for length 7 (7+1)
 				offset++
@@ -194,6 +202,9 @@ func TestParseMetadataResponse(t *testing.T) {
 				offset += 4
 				pkt[offset] = 0x00 // null rack
 				offset++
+				// tagged_fields (empty for this test)
+				pkt[offset] = 0x00 // varint 0 for null
+				offset++
 
 				// Second broker
 				binary.BigEndian.PutUint32(pkt[offset:], 2)
@@ -208,6 +219,9 @@ func TestParseMetadataResponse(t *testing.T) {
 				offset++
 				copy(pkt[offset:], "rack1")
 				offset += 5
+				// tagged_fields (empty for this test)
+				pkt[offset] = 0x00 // varint 0 for null
+				offset++
 
 				// cluster_id (compact nullable string) - null
 				pkt[offset] = 0x00
@@ -240,6 +254,9 @@ func TestParseMetadataResponse(t *testing.T) {
 
 				binary.BigEndian.PutUint32(pkt[offset:], 0) // topic_authorized_operations
 				offset += 4
+				// tagged_fields (empty for this test)
+				pkt[offset] = 0x00 // varint 0 for null
+				offset++
 
 				// Second topic
 				binary.BigEndian.PutUint16(pkt[offset:], 0) // error_code
@@ -426,6 +443,9 @@ func createValidMetadataPacket(version int16) []byte {
 		offset += 4
 		pkt[offset] = 0x00 // null rack
 		offset++
+		// tagged_fields (empty for this test)
+		pkt[offset] = 0x00 // varint 0 for null
+		offset++
 
 		// cluster_id (compact nullable string) - null
 		pkt[offset] = 0x00
@@ -479,6 +499,9 @@ func createValidMetadataPacket(version int16) []byte {
 		offset += 4
 		binary.BigEndian.PutUint16(pkt[offset:], 0) // null rack
 		offset += 2
+		// tagged_fields (empty for this test)
+		pkt[offset] = 0x00 // varint 0 for null
+		offset++
 
 		// cluster_id (nullable) - null
 		binary.BigEndian.PutUint16(pkt[offset:], 0)

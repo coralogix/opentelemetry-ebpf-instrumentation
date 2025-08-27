@@ -90,6 +90,10 @@ func skipMetadataResponseBrokers(pkt []byte, header *KafkaRequestHeader, offset 
 		if err != nil {
 			return 0, err
 		}
+		offset, err = skipTaggedFields(pkt, header, offset)
+		if err != nil {
+			return 0, err
+		}
 	}
 	return offset, nil
 }
@@ -160,6 +164,10 @@ func parseMetadataTopic(pkt []byte, header *KafkaRequestHeader, offset int, isLa
 	)
 	if err != nil {
 		// if we can't read partitions, we can still return the topic
+		return &topic, offset, nil
+	}
+	offset, err = skipTaggedFields(pkt, header, offset)
+	if err != nil {
 		return &topic, offset, nil
 	}
 	return &topic, offset, nil

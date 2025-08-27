@@ -177,6 +177,10 @@ func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*Fe
 		}
 		topic.Partition = partition
 	}
+	offset, err = skipTaggedFields(pkt, header, offset)
+	if err != nil {
+		return &topic, offset, nil
+	}
 	return &topic, offset, nil
 }
 
