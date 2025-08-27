@@ -15,12 +15,12 @@ const (
 	Int64Len           = 8
 	UUIDLen            = 16
 	MinKafkaRequestLen = // 14
-	Int32Len + // MessageSize
+	Int32Len +         // MessageSize
 		Int16Len + // APIKey
 		Int16Len + // APIVersion
 		Int32Len + // CorrelationID
 		Int16Len // Length of ClientID
-	KafkaResponseLen = Int32Len + // MessageSize
+	MinKafkaResponseLen = Int32Len + // MessageSize
 		Int32Len // CorrelationID
 	KafkaMaxPayloadLen = 20 * 1024 * 1024 // 20 MB max, 1MB is default for most Kafka installations
 )
@@ -34,7 +34,7 @@ const (
 )
 
 type (
-	UUID   = [UUIDLen]byte
+	UUID   [UUIDLen]byte
 	Offset = int
 )
 
@@ -88,7 +88,7 @@ func ParseKafkaRequestHeader(pkt []byte) (*KafkaRequestHeader, Offset, error) {
 }
 
 func ParseKafkaResponseHeader(pkt []byte, requestHeader *KafkaRequestHeader) (*KafkaResponseHeader, Offset, error) {
-	if len(pkt) < KafkaResponseLen {
+	if len(pkt) < MinKafkaResponseLen {
 		return nil, 0, errors.New("packet too short for Kafka response header")
 	}
 	header := &KafkaResponseHeader{
@@ -96,7 +96,7 @@ func ParseKafkaResponseHeader(pkt []byte, requestHeader *KafkaRequestHeader) (*K
 		CorrelationID: int32(binary.BigEndian.Uint32(pkt[4:8])),
 	}
 
-	offset := KafkaResponseLen
+	offset := MinKafkaResponseLen
 	err := validateKafkaResponseHeader(header, requestHeader)
 	if err != nil {
 		return nil, 0, err
@@ -112,18 +112,18 @@ func skipTaggedFields(pkt []byte, header *KafkaRequestHeader, offset Offset) (Of
 	if !isFlexible(header) {
 		return offset, nil // no tagged fields to skip for non-flexible versions
 	}
-	taggedFieldsLen, offset, err := readUnsignedVarint(pkt, offset)
+	taggedFieldsLen, offset, err := readUnsignedVarint(pkt[offset:], offset)
 	if err != nil {
 		return 0, err
 	}
 
 	for i := 0; i < taggedFieldsLen; i++ {
-		_, offset, err = readUnsignedVarint(pkt, offset) // read tag ID
+		_, offset, err = readUnsignedVarint(pkt[offset:], offset) // read tag ID
 		if err != nil {
 			return 0, err
 		}
 		var tagLen int
-		tagLen, offset, err = readUnsignedVarint(pkt, offset) // read tag length
+		tagLen, offset, err = readUnsignedVarint(pkt[offset:], offset) // read tag length
 		if err != nil {
 			return 0, err
 		}
@@ -146,11 +146,11 @@ func validateKafkaRequestHeader(header *KafkaRequestHeader) error {
 
 	switch header.APIKey {
 	case APIKeyFetch:
-		if header.APIVersion > 17 { // latest: Fetch Request (Version: 17)
+		if header.APIVersion > 18 { // latest: Fetch Request (Version: 17)
 			return errors.New("invalid Kafka request header: unsupported API key version for Fetch")
 		}
 	case APIKeyProduce:
-		if header.APIVersion > 12 { // latest: Produce Request (Version: 12)
+		if header.APIVersion > 13 { // latest: Produce Request (Version: 12)
 			return errors.New("invalid Kafka request header: unsupported API key version for Produce")
 		}
 	case APIKeyMetadata:
@@ -167,8 +167,8 @@ func validateKafkaRequestHeader(header *KafkaRequestHeader) error {
 }
 
 func validateKafkaResponseHeader(header *KafkaResponseHeader, requestHeader *KafkaRequestHeader) error {
-	if header.MessageSize < int32(MinKafkaRequestLen) {
-		return errors.New("invalid Kafka response header: size is negative")
+	if header.MessageSize < MinKafkaResponseLen {
+		return errors.New("invalid Kafka response header: size too small")
 	}
 
 	if header.MessageSize > KafkaMaxPayloadLen {
@@ -176,7 +176,7 @@ func validateKafkaResponseHeader(header *KafkaResponseHeader, requestHeader *Kaf
 	}
 
 	if header.CorrelationID < 0 {
-		return errors.New("invalid Kafka request header: correlation ID is negative")
+		return errors.New("invalid Kafka response header: correlation ID is negative")
 	}
 	if header.CorrelationID != requestHeader.CorrelationID {
 		return errors.New("invalid Kafka response header: correlation ID does not match request header")
@@ -261,7 +261,7 @@ func readStringLength(pkt []byte, header *KafkaRequestHeader, offset Offset, nul
 		if nullable && size == -1 {
 			return 0, offset + Int16Len, nil // return 0 for null
 		}
-		return int(size), offset + Int16Len, nil // size is stored as a varint, so we subtract 1
+		return int(size), offset + Int16Len, nil
 	}
 
 	// length is stored as a varint
@@ -283,6 +283,9 @@ func readUnsignedVarint(data []byte, offset Offset) (int, Offset, error) {
 	value := 0
 	i := 0
 	for idx := 0; idx < len(data); idx++ {
+		if idx > len(data) {
+			return 0, 0, errors.New("offset exceeds data length")
+		}
 		b := data[idx]
 		if (b & 0x80) == 0 {
 			value |= int(b) << i

@@ -153,11 +153,8 @@ const (
 	DBQueryText          = Name("db.query.text")
 	DBResponseStatusCode = Name("db.response.status_code")
 	DBNamespace          = Name("db.namespace")
-)
 
-// Messaging specific attributes
-const (
-	// SQL
+	// Messaging
 	MessagingPartition   = Name("messaging.destination.partition.id")
 	MessagingKafkaOffset = Name("messaging.kafka.offset")
 )

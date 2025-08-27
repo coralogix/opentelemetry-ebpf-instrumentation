@@ -138,12 +138,12 @@ func parseFetchTopic(pkt []byte, header *KafkaRequestHeader, offset Offset) (*Fe
 		  Topics => topic_id [partitions] _tagged_fields
 		    topic_id => UUID
 		*/
-		if offset+UUIDLen > len(pkt) {
-			return nil, offset, errors.New("packet too short for topic UUID")
+		var topicUUID *UUID
+		topicUUID, offset, err = readUUID(pkt, offset)
+		if err != nil {
+			return nil, offset, err
 		}
-		topicUUID := (UUID)(pkt[offset : offset+UUIDLen])
-		offset += UUIDLen
-		topic.UUID = &topicUUID
+		topic.UUID = topicUUID
 	} else {
 		/*
 		  Topics => topic [partitions] _tagged_fields
