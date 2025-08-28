@@ -90,6 +90,14 @@ static __always_inline unsigned char *bpf_strstr_tp_loop(unsigned char *buf, int
 }
 
 static __always_inline unsigned char *bpf_strstr_tp_loop__legacy(unsigned char *buf) {
+    // `tp_match` is the only non-inlined function and it's a subprogram which is used
+    // conditionally. In order to avoid the verifier rejecting the program because the
+    // function metadata doesn't match the actual function, add a dummy call to it.
+    //
+    // Error Log:
+    //  number of funcs in func_info doesn't match number of subprogs
+    tp_match(10000, NULL);
+
     if (!k_bpf_traceparent_enabled) {
         return NULL;
     }
@@ -97,8 +105,9 @@ static __always_inline unsigned char *bpf_strstr_tp_loop__legacy(unsigned char *
     const u16 k_besteffort_max_loops = 450; // Limit search to avoid burning too many instructions
     for (u16 i = 0; i + TRACE_PARENT_HEADER_LEN < k_besteffort_max_loops; i++) {
         // Only check at offset=0 or after '\n' to save instructions
-        if (i != 0 && buf[i - 1] != '\n')
+        if (i != 0 && buf[i - 1] != '\n') {
             continue;
+        }
 
         if (is_traceparent(&buf[i])) {
             return &buf[i];
