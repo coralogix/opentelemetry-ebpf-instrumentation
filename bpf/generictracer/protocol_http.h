@@ -147,7 +147,13 @@ static __always_inline void http_get_or_create_trace_info(http_connection_metada
             bpf_clamp_umax(buf_len, TRACE_BUF_SIZE - 1);
 
             bpf_probe_read(buf, buf_len, u_buf);
-            unsigned char *res = bpf_strstr_tp_loop(buf, buf_len);
+
+            unsigned char *res = NULL;
+            if (bpf_core_enum_value_exists(enum bpf_func_id, BPF_FUNC_loop)) {
+                res = bpf_strstr_tp_loop(buf, buf_len);
+            } else {
+                res = bpf_strstr_tp_loop__legacy(buf);
+            }
 
             if (res) {
                 bpf_dbg_printk("Found traceparent in headers [%s] overriding what was before", res);
