@@ -55,7 +55,7 @@ static __always_inline void trace_key_from_pid_tid(trace_key_t *t_key) {
     t_key->extra_id = extra_id;
 }
 
-static int tp_match(u32 index, void *data) {
+static __hidden int tp_match(u32 index, void *data) {
     if (index >= (TRACE_BUF_SIZE - TRACE_PARENT_HEADER_LEN)) {
         return 1;
     }
@@ -90,14 +90,6 @@ static __always_inline unsigned char *bpf_strstr_tp_loop(unsigned char *buf, int
 }
 
 static __always_inline unsigned char *bpf_strstr_tp_loop__legacy(unsigned char *buf) {
-    // `tp_match` is the only non-inlined function and it's a subprogram which is used
-    // conditionally. In order to avoid the verifier rejecting the program because the
-    // function metadata doesn't match the actual function, add a dummy call to it.
-    //
-    // Error Log:
-    //  number of funcs in func_info doesn't match number of subprogs
-    tp_match(10000, NULL);
-
     if (!k_bpf_traceparent_enabled) {
         return NULL;
     }
