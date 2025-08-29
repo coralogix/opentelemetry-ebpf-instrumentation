@@ -139,6 +139,8 @@ func newGraphBuilder(
 	), swarm.WithID("OTELTracesReceiver"))
 	swi.Add(prom.BPFMetrics(ctxInfo, &config.Prometheus),
 		swarm.WithID("BPFMetrics"))
+	swi.Add(prom.PrometheusEndpoint(ctxInfo, &config.Prometheus, selectorCfg, exportableSpans, processEventsCh),
+		swarm.WithID("PrometheusEndpoint"))
 	swi.Add(debug.PrinterNode(config.TracePrinter, exportableSpans),
 		swarm.WithID("PrinterNode"))
 

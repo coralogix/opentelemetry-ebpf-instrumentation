@@ -12,19 +12,6 @@
 
 enum { IP_V6_DEST_OPTS = 60 };
 
-// Taken from uapi/linux/tcp.h
-struct __tcphdr {
-    __be16 source;
-    __be16 dest;
-    __be32 seq;
-    __be32 ack_seq;
-    __u16 res1 : 4, doff : 4, fin : 1, syn : 1, rst : 1, psh : 1, ack : 1, urg : 1, ece : 1,
-        cwr : 1;
-    __be16 window;
-    __sum16 check;
-    __be16 urg_ptr;
-};
-
 static __always_inline bool
 read_sk_buff(struct __sk_buff *skb, protocol_info_t *tcp, connection_info_t *conn) {
     // we read the protocol just like here linux/samples/bpf/parse_ldabs.c
@@ -107,41 +94,39 @@ read_sk_buff(struct __sk_buff *skb, protocol_info_t *tcp, connection_info_t *con
     }
 
     u16 port;
-    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, source), &port, sizeof(port));
+    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct tcphdr, source), &port, sizeof(port));
     conn->s_port = __bpf_htons(port);
 
-    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, dest), &port, sizeof(port));
+    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct tcphdr, dest), &port, sizeof(port));
     conn->d_port = __bpf_htons(port);
 
     u32 seq;
-    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, seq), &seq, sizeof(seq));
+    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct tcphdr, seq), &seq, sizeof(seq));
     tcp->seq = __bpf_htonl(seq);
 
     u32 ack;
-    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct __tcphdr, ack_seq), &ack, sizeof(ack));
+    bpf_skb_load_bytes(skb, tcp->hdr_len + offsetof(struct tcphdr, ack_seq), &ack, sizeof(ack));
     tcp->ack = __bpf_htonl(ack);
 
     u8 doff;
     bpf_skb_load_bytes(
         skb,
-        tcp->hdr_len + offsetof(struct __tcphdr, ack_seq) + 4,
+        tcp->hdr_len + offsetof(struct tcphdr, ack_seq) + 4,
         &doff,
-        sizeof(
-            doff)); // read the first byte past __tcphdr->ack_seq, we can't do offsetof bit fields
-    doff &= 0xf0;   // clean-up res1
-    doff >>= 4;     // move the upper 4 bits to low
-    doff *= 4;      // convert to bytes length
+        sizeof(doff)); // read the first byte past tcphdr->ack_seq, we can't do offsetof bit fields
+    doff &= 0xf0;      // clean-up res1
+    doff >>= 4;        // move the upper 4 bits to low
+    doff *= 4;         // convert to bytes length
 
     u8 flags;
     bpf_skb_load_bytes(
         skb,
-        tcp->hdr_len + offsetof(struct __tcphdr, ack_seq) + 4 + 1,
+        tcp->hdr_len + offsetof(struct tcphdr, ack_seq) + 4 + 1,
         &flags,
-        sizeof(flags)); // read the second byte past __tcphdr->doff, again bit fields offsets
+        sizeof(flags)); // read the second byte past tcphdr->doff, again bit fields offsets
     tcp->flags = flags;
     tcp->h_proto = h_proto;
-    tcp->opts_off =
-        tcp->hdr_len + sizeof(struct __tcphdr); // must be done before we add data offset
+    tcp->opts_off = tcp->hdr_len + sizeof(struct tcphdr); // must be done before we add data offset
 
     tcp->hdr_len += doff;
 
