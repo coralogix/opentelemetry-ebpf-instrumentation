@@ -68,5 +68,6 @@ static __always_inline bool is_traceparent(const unsigned char *p) {
         (p[8] == 'e') && (p[9] == 'n') && (p[10] == 't') && (p[11] == ':') && (p[12] == ' ')) {
         return true;
     }
+
     return false;
 }
