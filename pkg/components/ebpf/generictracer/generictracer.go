@@ -7,6 +7,7 @@ package generictracer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/btf"
 	"github.com/cilium/ebpf/link"
 	"github.com/gavv/monotime"
 	"github.com/vishvananda/netlink"
@@ -156,6 +158,13 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 		culprit := spec.Programs["obi_protocol_http"]
 		fmt.Println("GREPME refs: ", culprit.Instructions.FunctionReferences(), len(culprit.Instructions.FunctionReferences()))
 	}
+
+	debugReader := bytes.NewReader(_BpfTPDebugBytes)
+	btfSpec, btfExt, err := btf.LoadSpecAndExtInfosFromReader(debugReader)
+	if err != nil {
+		return nil, fmt.Errorf("GREPME can't LoadSpecAndExtInfosFromReader: %w", err)
+	}
+	fmt.Println("GREPME: loaded BTF spec and ext infos", "spec", btfSpec, "ext", btfExt)
 
 	return spec, err
 }
