@@ -4,7 +4,7 @@ services:
   kafka:
     restart: always
     container_name: kafka-like
-    image: docker.io/bitnami/kafka:4.0.0
+    image: docker.io/bitnamilegacy/kafka:4.0.0
     ports:
       - "9093:9093"
     volumes:
