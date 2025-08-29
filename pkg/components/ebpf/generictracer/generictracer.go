@@ -149,7 +149,15 @@ func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
 		p.log.Info("Enabling trace information parsing", "bpf_loop_enabled", ebpfcommon.SupportsEBPFLoops(p.log, p.cfg.EBPF.OverrideBPFLoopEnabled))
 	}
 
-	return loader()
+	spec, err := loader()
+	if err != nil {
+		fmt.Println("GREPME: Error loading BPF objects: ", err)
+	} else {
+		culprit := spec.Programs["obi_protocol_http"]
+		fmt.Println("GREPME refs: ", culprit.Instructions.FunctionReferences(), len(culprit.Instructions.FunctionReferences()))
+	}
+
+	return spec, err
 }
 
 func (p *Tracer) SetupTailCalls() {

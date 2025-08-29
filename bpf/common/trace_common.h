@@ -55,7 +55,7 @@ static __always_inline void trace_key_from_pid_tid(trace_key_t *t_key) {
     t_key->extra_id = extra_id;
 }
 
-static __hidden int tp_match(u32 index, void *data) {
+static int tp_match(u32 index, void *data) {
     if (index >= (TRACE_BUF_SIZE - TRACE_PARENT_HEADER_LEN)) {
         return 1;
     }
@@ -94,9 +94,8 @@ static __always_inline unsigned char *bpf_strstr_tp_loop__legacy(unsigned char *
         return NULL;
     }
 
-    const u16 k_besteffort_max_loops = 450; // Limit search to avoid burning too many instructions
+    const u16 k_besteffort_max_loops = 450; // Limited search to avoid burning too many instructions
     for (u16 i = 0; i + TRACE_PARENT_HEADER_LEN < k_besteffort_max_loops; i++) {
-        // Only check at offset=0 or after '\n' to save instructions
         if (i != 0 && buf[i - 1] != '\n') {
             continue;
         }
