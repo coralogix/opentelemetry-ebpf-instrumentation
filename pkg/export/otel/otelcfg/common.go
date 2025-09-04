@@ -145,6 +145,10 @@ func GetResourceAttrs(hostID string, service *svc.Attrs) []attribute.KeyValue {
 		attrs = append(attrs, semconv.ServiceNamespace(service.UID.Namespace))
 	}
 
+	if service.UID.Version != "" {
+		attrs = append(attrs, semconv.ServiceVersion(service.UID.Version))
+	}
+
 	for k, v := range service.Metadata {
 		attrs = append(attrs, k.OTEL().String(v))
 	}
