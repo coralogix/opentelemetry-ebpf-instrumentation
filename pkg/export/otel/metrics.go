@@ -764,6 +764,7 @@ func (mr *MetricsReporter) spanMetricAttributes() []attributes.Field[*request.Sp
 			attr.ServiceName,
 			attr.ServiceInstanceID,
 			attr.ServiceNamespace,
+			attr.ServiceVersion,
 			attr.SpanKind,
 			attr.SpanName,
 			attr.StatusCode,

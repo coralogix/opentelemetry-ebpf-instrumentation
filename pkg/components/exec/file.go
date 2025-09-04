@@ -33,6 +33,7 @@ const (
 	envResourceAttrs    = "OTEL_RESOURCE_ATTRIBUTES"
 	serviceNameKey      = "service.name"
 	serviceNamespaceKey = "service.namespace"
+	serviceVersionKey   = "service.version"
 )
 
 func (fi *FileInfo) ExecutableName() string {
@@ -101,6 +102,8 @@ func setServiceEnvVariables(service svc.Attrs, envVars map[string]string, k8sEna
 				service.UID.Name = result
 			} else if result, ok := allVars[serviceNamespaceKey]; ok {
 				service.UID.Namespace = result
+			} else if result, ok := allVars[serviceVersionKey]; ok {
+				service.UID.Version = result
 			}
 		}
 	}
