@@ -131,11 +131,12 @@ const (
 	Instance = Name("instance")
 	Job      = Name("job")
 
-	// ServiceName and ServiceNamespace are going to be used only on Prometheus
+	// ServiceName, ServiceNamespace and ServiceVersion are going to be used only on Prometheus
 	// as metric attributes. The OTEL exporter already uses them as Resource
 	// attributes, which can't be enabled/disabled by the users
 	ServiceName      = Name(semconv.ServiceNameKey)
 	ServiceNamespace = Name(semconv.ServiceNamespaceKey)
+	ServiceVersion   = Name(semconv.ServiceVersionKey)
 
 	HostName = Name(semconv.HostNameKey)
 	HostID   = Name(semconv.HostIDKey)
