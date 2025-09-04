@@ -4,7 +4,7 @@ services:
   zookeeper:
     restart: always
     container_name: kafka-like-zookeeper
-    image: docker.io/bitnami/zookeeper:3.8
+    image: docker.io/bitnamilegacy/zookeeper:3.8
     ports:
       - "2181:2181"
     volumes:
@@ -15,7 +15,7 @@ services:
   kafka:
     restart: always
     container_name: kafka-like
-    image: docker.io/bitnami/kafka:3.3
+    image: docker.io/bitnamilegacy/kafka:3.3
     ports:
       - "9093:9093"
     volumes:
@@ -33,8 +33,8 @@ services:
 
   testserver:
     build:
-      context: ../../test/integration/components/javakafka/
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: ./test/integration/components/javakafka/Dockerfile
     image: hatest-testserver-java-kafka
     ports:
       - "${TEST_SERVICE_PORTS}"

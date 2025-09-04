@@ -4,7 +4,7 @@ services:
   kafka:
     restart: always
     container_name: kafka-like
-    image: docker.io/bitnami/kafka:4.0.0
+    image: docker.io/bitnamilegacy/kafka:4.0.0
     ports:
       - "9093:9093"
     volumes:
@@ -25,8 +25,8 @@ services:
 
   testserver:
     build:
-      context: ../../test/integration/components/javakafka/
-      dockerfile: Dockerfile_400
+      context: ../..
+      dockerfile: ./test/integration/components/javakafka/Dockerfile_400
     image: hatest-testserver-java-kafka
     ports:
       - "${TEST_SERVICE_PORTS}"

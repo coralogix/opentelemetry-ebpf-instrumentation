@@ -1,14 +1,14 @@
 module go.opentelemetry.io/obi/internal/tools
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/cilium/ebpf v0.19.0
 	github.com/golangci/golangci-lint/v2 v2.4.0
-	github.com/google/go-licenses/v2 v2.0.0-alpha.1
+	github.com/google/go-licenses/v2 v2.0.0
 	github.com/grafana/go-offsets-tracker v0.1.7
 	github.com/onsi/ginkgo/v2 v2.23.4
-	sigs.k8s.io/controller-runtime/tools/setup-envtest v0.0.0-20250820133309-9f93124137fa
+	sigs.k8s.io/controller-runtime/tools/setup-envtest v0.0.0-20250902150316-e5878c995fc3
 	sigs.k8s.io/kind v0.29.0
 )
 

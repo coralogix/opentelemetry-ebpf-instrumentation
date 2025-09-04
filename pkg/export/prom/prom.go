@@ -949,6 +949,7 @@ func (r *metricsReporter) observe(span *request.Span) {
 		if r.cfg.ServiceGraphMetricsEnabled() {
 			if !span.IsSelfReferenceSpan() || r.cfg.AllowServiceGraphSelfReferences {
 				lvg := r.labelValuesServiceGraph(span)
+
 				if span.IsClientSpan() {
 					r.serviceGraphClient.WithLabelValues(lvg...).Metric.Observe(duration)
 					// If we managed to resolve the remote name only, we check to see

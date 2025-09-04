@@ -1,5 +1,5 @@
 # Build the binary for the k8s-cache service
-FROM golang:1.25@sha256:91e2cd436f7adbfad0a0cbb7bf8502fa863ed8461414ceebe36c6304731e0fd9 AS builder
+FROM golang:1.25@sha256:5502b0e56fca23feba76dbc5387ba59c593c02ccc2f0f7355871ea9a0852cebe AS builder
 
 ARG TARGETARCH
 ENV GOARCH=$TARGETARCH
@@ -12,7 +12,6 @@ COPY go.sum go.sum
 COPY LICENSE LICENSE
 COPY NOTICE NOTICE
 COPY Makefile Makefile
-COPY third_party_licenses.csv third_party_licenses.csv
 COPY cmd/ cmd/
 COPY pkg/ pkg/
 COPY .git/ .git/
@@ -30,6 +29,5 @@ WORKDIR /
 COPY --from=builder /opt/app-root/bin/k8s-cache .
 COPY --from=builder /opt/app-root/LICENSE .
 COPY --from=builder /opt/app-root/NOTICE .
-COPY --from=builder /opt/app-root/third_party_licenses.csv .
 
 ENTRYPOINT [ "/k8s-cache" ]
