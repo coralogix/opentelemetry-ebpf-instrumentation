@@ -211,7 +211,6 @@ static __always_inline void track_sock(struct __sk_buff *skb, const connection_i
 
 SEC("tc_egress")
 int obi_app_egress(struct __sk_buff *skb) {
-    //bpf_printk("egress");
     protocol_info_t tcp = {};
     connection_info_t conn = {};
     pid_connection_info_t p_conn = {};
