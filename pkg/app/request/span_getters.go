@@ -69,6 +69,8 @@ func SpanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 		getter = func(s *Span) attribute.KeyValue { return semconv.ServiceName(s.Service.UID.Name) }
 	case attr.ServiceNamespace:
 		getter = func(s *Span) attribute.KeyValue { return semconv.ServiceNamespace(s.Service.UID.Namespace) }
+	case attr.ServiceVersion:
+		getter = func(s *Span) attribute.KeyValue { return semconv.ServiceVersion(s.Service.UID.Version) }
 	case attr.SpanKind:
 		getter = func(s *Span) attribute.KeyValue { return SpanKindMetric(s.ServiceGraphKind()) }
 	case attr.SpanName:
@@ -211,6 +213,8 @@ func SpanPromGetters(attrName attr.Name) (attributes.Getter[*Span, string], bool
 		getter = func(s *Span) string { return s.Service.UID.Name }
 	case attr.ServiceNamespace:
 		getter = func(s *Span) string { return s.Service.UID.Namespace }
+	case attr.ServiceVersion:
+		getter = func(s *Span) string { return s.Service.UID.Version }
 	case attr.CudaKernelName:
 		getter = func(s *Span) string { return s.Method }
 	case attr.CudaMemcpyKind:

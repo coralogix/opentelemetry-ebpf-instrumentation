@@ -74,6 +74,7 @@ func (sn ServiceNameNamespace) String() string {
 type UID struct {
 	Name      string
 	Namespace string
+	Version   string
 	Instance  string
 }
 
