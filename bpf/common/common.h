@@ -44,6 +44,7 @@
 
 volatile const u32 mysql_buffer_size = 0;
 volatile const u32 postgres_buffer_size = 0;
+volatile const u32 kafka_buffer_size = 0;
 
 enum large_buf_action : u8 {
     k_large_buf_action_init = 0,
