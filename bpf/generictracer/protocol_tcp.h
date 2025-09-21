@@ -128,7 +128,7 @@ static __always_inline int tcp_send_large_buffer(tcp_req_t *req,
             u8 packet_type = infer_packet_type(direction, pid_conn->conn.d_port);
             if (packet_type == PACKET_TYPE_RESPONSE) {
                 // only interested in large metadata responses
-                ret = kafka_send_large_buffer(req, u_buf, bytes_len, packet_type, action);
+                ret = kafka_send_large_buffer(req, pid_conn, u_buf, bytes_len, packet_type, action);
             }
         }
         break;

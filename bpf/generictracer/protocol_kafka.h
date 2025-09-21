@@ -27,31 +27,31 @@
 // Every kafka api packet is prefixed by an header
 // https://kafka.apache.org/protocol#protocol_messages
 struct kafka_hdr {
-    int32 message_size;
-    int16 api_key;
-    int16 api_version;
-    int32 correlation_id;
+    int32_t message_size;
+    int16_t api_key;
+    int16_t api_version;
+    int32_t correlation_id;
     // client-id is a nullable string, we don't parse it for now
 };
 
-struct kafka_hdr_response {
-    int32 message_size;
-    int32 correlation_id;
+struct kafka_response_hdr {
+    int32_t message_size;
+    int32_t correlation_id;
 };
 
 struct kafka_state_data {
-    int32 message_size;
+    int32_t message_size;
 };
 
 struct kafka_request_data {
-    int32 correlation_id;
+    int32_t correlation_id;
 };
 
 enum {
     // Kafka header sizes
     k_kafka_min_hdr_size = 13, // header + tagged fields
     k_kafka_min_response_hdr_size = 9, // header + tagged fields
-    k_kafka_hdr_size_without_message_size = 8,
+    k_kafka_hdr_size_without_message_size = 9,
     k_kafka_hdr_message_size_len = 4,
 
     k_kafka_response_message_size_len = 4,
@@ -88,14 +88,14 @@ struct {
 SCRATCH_MEM_SIZED(kafka_large_buffers, k_kafka_large_buf_max_size);
 
 
-static __always_inline u32 read_kafka_response_header(const unsigned char *data, size_t data_len, const struct kafka_response_hdr *hdr) {
+static __always_inline u32 read_kafka_response_header(const unsigned char *data, size_t data_len, struct kafka_response_hdr *hdr) {
     if (data_len < k_kafka_min_response_hdr_size) {
         return 0;
     }
-    bpf_probe_read(&hdr->message_size, sizeof(hdr->message_size), (const void *)data);
+    bpf_probe_read((void *)&hdr->message_size, sizeof(hdr->message_size), (const void *)data);
     hdr->message_size = bpf_ntohl(hdr->message_size);
     if (hdr->message_size < k_kafka_min_response_hdr_size || hdr->message_size > k_kafka_payload_length_max) {
-        bpf_dbg_printk("read_kafka_response_header: payload length invalid: %d", message_size);
+        bpf_dbg_printk("read_kafka_response_header: payload length invalid: %d", hdr->message_size);
         return 0;
     }
     bpf_probe_read(&hdr->correlation_id, sizeof(hdr->correlation_id), (const void *)(data + 4));
@@ -107,24 +107,12 @@ static __always_inline u32 read_kafka_response_header(const unsigned char *data,
     return -1;
 }
 
-static __always_inline u32 read_full_kafka_message_size(const unsigned char *data, size_t data_len, const struct kafka_hdr *hdr) {
-    int32 message_size = read_kafka_message_size(data, data_len);
-    if (message_size < 0) {
-        return -1;
-    }
-    hdr->message_size = message_size;
-    if (read_kafka_header(data + k_kafka_hdr_message_size_len, data_len - k_kafka_hdr_message_size_len, hdr) < 0) {
-        return -1;
-    }
-    return 0;
-}
-
-static __always_inline int32 read_kafka_message_size(const unsigned char *data, size_t data_len) {
+static __always_inline int32_t read_kafka_message_size(const unsigned char *data, size_t data_len) {
     if (data_len < k_kafka_hdr_message_size_len) {
         return 0;
     }
-    int32 message_size = 0;
-    bpf_probe_read(&message_size, sizeof(hdr->message_size), (const void *)data);
+    int32_t message_size = 0;
+    bpf_probe_read(&message_size, sizeof(message_size), (const void *)data);
     message_size = bpf_ntohl(message_size);
     if (message_size < k_kafka_min_hdr_size || message_size > k_kafka_payload_length_max) {
         bpf_dbg_printk("read_kafka_message_size: payload length invalid: %d", message_size);
@@ -133,7 +121,7 @@ static __always_inline int32 read_kafka_message_size(const unsigned char *data, 
     return message_size;
 }
 
-static __always_inline u32 read_kafka_header(const unsigned char *data, size_t data_len, const struct kafka_hdr *hdr) {
+static __always_inline u32 read_kafka_header(const unsigned char *data, size_t data_len, struct kafka_hdr *hdr) {
     if (data_len < k_kafka_hdr_size_without_message_size) {
         return 0;
     }
@@ -159,6 +147,18 @@ static __always_inline u32 read_kafka_header(const unsigned char *data, size_t d
     return 1;
 
 }
+
+static __always_inline u32 read_full_kafka_message_size(const unsigned char *data, size_t data_len, struct kafka_hdr *hdr) {
+    int32_t message_size = read_kafka_message_size(data, data_len);
+    if (message_size < 0) {
+        return -1;
+    }
+    hdr->message_size = message_size;
+    if (read_kafka_header(data + k_kafka_hdr_message_size_len, data_len - k_kafka_hdr_message_size_len, hdr) < 0) {
+        return -1;
+    }
+    return 0;
+}
 // This function is used to store the kafka header if it comes in split packets
 // from double send.
 // Given the fact that we need to store this for the duration of the full request
@@ -173,16 +173,14 @@ static __always_inline int kafka_store_state_data(const connection_info_t *conn_
     }
 
     struct kafka_state_data new_state_data = {};
-    kafka_state_data.message_size = read_kafka_message_size(data, data_len);
-    if (kafka_state_data.message_size < 0) {
+    new_state_data.message_size = read_kafka_message_size(data, data_len);
+    if (new_state_data.message_size < 0) {
         return 0;
     }
     bpf_map_update_elem(&kafka_state, conn_info, &new_state_data, BPF_ANY);
 
     return -1;
 }
-
-// DONE
 
 static __always_inline int kafka_parse_fixup_header(const connection_info_t *conn_info,
                                                     struct kafka_hdr *hdr,
@@ -226,20 +224,20 @@ static __always_inline int kafka_read_fixup_buffer(const connection_info_t *conn
 
     struct kafka_state_data *state_data = bpf_map_lookup_elem(&kafka_state, conn_info);
     if (state_data != NULL) {
-        bpf_probe_read(buf, k_mysql_hdr_without_command_size, (const void *)state_data);
-        offset += k_mysql_hdr_without_command_size;
-        bpf_map_delete_elem(&mysql_state, conn_info);
+        bpf_probe_read(buf, k_kafka_hdr_size_without_message_size, (const void *)state_data);
+        offset += k_kafka_hdr_size_without_message_size;
+        bpf_map_delete_elem(&kafka_state, conn_info);
     } else {
-        if (data_len < k_mysql_hdr_size) {
-            bpf_dbg_printk("mysql_read_fixup_buffer: data_len is too short: %d", data_len);
+        if (data_len < k_kafka_min_hdr_size) {
+            bpf_dbg_printk("kafka_read_fixup_buffer: data_len is too short: %d", data_len);
             return -1;
         }
     }
 
     *buf_len = data_len + offset;
-    if (*buf_len >= mysql_buffer_size) {
-        *buf_len = mysql_buffer_size;
-        bpf_dbg_printk("WARN: mysql_read_fixup_buffer: buffer is full, truncating data");
+    if (*buf_len >= kafka_buffer_size) {
+        *buf_len = kafka_buffer_size;
+        bpf_dbg_printk("WARN: kafka_read_fixup_buffer: buffer is full, truncating data");
     }
 
     bpf_probe_read(buf + offset, *buf_len & buf_len_mask, (const void *)data);
@@ -268,7 +266,7 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
             bpf_dbg_printk("kafka_send_large_buffer: no ongoing request found for this response");
             return 0;
         }
-        kafka_response_hdr hdr = {};
+        struct kafka_response_hdr hdr = {};
         if (read_kafka_response_header(u_buf, bytes_len, &hdr) != 0) {
             bpf_dbg_printk("kafka_send_large_buffer: failed to read kafka response header");
             return 0;
@@ -279,7 +277,7 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
                            req_data->correlation_id);
             return 0;
         }
-        bpf_map_delete_elem(&kafka_state, conn_info);
+        bpf_map_delete_elem(&kafka_ongoing_requests, &pid_conn->conn);
     }
 
     tcp_large_buffer_t *large_buf = (tcp_large_buffer_t *)kafka_large_buffers_mem();
@@ -293,9 +291,8 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
     large_buf->action = action;
     __builtin_memcpy((void *)&large_buf->tp, (void *)&req->tp, sizeof(tp_info_t));
 
-    // TODO fix
     int written =
-        mysql_read_fixup_buffer(&pid_conn->conn, large_buf->buf, &large_buf->len, u_buf, bytes_len);
+        kafka_read_fixup_buffer(&pid_conn->conn, large_buf->buf, &large_buf->len, u_buf, bytes_len);
     if (written < 0) {
         bpf_dbg_printk("kafka_send_large_buffer: failed to read buffer, not sending large buffer");
         return 0;
@@ -337,6 +334,6 @@ static __always_inline u8 is_kafka(connection_info_t *conn_info,
     // insert request correlation_id into ongoing requests map
     struct kafka_request_data req_data = {};
     req_data.correlation_id = hdr.correlation_id;
-    bpf_map_update_elem(&kafka_ongoing_requests, conn_info, &new_state_data, BPF_ANY);
+    bpf_map_update_elem(&kafka_ongoing_requests, conn_info, &req_data, BPF_ANY);
     return 1;
 }

@@ -73,6 +73,8 @@ func ReadTCPRequestIntoSpan(parseCtx *EBPFParseContext, cfg *config.EBPFTracer, 
 		}
 
 		return span, false, nil
+	case ProtocolTypeKafka:
+		slog.Info("Kafka: kafka message!")
 	case ProtocolTypeUnknown:
 	default:
 	}
