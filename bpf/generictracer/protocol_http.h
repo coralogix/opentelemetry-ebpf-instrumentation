@@ -4,6 +4,7 @@
 #pragma once
 
 #include <bpfcore/vmlinux.h>
+#include <bpfcore/bpf_builtins.h>
 #include <bpfcore/bpf_helpers.h>
 
 #include <common/http_types.h>
@@ -148,7 +149,12 @@ http_get_or_create_trace_info(http_connection_metadata_t *meta,
         unsigned char *buf = tp_char_buf();
         if (buf) {
             const u16 buf_len = bytes_len & (TRACE_BUF_SIZE - 1);
-            cheap_bzero(buf, TRACE_BUF_SIZE);
+
+            _Static_assert(TRACE_BUF_SIZE == 1024,
+                           "Please fix the __bpf_memzero statements below this line");
+
+            __bpf_memzero(buf, 512);
+            __bpf_memzero(buf + 512, 512);
             bpf_probe_read(buf, buf_len, u_buf);
 
             unsigned char *res = tp_loop_fn(buf, buf_len);

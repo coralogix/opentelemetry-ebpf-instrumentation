@@ -23,7 +23,6 @@
 #include <maps/server_traces.h>
 #include <maps/tp_info_mem.h>
 #include <maps/tp_char_buf_mem.h>
-#include <maps/zeros.h>
 
 #include <pid/pid_helpers.h>
 
@@ -32,14 +31,6 @@ enum { k_bpf_traceparent_enabled = 1 };
 #else
 enum { k_bpf_traceparent_enabled = 0 };
 #endif
-
-static __always_inline void cheap_bzero(unsigned char *buf, u16 size) {
-    void *z = bpf_map_lookup_elem(&zeros, &(u16){0});
-    if (!z) {
-        return;
-    }
-    bpf_probe_read(buf, size, z);
-}
 
 static __always_inline unsigned char *tp_char_buf() {
     int zero = 0;
