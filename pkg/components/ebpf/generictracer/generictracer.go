@@ -208,6 +208,7 @@ func (p *Tracer) Constants() map[string]any {
 
 	m["mysql_buffer_size"] = p.cfg.EBPF.BufferSizes.MySQL
 	m["postgres_buffer_size"] = p.cfg.EBPF.BufferSizes.Postgres
+	m["kafka_buffer_size"] = p.cfg.EBPF.BufferSizes.Kafka
 
 	return m
 }

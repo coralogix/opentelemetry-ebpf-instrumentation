@@ -56,10 +56,12 @@ enum {
 
     k_kafka_response_message_size_len = 4,
 
-    // Api Keys
-    k_kafka_api_key_metadata_request = 0x3,
+    // Api keys
+    k_kafka_api_key_min = 0,
+    k_kafka_api_key_metadata_request = 3,
+    k_kafka_api_key_max = 92,
 
-    // Api Keys
+    // Api versions
     k_kafka_api_version_metadata_request_min = 10,
     k_kafka_api_version_metadata_request_max = 13,
 
@@ -87,12 +89,12 @@ struct {
 
 SCRATCH_MEM_SIZED(kafka_large_buffers, k_kafka_large_buf_max_size);
 
-
 static __always_inline u32 read_kafka_response_header(const unsigned char *data, size_t data_len, struct kafka_response_hdr *hdr) {
     if (data_len < k_kafka_min_response_hdr_size) {
         return 0;
     }
-    bpf_probe_read((void *)&hdr->message_size, sizeof(hdr->message_size), (const void *)data);
+
+    bpf_probe_read((void *)&hdr->message_size, k_kafka_hdr_message_size_len, (const void *)data);
     hdr->message_size = bpf_ntohl(hdr->message_size);
     if (hdr->message_size < k_kafka_min_response_hdr_size || hdr->message_size > k_kafka_payload_length_max) {
         bpf_dbg_printk("read_kafka_response_header: payload length invalid: %d", hdr->message_size);
@@ -101,23 +103,27 @@ static __always_inline u32 read_kafka_response_header(const unsigned char *data,
     bpf_probe_read(&hdr->correlation_id, sizeof(hdr->correlation_id), (const void *)(data + 4));
     hdr->correlation_id = bpf_ntohl(hdr->correlation_id);
     if (hdr->correlation_id < 0) {
-        bpf_dbg_printk("read_kafka_header: correlation_id invalid: %d", hdr->correlation_id);
+        bpf_dbg_printk("read_kafka_response_header: correlation_id invalid: %d", hdr->correlation_id);
         return 0;
     }
+
     return 1;
 }
 
-static __always_inline int32_t read_kafka_message_size(const unsigned char *data, size_t data_len) {
+static __always_inline int read_kafka_message_size(const unsigned char *data, size_t data_len) {
     if (data_len < k_kafka_hdr_message_size_len) {
-        return 0;
+        return -1;
     }
-    int32_t message_size = 0;
-    bpf_probe_read(&message_size, sizeof(message_size), (const void *)data);
+
+    int message_size = 0;
+    bpf_probe_read(&message_size, k_kafka_hdr_message_size_len, (const void *)data);
     message_size = bpf_ntohl(message_size);
+
     if (message_size < k_kafka_min_hdr_size || message_size > k_kafka_payload_length_max) {
         bpf_dbg_printk("read_kafka_message_size: payload length invalid: %d", message_size);
-        return 0;
+        return -1;
     }
+
     bpf_dbg_printk("read_kafka_message_size: message_size: %d", message_size);
     return message_size;
 }
@@ -126,40 +132,60 @@ static __always_inline u32 read_kafka_header(const unsigned char *data, size_t d
     if (data_len < k_kafka_hdr_size_without_message_size) {
         return 0;
     }
+    if (data_len - k_kafka_hdr_message_size_len != hdr->message_size) {
+        bpf_dbg_printk("GREPME data_len - 4 != message_size: %d - %d != %d",
+                       data_len,
+                       k_kafka_hdr_message_size_len,
+                       hdr->message_size);
+        return 0;
+    }
+
     bpf_probe_read(&hdr->api_key, sizeof(hdr->api_key), (const void *)(data));
     hdr->api_key = bpf_ntohs(hdr->api_key);
     if (hdr->api_key != k_kafka_api_key_metadata_request) {
-        bpf_dbg_printk("read_kafka_header: api_key invalid: %d", hdr->api_key);
+        bpf_dbg_printk("read_kafka_header: uninteresting api key: %d", hdr->api_key);
         return 0;
     }
+    // if (hdr->api_key < k_kafka_api_key_min || hdr->api_key > k_kafka_api_key_max) {
+    //     bpf_dbg_printk("read_kafka_header: invalid api key: %d", hdr->api_key);
+    //     return 0;
+    // }
+
     bpf_dbg_printk("read_kafka_header: api_key: %d", hdr->api_key);
+
     bpf_probe_read(&hdr->api_version, sizeof(hdr->api_version), (const void *)(data + 2));
     hdr->api_version = bpf_ntohs(hdr->api_version);
     if (hdr->api_version < k_kafka_api_version_metadata_request_min ||
         hdr->api_version > k_kafka_api_version_metadata_request_max) {
-        bpf_dbg_printk("read_kafka_header: api_version invalid: %d", hdr->api_version);
+        bpf_dbg_printk("read_kafka_header: uninteresting api version: %d", hdr->api_version);
         return 0;
     }
+
     bpf_dbg_printk("read_kafka_header: api_version: %d", hdr->api_version);
+
     bpf_probe_read(&hdr->correlation_id, sizeof(hdr->correlation_id), (const void *)(data + 4));
     hdr->correlation_id = bpf_ntohl(hdr->correlation_id);
     if (hdr->correlation_id < 0) {
         bpf_dbg_printk("read_kafka_header: correlation_id invalid: %d", hdr->correlation_id);
         return 0;
     }
+
     bpf_dbg_printk("read_kafka_header: correlation_id: %d", hdr->correlation_id);
     return 1;
-
 }
 
 static __always_inline u32 read_full_kafka_message(const unsigned char *data, size_t data_len, struct kafka_hdr *hdr) {
-    int32_t message_size = read_kafka_message_size(data, data_len);
-    if (message_size < 0) {
+    int message_size = read_kafka_message_size(data, data_len);
+    if (message_size == -1) {
         return 0;
     }
     hdr->message_size = message_size;
-    return read_kafka_header(data + k_kafka_hdr_message_size_len, data_len - k_kafka_hdr_message_size_len, hdr);
+
+    bpf_dbg_printk("GREPME: message_size: %d data_len: %d", message_size, data_len);
+
+    return read_kafka_header(data + k_kafka_hdr_message_size_len, data_len, hdr);
 }
+
 // This function is used to store the kafka header if it comes in split packets
 // from double send.
 // Given the fact that we need to store this for the duration of the full request
@@ -173,11 +199,13 @@ static __always_inline int kafka_store_state_data(const connection_info_t *conn_
         return 0;
     }
 
-    struct kafka_state_data new_state_data = {};
-    new_state_data.message_size = read_kafka_message_size(data, data_len);
-    if (new_state_data.message_size < 0) {
+    int message_size = read_kafka_message_size(data, data_len);
+    if (message_size == -1) {
         return 0;
     }
+
+    struct kafka_state_data new_state_data = {};
+    new_state_data.message_size = message_size;
     bpf_dbg_printk("ksts: GREPME store data with msg_size: %d,conn=%llx", new_state_data.message_size, &conn_info);
     bpf_map_update_elem(&kafka_state, conn_info, &new_state_data, BPF_ANY);
 
@@ -188,22 +216,22 @@ static __always_inline int kafka_parse_fixup_header(const connection_info_t *con
                                                     struct kafka_hdr *hdr,
                                                     const unsigned char *data,
                                                     size_t data_len) {
-    // Prepend the header from state data.
-    bpf_dbg_printk("kafka_parse_fixup_header: GREPME reading state data conn_info=%llx", &conn_info);
     struct kafka_state_data *state_data = bpf_map_lookup_elem(&kafka_state, conn_info);
     if (state_data != NULL) {
+        // State data found, use stored message size
         hdr->message_size = state_data->message_size;
-        bpf_dbg_printk("kafka_parse_fixup_header: GREPME got size from state: %d conn_info=%llx", hdr->message_size, &conn_info);
+        bpf_dbg_printk("kafka_parse_fixup_header: GREPME got size from state: %d", hdr->message_size);
         if (read_kafka_header(data, data_len, hdr) != 0) {
             bpf_map_delete_elem(&kafka_state, conn_info);
             return 1;
         }
-    }
-    // Try to parse and validate the header first.
-    if (read_full_kafka_message(data, data_len, hdr) > 0) {
-        // Header is valid and we have the full data, we can proceed.
-        bpf_dbg_printk("kafka_parse_fixup_header: read full header");
-        return 1;
+    } else {
+        // Try to parse and validate the header first.
+        if (read_full_kafka_message(data, data_len, hdr) > 0) {
+            // Header is valid and we have the full data, we can proceed.
+            bpf_dbg_printk("kafka_parse_fixup_header: read full header OK");
+            return 1;
+        }
     }
 
     bpf_dbg_printk("kafka_parse_fixup_header: failed to parse kafka header");

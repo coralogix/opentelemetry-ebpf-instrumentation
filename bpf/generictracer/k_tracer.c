@@ -518,7 +518,7 @@ int BPF_KRETPROBE(obi_kretprobe_tcp_sendmsg, int sent_len) {
                 handle_buf_with_connection(ctx,
                                            &s_args->p_conn,
                                            msg_buf->buf,
-                                           msg_buf->size,
+                                           sent_len, //msg_buf->size,
                                            NO_SSL,
                                            TCP_SEND,
                                            s_args->orig_dport);
