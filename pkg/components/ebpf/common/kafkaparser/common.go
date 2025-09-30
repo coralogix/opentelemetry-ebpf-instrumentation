@@ -15,7 +15,7 @@ const (
 	Int64Len           = 8
 	UUIDLen            = 16
 	MinKafkaRequestLen = // 14
-	Int32Len +         // MessageSize
+	Int32Len + // MessageSize
 		Int16Len + // APIKey
 		Int16Len + // APIVersion
 		Int32Len + // CorrelationID
@@ -178,9 +178,9 @@ func validateKafkaResponseHeader(header *KafkaResponseHeader, requestHeader *Kaf
 	if header.CorrelationID < 0 {
 		return errors.New("invalid Kafka response header: correlation ID is negative")
 	}
-	if header.CorrelationID != requestHeader.CorrelationID {
-		return errors.New("invalid Kafka response header: correlation ID does not match request header")
-	}
+	//if header.CorrelationID != requestHeader.CorrelationID {
+	//	return errors.New("invalid Kafka response header: correlation ID does not match request header")
+	//}
 	return nil
 }
 
@@ -261,9 +261,6 @@ func readStringLength(pkt []byte, header *KafkaRequestHeader, offset Offset, nul
 		if nullable && size == -1 {
 			return 0, offset + Int16Len, nil // return 0 for null
 		}
-		if size < 1 {
-			return 0, 0, errors.New("invalid string size")
-		}
 		return int(size), offset + Int16Len, nil
 	}
 
@@ -279,9 +276,6 @@ func readStringLength(pkt []byte, header *KafkaRequestHeader, offset Offset, nul
 		return 0, 0, errors.New("invalid string size")
 	}
 	size-- // size is stored as a varint, so we subtract 1
-	if size < 0 {
-		return 0, 0, errors.New("invalid string size")
-	}
 	return size, offset, nil
 }
 

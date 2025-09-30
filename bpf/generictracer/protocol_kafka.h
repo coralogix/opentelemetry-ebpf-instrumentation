@@ -39,6 +39,11 @@ struct kafka_response_hdr {
     int32_t correlation_id;
 };
 
+struct kafka_state_key {
+    connection_info_t conn;
+    u8 direction;
+};
+
 struct kafka_state_data {
     int32_t message_size;
 };
@@ -75,7 +80,7 @@ enum {
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __type(key, connection_info_t);
+    __type(key, struct kafka_state_key);
     __type(value, struct kafka_state_data);
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } kafka_state SEC(".maps");
@@ -91,6 +96,7 @@ SCRATCH_MEM_SIZED(kafka_large_buffers, k_kafka_large_buf_max_size);
 
 static __always_inline u32 read_kafka_response_header(const unsigned char *data, size_t data_len, struct kafka_response_hdr *hdr) {
     if (data_len < k_kafka_min_response_hdr_size) {
+        bpf_dbg_printk("read_kafka_response_header: data_len < 9 too small: %d", data_len);
         return 0;
     }
 
@@ -194,7 +200,8 @@ static __always_inline u32 read_full_kafka_message(const unsigned char *data, si
 // dropped in favor of state storage.
 static __always_inline int kafka_store_state_data(const connection_info_t *conn_info,
                                                   const unsigned char *data,
-                                                  size_t data_len) {
+                                                  size_t data_len,
+                                                  u8 direction) {
     if (data_len != k_kafka_hdr_message_size_len) {
         return 0;
     }
@@ -206,8 +213,13 @@ static __always_inline int kafka_store_state_data(const connection_info_t *conn_
 
     struct kafka_state_data new_state_data = {};
     new_state_data.message_size = message_size;
-    bpf_dbg_printk("ksts: GREPME store data with msg_size: %d,conn=%llx", new_state_data.message_size, &conn_info);
-    bpf_map_update_elem(&kafka_state, conn_info, &new_state_data, BPF_ANY);
+    struct kafka_state_key state_key = {
+        .conn = *conn_info,
+        .direction = direction
+    };
+    bpf_dbg_printk("ksts: GREPME store data with msg_size: %d,key=%llx", new_state_data.message_size, &state_key);
+    bpf_dbg_printk("ksts: GREPME direction=%d", direction);
+    bpf_map_update_elem(&kafka_state, &state_key, &new_state_data, BPF_ANY);
 
     return -1;
 }
@@ -215,8 +227,14 @@ static __always_inline int kafka_store_state_data(const connection_info_t *conn_
 static __always_inline int kafka_parse_fixup_header(const connection_info_t *conn_info,
                                                     struct kafka_hdr *hdr,
                                                     const unsigned char *data,
-                                                    size_t data_len) {
-    struct kafka_state_data *state_data = bpf_map_lookup_elem(&kafka_state, conn_info);
+                                                    size_t data_len,
+                                                    u8 direction) {
+    struct kafka_state_key state_key = {
+        .conn = *conn_info,
+        .direction = direction
+    };
+    bpf_dbg_printk("kafka_parse_fixup_header: GREPME reading state direction=%d", direction);
+    struct kafka_state_data *state_data = bpf_map_lookup_elem(&kafka_state, &state_key);
     if (state_data != NULL) {
         // State data found, use stored message size
         hdr->message_size = state_data->message_size;
@@ -284,8 +302,9 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
                                                    const void *u_buf,
                                                    u32 bytes_len,
                                                    u8 packet_type,
-                                                   enum large_buf_action action) {
-    if (kafka_store_state_data(&pid_conn->conn, u_buf, bytes_len) < 0) {
+                                                   enum large_buf_action action,
+                                                   u8 direction) {
+    if (kafka_store_state_data(&pid_conn->conn, u_buf, bytes_len, direction) < 0) {
         bpf_dbg_printk("kafka_send_large_buffer: 4 bytes packet, storing state data");
         return -1;
     }
@@ -298,7 +317,7 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
             return 0;
         }
         struct kafka_response_hdr hdr = {};
-        if (read_kafka_response_header(u_buf, bytes_len, &hdr) != 0) {
+        if (read_kafka_response_header(u_buf, bytes_len, &hdr) == 0) {
             bpf_dbg_printk("kafka_send_large_buffer: failed to read kafka response header");
             return 0;
         }
@@ -341,19 +360,20 @@ static __always_inline int kafka_send_large_buffer(tcp_req_t *req,
 static __always_inline u8 is_kafka(connection_info_t *conn_info,
                                    const unsigned char *data,
                                    u32 data_len,
-                                   enum protocol_type *protocol_type) {
+                                   enum protocol_type *protocol_type,
+                                   u8 direction) {
     if (*protocol_type != k_protocol_type_kafka && *protocol_type != k_protocol_type_unknown) {
         // Already classified, not kafka.
         return 0;
     }
 
-    if (kafka_store_state_data(conn_info, data, (size_t)data_len) < 0) {
+    if (kafka_store_state_data(conn_info, data, (size_t)data_len, direction) < 0) {
         bpf_dbg_printk("is_kafka: 4 bytes packet, storing state data");
         return 0;
     }
 
     struct kafka_hdr hdr = {};
-    int res = kafka_parse_fixup_header(conn_info, &hdr, data, data_len);
+    int res = kafka_parse_fixup_header(conn_info, &hdr, data, data_len, direction);
     if (res == 0) {
         bpf_dbg_printk("is_kafka: failed to parse kafka header");
         unsigned char tmp[20];
