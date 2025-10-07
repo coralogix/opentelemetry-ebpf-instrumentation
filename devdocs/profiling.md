@@ -1,6 +1,6 @@
 # OBI profiling
 
-To profile a OBI while it is instrumenting an application do the following:
+To profile OBI while it is instrumenting an application do the following:
 
 1. Run OBI with the `OTEL_EBPF_PROFILE_PORT` variable set, e.g. 6060.
 2. Download the required profiles:
