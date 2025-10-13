@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 
 	"go.opentelemetry.io/obi/pkg/internal/netolly/ebpf"
@@ -36,18 +37,18 @@ var netLookupAddr = net.LookupAddr
 // from the documentation. This means that it does not impact in the overall Beyla performance.
 type ReverseDNS struct {
 	// Type of ReverseDNS. Values are "none" (default), "local" and "ebpf"
-	Type string `yaml:"type" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_TYPE"`
+	Type string `yaml:"type" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_TYPE" validate:"oneof=none local ebpf"`
 
 	// CacheLen only applies to the "local" and "ebpf" ReverseDNS type. It
 	// specifies the max size of the LRU cache that is checked before
 	// performing the name lookup. Default: 256
-	CacheLen int `yaml:"cache_len" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_CACHE_LEN"`
+	CacheLen int `yaml:"cache_len" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_CACHE_LEN" validate:"reverseDnsCacheLen"`
 
 	// CacheTTL only applies to the "local" and "ebpf" ReverseDNS type. It
 	// specifies the time-to-live of a cached IP->hostname entry. After the
 	// cached entry becomes older than this time, the IP->hostname entry will be looked
 	// up again.
-	CacheTTL time.Duration `yaml:"cache_expiry" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_CACHE_TTL"`
+	CacheTTL time.Duration `yaml:"cache_expiry" env:"OTEL_EBPF_NETWORK_REVERSE_DNS_CACHE_TTL" validate:"reverseDnsCacheTTL"`
 }
 
 func (r ReverseDNS) Enabled() bool {
@@ -114,4 +115,32 @@ func optGetName(log *slog.Logger, cache *expirable.LRU[ebpf.IPAddr, string], ip 
 	// return empty string. In a later pipeline stage it will be decorated with
 	// the actual IP
 	return ""
+}
+
+func ValidateReverseDNSCacheTTL(fl validator.FieldLevel) bool {
+	// Obtain the entire struct that the field CacheTTL belongs to
+	reverseDNS, ok := fl.Parent().Interface().(ReverseDNS)
+	if !ok {
+		// it should not happen
+		return false
+	}
+
+	if reverseDNS.Type == ReverseDNSNone && reverseDNS.CacheTTL != 0 {
+		return false
+	}
+	return true
+}
+
+func ValidateReverseDNSCacheLen(fl validator.FieldLevel) bool {
+	// Obtain the entire struct that the field CacheLen belongs to
+	reverseDNS, ok := fl.Parent().Interface().(ReverseDNS)
+	if !ok {
+		// it should not happen
+		return false
+	}
+
+	if reverseDNS.Type == ReverseDNSNone && reverseDNS.CacheLen != 0 {
+		return false
+	}
+	return true
 }
