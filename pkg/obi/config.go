@@ -97,6 +97,9 @@ var DefaultConfig = Config{
 				GraphQL: config.GraphQLConfig{
 					Enabled: false,
 				},
+				AWS: config.AWSConfig{
+					Enabled: false,
+				},
 			},
 		},
 		MaxTransactionTime: 5 * time.Minute,
