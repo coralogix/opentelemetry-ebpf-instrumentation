@@ -42,6 +42,8 @@ func appendTCPLargeBuffer(parseCtx *EBPFParseContext, record *ringbuf.Record) (r
 		connInfo:   event.ConnInfo,
 	}
 
+	fmt.Println("GREPME appendTCPLargeBuffer(", event.Action, ") pt dir len", key.packetType, key.direction, event.Len, "[", string(record.RawSample[hdrSize:hdrSize+event.Len]), "]", key.traceID, key.connInfo)
+
 	switch event.Action {
 	case largeBufferActionInit:
 		newBuffer := make([]byte, event.Len)
@@ -71,8 +73,11 @@ func extractTCPLargeBuffer(parseCtx *EBPFParseContext, traceID [16]uint8, packet
 	}
 
 	if lb, ok := parseCtx.largeBuffers.Get(key); ok {
+		fmt.Println("GREPME extractTCPLargeBuffer pt dir len", key.packetType, key.direction, len(lb.buf), "[", string(lb.buf), "]", key.traceID, key.connInfo)
 		parseCtx.largeBuffers.Remove(key)
 		return lb.buf, true
+	} else {
+		fmt.Println("GREPME extractTCPLargeBuffer NOT FOUND!", key.packetType, key.direction, key.traceID, key.connInfo)
 	}
 
 	return nil, false
