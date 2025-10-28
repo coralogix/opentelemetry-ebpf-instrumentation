@@ -25,14 +25,19 @@ type elasticsearchOperation struct {
 }
 
 const (
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search
 	pathSearch string = "_search"
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-msearch
+	pathMSearch string = "_msearch"
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk
+	pathBulk string = "_bulk"
 )
 
 func ElasticsearchSpan(baseSpan *request.Span, req *http.Request, resp *http.Response) (request.Span, bool) {
 	if !isElasticsearchResponse(resp) {
 		return *baseSpan, false
 	}
-	if err := isSearchRequest(req); err != nil {
+	if err := isSupportedRequest(req); err != nil {
 		slog.Debug(err.Error())
 		return *baseSpan, false
 	}
@@ -93,16 +98,26 @@ func extractDBQueryText(body []byte) (string, error) {
 	return buf.String(), nil
 }
 
-func isSearchRequest(req *http.Request) error {
-	// let's focus only on _search operation that has only GET and POST http methods
-	if !strings.Contains(req.URL.Path, pathSearch) {
-		return errors.New("parse Elasticsearch search request: unsupported endpoint")
+func isSupportedRequest(req *http.Request) error {
+	switch {
+	case strings.Contains(req.URL.Path, pathSearch):
+		if req.Method != http.MethodGet && req.Method != http.MethodPost {
+			return errors.New("parse Elasticsearch search request: unsupported method")
+		}
+		return nil
+	case strings.Contains(req.URL.Path, pathMSearch):
+		if req.Method != http.MethodGet && req.Method != http.MethodPost {
+			return errors.New("parse Elasticsearch msearch request: unsupported method")
+		}
+		return nil
+	case strings.Contains(req.URL.Path, pathBulk):
+		if req.Method != http.MethodPost && req.Method != http.MethodPut {
+			return errors.New("parse Elasticsearch bulk request: unsupported method")
+		}
+		return nil
 	}
 
-	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		return errors.New("parse Elasticsearch search request: unsupported method")
-	}
-	return nil
+	return errors.New("parse Elasticsearch request: unsupported endpoint")
 }
 
 // isElasticsearchResponse checks if X-Elastic-Product HTTP header is present.

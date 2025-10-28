@@ -87,6 +87,26 @@ func TestParseElasticsearchRequest(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name:  "Valid POST request for a msearch query",
+			input: newRequest(http.MethodGet, "/_msearch", `[{},{"query":{"match":{"message":"this is a test"}}},{"index":"my-index-000002"},{"query":{"match_all":{}}}]`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "[{},{\"query\":{\"match\":{\"message\":\"this is a test\"}}},{\"index\":\"my-index-000002\"},{\"query\":{\"match_all\":{}}}]",
+				DBOperationName:  "msearch",
+				DBCollectionName: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Valid POST request for a bulk query",
+			input: newRequest(http.MethodGet, "/test_index/_bulk", `[{"index":{"_index":"test","_id":"1"}},{"field1":"value1"},{"delete":{"_index":"test","_id":"2"}},{"create":{"_index":"test","_id":"3"}},{"field1":"value3"},{"update":{"_id":"1","_index":"test"}},{"doc":{"field2":"value2"}}]`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "[{\"index\":{\"_index\":\"test\",\"_id\":\"1\"}},{\"field1\":\"value1\"},{\"delete\":{\"_index\":\"test\",\"_id\":\"2\"}},{\"create\":{\"_index\":\"test\",\"_id\":\"3\"}},{\"field1\":\"value3\"},{\"update\":{\"_id\":\"1\",\"_index\":\"test\"}},{\"doc\":{\"field2\":\"value2\"}}]",
+				DBOperationName:  "bulk",
+				DBCollectionName: "test_index",
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
