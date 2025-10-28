@@ -9,9 +9,9 @@ services:
 
   testserver:
     build:
-      context: ../../test/integration/components/pythons3client/
+      context: ../../test/integration/components/pythonawsclient/
       dockerfile: Dockerfile
-    image: hatest-testserver-python-s3client
+    image: hatest-testserver-python-aws-client
     ports:
       - "${TEST_SERVICE_PORTS}"
     depends_on:
