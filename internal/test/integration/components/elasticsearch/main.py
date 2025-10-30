@@ -65,7 +65,6 @@ async def search():
         sys.exit(1)
     return {"status": "OK"}
 
-# it is not used for integration testing, only for manual testing
 @app.get("/msearch")
 async def msearch():
     ELASTICSEARCH_URL = ELASTICSEARCH_HOST + "/_msearch"
@@ -95,40 +94,8 @@ async def msearch():
         sys.exit(1)
     return {"status": "OK"}
 
-# it is not used for integration testing, only for manual testing
-@app.get("/bulk/action")
-async def bulk():
-    ELASTICSEARCH_URL = ELASTICSEARCH_HOST + "/_bulk"
-    actions=[
-        {
-            "index": {
-                "_index": "aaa",
-                "_id": "1"
-            }
-        },
-        {
-            "field1": "value1"
-        },
-        {
-            "index": {
-                "_index": "bbb",
-                "_id": "2"
-            }
-        },
-        {
-            "field2": "value2"
-        },
-    ]
-    ndjson_body = "\n".join([json.dumps(op) for op in actions]) + "\n"
-    try:
-        response = requests.post(ELASTICSEARCH_URL, data=ndjson_body, headers=HEADERS)
 
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
-    return {"status": "OK"}
-
-@app.get("/bulk/actions")
+@app.get("/bulk")
 async def bulk():
     ELASTICSEARCH_URL = ELASTICSEARCH_HOST + "/_bulk"
     actions=[
@@ -168,9 +135,8 @@ async def bulk():
             }
         }
     ]
-    ndjson_body = "\n".join([json.dumps(op) for op in actions]) + "\n"
     try:
-        response = requests.post(ELASTICSEARCH_URL, data=ndjson_body, headers=HEADERS)
+        response = requests.post(ELASTICSEARCH_URL, json=actions, headers=HEADERS)
 
     except Exception as e:
         print(json.dumps({"error": str(e)}))
