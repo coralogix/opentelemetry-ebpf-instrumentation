@@ -25,7 +25,7 @@ func TestParseElasticsearchRequest(t *testing.T) {
 			name:  "Valid POST request for a search query",
 			input: newRequest(http.MethodPost, "/test_index/_search", `{"query": {"match_all": {}}}`),
 			expected: elasticsearchOperation{
-				DBQueryText:      "{\"query\":{\"match_all\":{}}}",
+				DBQueryText:      "{\"query\": {\"match_all\": {}}}",
 				DBOperationName:  "search",
 				DBCollectionName: "test_index",
 			},
@@ -62,16 +62,10 @@ func TestParseElasticsearchRequest(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:     "Malformed JSON",
-			input:    newRequest(http.MethodGet, "/test_index/_search", `{`),
-			expected: elasticsearchOperation{},
-			wantErr:  true,
-		},
-		{
 			name:  "Valid Post request with wrong query JSON type",
 			input: newRequest(http.MethodPost, "/test_index/_search", `{"query": "not_object"}`),
 			expected: elasticsearchOperation{
-				DBQueryText:      "{\"query\":\"not_object\"}",
+				DBQueryText:      "{\"query\": \"not_object\"}",
 				DBOperationName:  "search",
 				DBCollectionName: "test_index",
 			},
@@ -84,6 +78,71 @@ func TestParseElasticsearchRequest(t *testing.T) {
 				DBQueryText:      "{\"query\":{\"match_all\":{}}}",
 				DBOperationName:  "search",
 				DBCollectionName: "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid POST request for a msearch query",
+			input: newRequest(http.MethodPost, "/_msearch", `{}
+{"query":{"match":{"message":"this is a test"}}}
+{"index":"my-index-000002"}
+{"query":{"match_all":{}}}
+`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "{}\n{\"query\":{\"match\":{\"message\":\"this is a test\"}}}\n{\"index\":\"my-index-000002\"}\n{\"query\":{\"match_all\":{}}}\n",
+				DBOperationName:  "msearch",
+				DBCollectionName: "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid POST request for a bulk operation with one action",
+			input: newRequest(http.MethodPost, "/test_index/_bulk", `{"index":{"_index":"aaa","_id":"1"}}
+{"field1":"value1"}
+{"index":{"_index":"bbb","_id":"2"}}
+{"field2":"value2"}
+`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "{\"index\":{\"_index\":\"aaa\",\"_id\":\"1\"}}\n{\"field1\":\"value1\"}\n{\"index\":{\"_index\":\"bbb\",\"_id\":\"2\"}}\n{\"field2\":\"value2\"}\n",
+				DBOperationName:  "bulk",
+				DBCollectionName: "test_index",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Valid POST request for a bulk operation with different actions",
+			input: newRequest(http.MethodPost, "/test_index/_bulk", `{"index":{"_index":"test","_id":"1"}}
+{"field1":"value1"}
+{"delete":{"_index":"test","_id":"2"}}
+{"create":{"_index":"test","_id":"3"}}
+{"field1":"value3"}
+{"update":{"_id":"1","_index":"test"}}
+{"doc":{"field2":"value2"}}
+`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "{\"index\":{\"_index\":\"test\",\"_id\":\"1\"}}\n{\"field1\":\"value1\"}\n{\"delete\":{\"_index\":\"test\",\"_id\":\"2\"}}\n{\"create\":{\"_index\":\"test\",\"_id\":\"3\"}}\n{\"field1\":\"value3\"}\n{\"update\":{\"_id\":\"1\",\"_index\":\"test\"}}\n{\"doc\":{\"field2\":\"value2\"}}\n",
+				DBOperationName:  "bulk",
+				DBCollectionName: "test_index",
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Valid GET request for a doc operation",
+			input: newRequest(http.MethodGet, "/test_index/_doc/1?stored_fields=tags,counter", ""),
+			expected: elasticsearchOperation{
+				DBQueryText:      "",
+				DBOperationName:  "doc",
+				DBCollectionName: "test_index",
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Valid POST request for a doc operation",
+			input: newRequest(http.MethodPost, "/test_index/_doc/", `{"message":"hello world"}`),
+			expected: elasticsearchOperation{
+				DBQueryText:      "{\"message\":\"hello world\"}",
+				DBOperationName:  "doc",
+				DBCollectionName: "test_index",
 			},
 			wantErr: false,
 		},

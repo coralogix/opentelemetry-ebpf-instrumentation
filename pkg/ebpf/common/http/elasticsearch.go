@@ -5,7 +5,6 @@ package ebpfcommon
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,25 +23,33 @@ type elasticsearchOperation struct {
 	DBCollectionName string
 }
 
-const (
-	pathSearch string = "_search"
-)
+var supportedOperationMethods = map[string]map[string]struct{}{
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-search
+	"_search": {http.MethodPost: {}, http.MethodGet: {}},
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-msearch
+	"_msearch": {http.MethodPost: {}, http.MethodGet: {}},
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk
+	"_bulk": {http.MethodPost: {}, http.MethodPut: {}},
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-get
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-index
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-delete
+	// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-exists
+	"_doc": {http.MethodGet: {}, http.MethodPost: {}, http.MethodPut: {}, http.MethodHead: {}, http.MethodDelete: {}},
+}
 
 func ElasticsearchSpan(baseSpan *request.Span, req *http.Request, resp *http.Response) (request.Span, bool) {
 	if !isElasticsearchResponse(resp) {
 		return *baseSpan, false
 	}
-	if err := isSearchRequest(req); err != nil {
+	if err := isSupportedRequest(req); err != nil {
 		slog.Debug(err.Error())
 		return *baseSpan, false
 	}
-
 	op, err := parseElasticsearchRequest(req)
 	if err != nil {
 		slog.Debug("parse Elasticsearch request", "error", err)
 		return *baseSpan, false
 	}
-
 	if resp != nil {
 		if v := resp.Header.Get("X-Found-Handling-Instance"); v != "" {
 			op.NodeName = v
@@ -67,42 +74,29 @@ func parseElasticsearchRequest(req *http.Request) (elasticsearchOperation, error
 	if err != nil {
 		return op, fmt.Errorf("failed to read Elasticsearch request body %w", err)
 	}
-
 	req.Body = io.NopCloser(bytes.NewBuffer(reqB))
-	if len(reqB) == 0 {
-		op.DBQueryText = ""
-	} else {
-		dbQueryText, err := extractDBQueryText(reqB)
-		if err != nil {
-			return op, err
-		}
-		op.DBQueryText = dbQueryText
-	}
-	op.DBOperationName = extractOperationName(req)
+	operationName := extractOperationName(req)
+	op.DBQueryText = string(reqB)
+	op.DBOperationName = operationName
 	op.DBCollectionName = extractDBCollectionName(req)
 	return op, nil
 }
 
-func extractDBQueryText(body []byte) (string, error) {
-	var buf bytes.Buffer
+func isSupportedRequest(req *http.Request) error {
+	urlPath := req.URL.Path
 
-	if err := json.Compact(&buf, body); err != nil {
-		return "", fmt.Errorf("invalid Elasticsearch JSON body: %w", err)
+	for operation, methods := range supportedOperationMethods {
+		if strings.Contains(urlPath, operation) {
+
+			_, supported := methods[req.Method]
+			if supported {
+				return nil
+			}
+			return fmt.Errorf("parse Elasticsearch %s request: unsupported method %s", operation, req.Method)
+		}
 	}
 
-	return buf.String(), nil
-}
-
-func isSearchRequest(req *http.Request) error {
-	// let's focus only on _search operation that has only GET and POST http methods
-	if !strings.Contains(req.URL.Path, pathSearch) {
-		return errors.New("parse Elasticsearch search request: unsupported endpoint")
-	}
-
-	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		return errors.New("parse Elasticsearch search request: unsupported method")
-	}
-	return nil
+	return errors.New("parse Elasticsearch request: unsupported endpoint")
 }
 
 // isElasticsearchResponse checks if X-Elastic-Product HTTP header is present.
@@ -121,12 +115,15 @@ func extractOperationName(req *http.Request) string {
 	if path == "" {
 		return ""
 	}
+
 	parts := strings.Split(path, "/")
-	if len(parts) == 0 {
-		return ""
+
+	for _, part := range parts {
+		if part != "" && strings.HasPrefix(part, "_") {
+			return strings.TrimPrefix(part, "_")
+		}
 	}
-	name := parts[len(parts)-1]
-	return strings.TrimPrefix(name, "_")
+	return ""
 }
 
 // extractDBCollectionName takes into account this rule from semconv

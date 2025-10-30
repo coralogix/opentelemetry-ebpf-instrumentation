@@ -38,7 +38,7 @@ func populate(t *testing.T, url string) {
 }
 
 func testElasticsearchSearch(t *testing.T, comm, url, index string) {
-	queryText := "{\"query\":{\"match\":{\"name\":\"OBI\"}}}"
+	queryText := "{\"query\": {\"match\": {\"name\": \"OBI\"}}}"
 	urlPath := "/search"
 	ti.DoHTTPGet(t, url+urlPath, 200)
 
