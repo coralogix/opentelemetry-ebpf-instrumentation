@@ -34,9 +34,9 @@ func ilog() *slog.Logger {
 	return slog.With("component", "ebpf.Instrumenter")
 }
 
-func closeAll(closers []io.Closer) {
-	for i := range closers {
-		closers[i].Close()
+func closeLinks(links []link.Link) {
+	for i := range links {
+		links[i].Close()
 	}
 }
 
@@ -46,33 +46,35 @@ func (i *instrumenter) goprobes(p Tracer) error {
 
 	i.gatherGoOffsets(goProbes)
 
-	closers, err := i.instrumentProbes(i.exe, goProbes)
+	var err error
+	i.links, err = i.instrumentProbes(i.exe, goProbes)
 	if err != nil {
 		return err
 	}
 
-	i.closables = append(i.closables, closers...)
-	p.AddCloser(i.closables...)
+	for _, lnk := range i.links {
+		p.AddCloser(lnk)
+	}
 
 	return nil
 }
 
-func (i *instrumenter) instrumentProbes(exe *link.Executable, probes map[string][]*ebpfcommon.ProbeDesc) ([]io.Closer, error) {
+func (i *instrumenter) instrumentProbes(exe *link.Executable, probes map[string][]*ebpfcommon.ProbeDesc) ([]link.Link, error) {
 	log := ilog().With("probes", "instrumentProbes")
 
-	var closers []io.Closer
+	var links []link.Link
 
 	for symbolName, probeArray := range probes {
 		for _, probe := range probeArray {
 			log.Debug("going to instrument function", "function", symbolName, "programs", probe)
 
-			cls, err := i.uprobe(exe, probe)
+			newLinks, err := i.uprobe(exe, probe)
 
 			if err != nil {
-				closeAll(cls)
+				closeLinks(newLinks)
 
 				if probe.Required {
-					closeAll(closers)
+					closeLinks(links)
 					if i.metrics != nil {
 						i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingUprobe)
 					}
@@ -82,12 +84,12 @@ func (i *instrumenter) instrumentProbes(exe *link.Executable, probes map[string]
 				// error will be common here since this could be no openssl loaded
 				log.Debug("error instrumenting uprobe", "function", symbolName, "error", err)
 			} else {
-				closers = append(closers, cls...)
+				links = append(links, newLinks...)
 			}
 		}
 	}
 
-	return closers, nil
+	return links, nil
 }
 
 func (i *instrumenter) kprobes(p KprobesTracer) error {
@@ -105,7 +107,9 @@ func (i *instrumenter) kprobes(p KprobesTracer) error {
 
 			log.Debug("error instrumenting kprobe", "function", kfunc, "error", err)
 		}
-		p.AddCloser(i.closables...)
+		for _, lnk := range i.links {
+			p.AddCloser(lnk)
+		}
 	}
 
 	return nil
@@ -120,7 +124,7 @@ func (i *instrumenter) kprobe(funcName string, programs ebpfcommon.ProbeDesc) er
 			}
 			return fmt.Errorf("setting kprobe: %w", err)
 		}
-		i.closables = append(i.closables, kp)
+		i.links = append(i.links, kp)
 	}
 
 	if programs.End != nil {
@@ -133,7 +137,7 @@ func (i *instrumenter) kprobe(funcName string, programs ebpfcommon.ProbeDesc) er
 			}
 			return fmt.Errorf("setting kretprobe: %w", err)
 		}
-		i.closables = append(i.closables, kp)
+		i.links = append(i.links, kp)
 	}
 
 	return nil
@@ -254,13 +258,18 @@ func (i *instrumenter) uprobes(pid int32, p Tracer) error {
 				continue
 			}
 
-			closers, err := i.instrumentProbes(libExe, m.probes[j])
+			links, err := i.instrumentProbes(libExe, m.probes[j])
 			if err != nil {
 				log.Debug("error instrumenting probes", "error", err)
 				continue
 			}
 
 			log.Debug("adding module for instrumenter and incrementing reference count", "path", m.instrPath, "ino", instrumentedIno)
+
+			var closers []io.Closer
+			for _, lnk := range links {
+				closers = append(closers, lnk)
+			}
 
 			// We bump the count of uses of the underlying shared library with a new executable
 			p.RecordInstrumentedLib(instrumentedIno, closers)
@@ -271,8 +280,8 @@ func (i *instrumenter) uprobes(pid int32, p Tracer) error {
 	return nil
 }
 
-func (i *instrumenter) uprobe(exe *link.Executable, probe *ebpfcommon.ProbeDesc) ([]io.Closer, error) {
-	var closers []io.Closer
+func (i *instrumenter) uprobe(exe *link.Executable, probe *ebpfcommon.ProbeDesc) ([]link.Link, error) {
+	var links []link.Link
 
 	if probe.Start != nil {
 		up, err := exe.Uprobe("", probe.Start, &link.UprobeOptions{
@@ -282,10 +291,10 @@ func (i *instrumenter) uprobe(exe *link.Executable, probe *ebpfcommon.ProbeDesc)
 			if i.metrics != nil {
 				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingUprobe)
 			}
-			return closers, fmt.Errorf("setting uprobe (offset): %w", err)
+			return links, fmt.Errorf("setting uprobe (offset): %w", err)
 		}
 
-		closers = append(closers, up)
+		links = append(links, up)
 	}
 
 	if probe.End != nil {
@@ -293,7 +302,7 @@ func (i *instrumenter) uprobe(exe *link.Executable, probe *ebpfcommon.ProbeDesc)
 			if i.metrics != nil {
 				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingUprobe)
 			}
-			return closers, errors.New("setting uretprobe (attaching to offset): missing return offsets")
+			return links, errors.New("setting uretprobe (attaching to offset): missing return offsets")
 		}
 
 		for _, offset := range probe.ReturnOffsets {
@@ -304,14 +313,14 @@ func (i *instrumenter) uprobe(exe *link.Executable, probe *ebpfcommon.ProbeDesc)
 				if i.metrics != nil {
 					i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorAttachingUprobe)
 				}
-				return closers, fmt.Errorf("setting uretprobe (attaching to offset): %w", err)
+				return links, fmt.Errorf("setting uretprobe (attaching to offset): %w", err)
 			}
 
-			closers = append(closers, up)
+			links = append(links, up)
 		}
 	}
 
-	return closers, nil
+	return links, nil
 }
 
 func (i *instrumenter) sockfilters(p Tracer) error {
@@ -406,7 +415,9 @@ func (i *instrumenter) tracepoints(p KprobesTracer) error {
 			}
 			return fmt.Errorf("instrumenting function %q: %w", sfunc, err)
 		}
-		p.AddCloser(i.closables...)
+		for _, lnk := range i.links {
+			p.AddCloser(lnk)
+		}
 	}
 
 	return nil
@@ -421,14 +432,14 @@ func (i *instrumenter) tracepoint(funcName string, programs ebpfcommon.ProbeDesc
 			return errors.New("invalid tracepoint type, must contain / in the name to separate the type and function name")
 		}
 		parts := strings.Split(funcName, "/")
-		kp, err := link.Tracepoint(parts[0], parts[1], programs.Start, nil)
+		tp, err := link.Tracepoint(parts[0], parts[1], programs.Start, nil)
 		if err != nil {
 			if i.metrics != nil {
 				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorInvalidTracepoint)
 			}
 			return fmt.Errorf("setting syscall: %w", err)
 		}
-		i.closables = append(i.closables, kp)
+		i.links = append(i.links, tp)
 	}
 
 	return nil

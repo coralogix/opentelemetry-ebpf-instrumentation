@@ -7,14 +7,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/cilium/ebpf"
@@ -25,8 +26,9 @@ import (
 	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
 	common "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
-	"go.opentelemetry.io/obi/pkg/internal/ebpf/convenience"
+	ebpfconvenience "go.opentelemetry.io/obi/pkg/internal/ebpf/convenience"
 	"go.opentelemetry.io/obi/pkg/internal/goexec"
+	"go.opentelemetry.io/obi/pkg/obi"
 	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
 
@@ -37,7 +39,7 @@ func ptlog() *slog.Logger { return slog.With("component", "ebpf.ProcessTracer") 
 type instrumenter struct {
 	offsets     *goexec.Offsets
 	exe         *link.Executable
-	closables   []io.Closer
+	links       []link.Link
 	modules     map[uint64]struct{}
 	metrics     imetrics.Reporter
 	processName string
@@ -108,13 +110,14 @@ func unloadInternalMaps(eventContext *common.EBPFEventContext) {
 	eventContext.EBPFMaps = make(map[string]*ebpf.Map)
 }
 
-func NewProcessTracer(tracerType ProcessTracerType, programs []Tracer, shutdownTimeout time.Duration, metrics imetrics.Reporter) *ProcessTracer {
+func NewProcessTracer(tracerType ProcessTracerType, programs []Tracer, cfg *obi.Config, metrics imetrics.Reporter) *ProcessTracer {
 	return &ProcessTracer{
 		Programs:        programs,
 		Type:            tracerType,
 		Instrumentables: map[uint64]*instrumenter{},
-		shutdownTimeout: shutdownTimeout,
+		shutdownTimeout: cfg.ShutdownTimeout,
 		metrics:         metrics,
+		printLinkStats:  cfg.EBPF.PrintLinkStatsOnSIGUSR2,
 	}
 }
 
@@ -261,7 +264,76 @@ func (pt *ProcessTracer) loadTracer(eventContext *common.EBPFEventContext, p Tra
 		return err
 	}
 
+	if pt.Type == Generic && pt.printLinkStats {
+		go pt.linkStats(i.links)
+	}
+
 	return nil
+}
+
+func (pt *ProcessTracer) linkStats(links []link.Link) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR2)
+
+	for {
+		<-ch
+
+		pt.log.Info("printing eBPF link stats upon receiving SIGUSR2", "num_links", len(links))
+		for _, lnk := range links {
+			info, err := lnk.Info()
+			if err != nil {
+				pt.log.Debug("unable to get link info", "error", err)
+				continue
+			}
+
+			perfEventInfo := info.PerfEvent()
+			if perfEventInfo == nil {
+				// not a perf event link
+				continue
+			}
+
+			kprobeInfo := perfEventInfo.Kprobe()
+			if kprobeInfo == nil {
+				// not a kprobe link
+				continue
+			}
+
+			missed, ok := kprobeInfo.Missed()
+			if !ok {
+				pt.log.Debug("unable to get missed count for kprobe link", "link", lnk)
+				continue
+			}
+
+			prog, err := ebpf.NewProgramFromID(info.Program)
+			if err != nil {
+				pt.log.Debug("unable to get program for link", "program_id", info.Program, "error", err)
+				continue
+			}
+
+			progInfo, err := prog.Info()
+			if err != nil {
+				pt.log.Debug("unable to get program info for link", "program_id", info.Program, "error", err)
+				continue
+			}
+
+			progStats, err := prog.Stats()
+			if err != nil {
+				pt.log.Debug("unable to get program stats for link", "program_id", info.Program, "error", err)
+				continue
+			}
+
+			pt.log.Info(
+				"eBPF link stats",
+				"link_id", info.ID,
+				"program_id", info.Program,
+				"program_name", progInfo.Name,
+				"kprobe_missed_count", missed,
+				"total_runtime", progStats.Runtime.String(),
+				"run_count", progStats.RunCount,
+				"recursion_misses", progStats.RecursionMisses,
+			)
+		}
+	}
 }
 
 func (pt *ProcessTracer) loadTracers(eventContext *common.EBPFEventContext) error {
@@ -343,9 +415,9 @@ func (pt *ProcessTracer) NewExecutable(exe *link.Executable, ie *Instrumentable)
 
 func (pt *ProcessTracer) UnlinkExecutable(info *exec.FileInfo) {
 	if i, ok := pt.Instrumentables[info.Ino]; ok {
-		for _, c := range i.closables {
-			if err := c.Close(); err != nil {
-				pt.log.Debug("Unable to close on unlink", "closable", c)
+		for _, lnk := range i.links {
+			if err := lnk.Close(); err != nil {
+				pt.log.Debug("Unable to close on unlink", "link", lnk, "error", err)
 			}
 		}
 		for ino := range i.modules {

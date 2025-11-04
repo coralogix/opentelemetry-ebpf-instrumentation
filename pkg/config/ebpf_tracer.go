@@ -114,6 +114,9 @@ type EBPFTracer struct {
 
 	// DNS timeout after which we report failed event
 	DNSRequestTimeout time.Duration `yaml:"dns_request_timeout" env:"OTEL_EBPF_BPF_DNS_REQUEST_TIMEOUT"`
+
+	// Enables printing eBPF link statistics (eg. kprobe nmissed) upon receiving SIGUSR2
+	PrintLinkStatsOnSIGUSR2 bool `yaml:"print_link_stats_on_sigusr2" env:"OTEL_EBPF_PRINT_LINK_STATS_ON_SIGUSR2" validate:"boolean"`
 }
 
 // Per-protocol data buffer size in bytes.
