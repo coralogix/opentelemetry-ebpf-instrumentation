@@ -33,7 +33,6 @@ type (
 
 func GraphQLSpan(baseSpan *request.Span, req *http.Request, _ *http.Response) (request.Span, bool) {
 	if req.Method != http.MethodPost {
-		slog.Debug("parse GraphQL request: unsupported method")
 		return *baseSpan, false
 	}
 

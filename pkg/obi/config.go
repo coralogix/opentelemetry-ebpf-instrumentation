@@ -117,6 +117,10 @@ var DefaultConfig = Config{
 			},
 		},
 		MaxTransactionTime: 5 * time.Minute,
+		LogEnricher: config.LogEnricherConfig{
+			CacheTTL:  30 * time.Minute,
+			CacheSize: 128,
+		},
 	},
 	NameResolver: &transform.NameResolverConfig{
 		Sources:  []transform.Source{transform.SourceK8s},
