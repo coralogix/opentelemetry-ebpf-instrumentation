@@ -142,12 +142,13 @@ type EBPFParseContext struct {
 }
 
 type EBPFEventContext struct {
-	CommonPIDsFilter ServiceFilter
-	SharedRingBuffer *ringBufForwarder
-	EBPFMaps         map[string]*ebpf.Map
-	RingBufLock      sync.Mutex
-	MapsLock         sync.Mutex
-	LoadLock         sync.Mutex
+	CommonPIDsFilter      ServiceFilter
+	LogEnricherPIDsFilter ServiceFilter
+	SharedRingBuffer      *ringBufForwarder
+	EBPFMaps              map[string]*ebpf.Map
+	RingBufLock           sync.Mutex
+	MapsLock              sync.Mutex
+	LoadLock              sync.Mutex
 }
 
 var MisclassifiedEvents = make(chan MisclassifiedEvent)
