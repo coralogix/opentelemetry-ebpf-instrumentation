@@ -58,18 +58,24 @@ static __always_inline void update_outgoing_request_span_id(pid_connection_info_
                                                             const egress_key_t *e_key) {
     http_info_t *h_info = bpf_map_lookup_elem(&ongoing_http, p_conn);
     if (h_info && tp->valid) {
-        bpf_dbg_printk("Found HTTP info, resetting the span id to %x%x", tcp->seq, tcp->ack);
+        bpf_dbg_printk("%s: found HTTP info, resetting the span id to seq=%x, ack=%x",
+                       __FUNCTION__,
+                       tcp->seq,
+                       tcp->ack);
+
         populate_span_id_from_tcp_info(&h_info->tp, tcp);
     }
 
     go_addr_key_t *g_key = bpf_map_lookup_elem(&go_ongoing_http, e_key);
     if (g_key) {
-        bpf_dbg_printk("Found Go HTTP info, trying to find the span id");
+        bpf_dbg_printk("%s: found Go HTTP info, trying to find the span id", __FUNCTION__);
         http_func_invocation_t *invocation =
             bpf_map_lookup_elem(&go_ongoing_http_client_requests, g_key);
         if (invocation) {
-            bpf_dbg_printk(
-                "Found Go HTTP invocation, resetting the span id to %x%x", tcp->seq, tcp->ack);
+            bpf_dbg_printk("%s: found Go HTTP invocation, resetting the span id to seq=%x, ack=%x",
+                           __FUNCTION__,
+                           tcp->seq,
+                           tcp->ack);
             populate_span_id_from_tcp_info(&invocation->tp, tcp);
         }
     }
@@ -80,12 +86,12 @@ encode_data_in_ip_options(struct __sk_buff *skb, protocol_info_t *tcp, tp_info_p
     // Handling IPv4
     // We only do this if the IP header doesn't have any options, this can be improved if needed
     if (tcp->h_proto == ETH_P_IP && tcp->ip_len == MIN_IP_LEN) {
-        bpf_dbg_printk("Adding the trace_id in the IP Options");
+        bpf_dbg_printk("%s: adding the trace_id in the IP Options", __FUNCTION__);
 
         inject_tc_ip_options_ipv4(skb, tcp, tp);
         tp->valid = 0;
     } else if (tcp->h_proto == ETH_P_IPV6 && tcp->l4_proto == IPPROTO_TCP) { // Handling IPv6
-        bpf_dbg_printk("Found IPv6 header");
+        bpf_dbg_printk("%s: found IPv6 header", __FUNCTION__);
 
         inject_tc_ip_options_ipv6(skb, tcp, tp);
         tp->valid = 0;
@@ -179,7 +185,7 @@ static __always_inline void track_sock(struct __sk_buff *skb, const connection_i
     const struct ethhdr *eth = (struct ethhdr *)(data);
 
     if ((void *)(eth + 1) > data_end) {
-        bpf_dbg_printk("bad size");
+        bpf_dbg_printk("%s: bad size", __FUNCTION__);
         return;
     }
 
@@ -190,7 +196,7 @@ static __always_inline void track_sock(struct __sk_buff *skb, const connection_i
     //bpf_printk("tuple %llx, next %llx, data end %llx", tuple, (void *)((u8 *)tuple + sizeof(*tuple)), data_end);
 
     if (!tuple) {
-        bpf_dbg_printk("bad tuple %llx, next %llx, data end %llx",
+        bpf_dbg_printk("track_sock: bad tuple=%llx, next=%llx, data end=%llx",
                        tuple,
                        (void *)(tuple + sizeof(struct bpf_sock_tuple)),
                        data_end);
@@ -198,7 +204,7 @@ static __always_inline void track_sock(struct __sk_buff *skb, const connection_i
     }
 
     struct bpf_sock *sk = lookup_sock_from_tuple(skb, tuple, proto, data_end);
-    bpf_dbg_printk("sk=%llx\n", sk);
+    bpf_dbg_printk("%s: sk=%llx", __FUNCTION__, sk);
 
     if (!sk) {
         return;
@@ -238,7 +244,7 @@ int obi_app_egress(struct __sk_buff *skb) {
     // deleted by the kprobes when tp->written == 1, but it does not hurt to
     // be robust
     if (tp->written) {
-        bpf_dbg_printk("tp already written by L7, not injecting IP options");
+        bpf_dbg_printk("%s: tp already written by L7, not injecting IP options", __FUNCTION__);
         bpf_map_delete_elem(&outgoing_trace_map, &e_key);
         return TC_ACT_UNSPEC;
     }
@@ -250,7 +256,8 @@ int obi_app_egress(struct __sk_buff *skb) {
     // means we haven't seen this request yet.
 
     p_conn.pid = tp->pid;
-    bpf_dbg_printk("egress flags %x, sequence %x, valid %d", tcp.flags, tcp.seq, tp->valid);
+    bpf_dbg_printk(
+        "%s: egress flags=%x, sequence=%x, valid=%d", __FUNCTION__, tcp.flags, tcp.seq, tp->valid);
     dbg_print_http_connection_info(&conn);
 
     // If it's the first packet of a request:

@@ -27,7 +27,7 @@ static __always_inline void print_tp(tp_info_pid_t *new_tp) {
     unsigned char tp_buf[TP_MAX_VAL_LENGTH];
 
     make_tp_string(tp_buf, &new_tp->tp);
-    bpf_dbg_printk("tp: %s", tp_buf);
+    bpf_dbg_printk("%s: tp=%s", __FUNCTION__, tp_buf);
 }
 
 static __always_inline void
@@ -39,12 +39,12 @@ parse_ip_options_ipv4(struct __sk_buff *skb, connection_info_t *conn, protocol_i
 
     sort_connection_info(conn);
     bpf_skb_load_bytes(skb, ip_off, &key, sizeof(key));
-    bpf_dbg_printk("options %llx, len = %d", key, tcp->ip_len);
+    bpf_dbg_printk("%s: options=%llx, len=%d", __FUNCTION__, key, tcp->ip_len);
     if (key == TC_TP_ID) {
         tp_info_pid_t *existing_tp =
             (tp_info_pid_t *)bpf_map_lookup_elem(&incoming_trace_map, conn);
         if (!existing_tp) {
-            bpf_dbg_printk("Found tp context in opts! ihl = %d", tcp->ip_len);
+            bpf_dbg_printk("%s: found tp context in opts! ihl=%d", __FUNCTION__, tcp->ip_len);
             tp_info_pid_t new_tp = {.pid = 0, .valid = 1};
             populate_span_id_from_tcp_info(&new_tp.tp, tcp);
 
@@ -56,14 +56,14 @@ parse_ip_options_ipv4(struct __sk_buff *skb, connection_info_t *conn, protocol_i
 
             bpf_map_update_elem(&incoming_trace_map, conn, &new_tp, BPF_ANY);
         } else {
-            bpf_dbg_printk("ignoring existing tp");
+            bpf_dbg_printk("%s: ignoring existing tp", __FUNCTION__);
         }
     }
 }
 
 static __always_inline void
 parse_ip_options_ipv6(struct __sk_buff *skb, connection_info_t *conn, protocol_info_t *tcp) {
-    bpf_dbg_printk("IPv6 ingress");
+    bpf_dbg_printk("%s: IPv6 ingress", __FUNCTION__);
     dbg_print_http_connection_info(conn);
 
     sort_connection_info(conn);
@@ -109,8 +109,10 @@ static __always_inline u8 inject_tc_ip_options_ipv4(struct __sk_buff *skb,
         new_hdr_len += (MAX_TC_TP_LEN / 4); // IHL is a number of 32bit words
         new_hdr_len |= hdr_ver & 0xf0;
 
-        bpf_dbg_printk(
-            "prev h_len %d, new_h_len %d, new_tot_len %d", hdr_len, new_hdr_len, new_tot_len);
+        bpf_dbg_printk("inject_tc_ip_options_ipv4: prev h_len=%d, new_h_len=%d, new_tot_len=%d",
+                       hdr_len,
+                       new_hdr_len,
+                       new_tot_len);
 
         bpf_skb_store_bytes(skb, offset_ip_tot_len, &new_tot_len, sizeof(u16), 0);
         bpf_skb_store_bytes(skb, ETH_HLEN, &new_hdr_len, sizeof(u8), 0);
