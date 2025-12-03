@@ -28,7 +28,7 @@ permissions:
 jobs:
   test-matrix:
     name: "Build integration_k8s matrix"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       matrix: ${{ steps.build-matrix.outputs.matrix }}
     steps:
@@ -51,7 +51,7 @@ jobs:
       pull-requests: write
       # Required for uploading artifacts
       actions: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.test-matrix.outputs.matrix) }}

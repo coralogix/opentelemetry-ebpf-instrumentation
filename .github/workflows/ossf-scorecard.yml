@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   analysis:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions:
       # Needed for Code scanning upload
       security-events: write
