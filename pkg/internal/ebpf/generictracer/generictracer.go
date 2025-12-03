@@ -213,6 +213,7 @@ func GenericTracerConstants(cfg *obi.Config) map[string]any {
 
 	m["http_buffer_size"] = cfg.EBPF.BufferSizes.HTTP
 	m["mysql_buffer_size"] = cfg.EBPF.BufferSizes.MySQL
+	m["kafka_buffer_size"] = cfg.EBPF.BufferSizes.Kafka
 	m["postgres_buffer_size"] = cfg.EBPF.BufferSizes.Postgres
 	m["max_transaction_time"] = uint64(cfg.EBPF.MaxTransactionTime.Nanoseconds())
 
