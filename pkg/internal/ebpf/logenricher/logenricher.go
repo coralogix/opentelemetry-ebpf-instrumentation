@@ -31,6 +31,7 @@ import (
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/internal/goexec"
+	"go.opentelemetry.io/obi/pkg/internal/shardedqueue"
 	"go.opentelemetry.io/obi/pkg/obi"
 	"go.opentelemetry.io/obi/pkg/pipe/msg"
 )
@@ -38,13 +39,20 @@ import (
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type log_event_t -target amd64,arm64 Bpf ../../../../bpf/logenricher/logenricher.c -- -I../../../../bpf -I../../../../bpf
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type log_event_t -target amd64,arm64 BpfDebug ../../../../bpf/logenricher/logenricher.c -- -I../../../../bpf -I../../../../bpf -DBPF_DEBUG
 
+type LogEvent struct {
+	orig    BpfLogEventT
+	logLine string
+}
+
 type Tracer struct {
-	cfg        *obi.Config
-	bpfObjects BpfObjects
-	closers    []io.Closer
-	log        *slog.Logger
-	pf         ebpfcommon.ServiceFilter
-	fdCache    *expirable.LRU[string, *os.File]
+	ctx         context.Context
+	cfg         *obi.Config
+	bpfObjects  BpfObjects
+	closers     []io.Closer
+	log         *slog.Logger
+	pf          ebpfcommon.ServiceFilter
+	fdCache     *expirable.LRU[string, *os.File]
+	asyncWriter *shardedqueue.ShardedQueue[LogEvent]
 }
 
 func New(pf ebpfcommon.ServiceFilter, cfg *obi.Config) *Tracer {
@@ -55,7 +63,7 @@ func New(pf ebpfcommon.ServiceFilter, cfg *obi.Config) *Tracer {
 		return nil
 	}
 
-	return &Tracer{
+	tr := &Tracer{
 		log: logger,
 		cfg: cfg,
 		pf:  pf,
@@ -63,6 +71,20 @@ func New(pf ebpfcommon.ServiceFilter, cfg *obi.Config) *Tracer {
 			f.Close()
 		}, cfg.EBPF.LogEnricher.CacheTTL),
 	}
+
+	asyncWriter := shardedqueue.NewShardedQueue[LogEvent](
+		cfg.EBPF.LogEnricher.AsyncWriterWorkers,
+		cfg.EBPF.LogEnricher.AsyncWriterChannelLen,
+		func(e LogEvent) string { return e.filePath() },
+		func(_ int, ch <-chan LogEvent) {
+			for e := range ch {
+				tr.handle(e)
+			}
+		},
+	)
+
+	tr.asyncWriter = asyncWriter
+	return tr
 }
 
 func (p *Tracer) Load() (*ebpf.CollectionSpec, error) {
@@ -237,6 +259,8 @@ func (p *Tracer) BlockPID(pid, ns uint32) {
 func (p *Tracer) Run(ctx context.Context, eventCtx *ebpfcommon.EBPFEventContext, _ *msg.Queue[[]request.Span]) {
 	p.log.Debug("starting")
 
+	p.ctx = ctx
+
 	if err := p.initPIDsMap(p.bpfObjects.LogEnricherPids); err != nil {
 		p.log.Error("failed to init pids map, not starting", "error", err)
 		return
@@ -270,56 +294,69 @@ func (p *Tracer) handleLogEvent(_ *ebpfcommon.EBPFParseContext, _ *config.EBPFTr
 		return request.Span{}, true, err
 	}
 
+	err = p.asyncWriter.Enqueue(p.ctx, LogEvent{
+		orig:    *event,
+		logLine: unix.ByteSliceToString(record.RawSample[hdrSize : hdrSize+event.Len]),
+	})
+	return request.Span{}, true, err
+}
+
+func (e LogEvent) filePath() string {
+	var fp string
+
 	procFdPath := func(fd int) string {
-		return filepath.Join("/proc", strconv.FormatUint(uint64(event.Tgid), 10), "fd", strconv.Itoa(fd))
+		return filepath.Join("/proc", strconv.FormatUint(uint64(e.orig.Tgid), 10), "fd", strconv.Itoa(fd))
 	}
 
-	var filePath string
-	if event.Fd != 0 {
+	if e.orig.Fd != 0 {
 		// This is a pipe write, use the target process pipe fd
-		filePath = procFdPath(int(event.Fd))
+		fp = procFdPath(int(e.orig.Fd))
 	} else {
 		// TTY write
-		filePath = unix.ByteSliceToString(event.FilePath[:])
-		if filePath == "" {
+		fp = unix.ByteSliceToString(e.orig.FilePath[:])
+		if fp == "" {
 			// Fallback to process stdout in the case path resolver failed
-			filePath = procFdPath(1)
+			fp = procFdPath(1)
 		}
 	}
 
+	return fp
+}
+
+func (p *Tracer) handle(e LogEvent) {
 	// Get or open the file descriptor
-	f, ok := p.fdCache.Get(filePath)
+	f, ok := p.fdCache.Get(e.filePath())
 	if !ok {
-		f2, err2 := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND, 0)
+		f2, err2 := os.OpenFile(e.filePath(), os.O_WRONLY|os.O_APPEND, 0)
 		if err2 != nil {
-			p.log.Error("failed to open log file for writing", "path", filePath, "error", err2)
-			return request.Span{}, true, err2
+			p.log.Error("failed to open log file for writing", "path", e.filePath(), "error", err2)
+			return
 		}
-		p.fdCache.Add(filePath, f2)
+		p.fdCache.Add(e.filePath(), f2)
 		f = f2
 	}
-
-	logLine := make([]byte, event.Len)
-	copy(logLine, record.RawSample[hdrSize:hdrSize+event.Len])
 
 	var (
 		zeroTraceID [16]uint8
 		zeroSpanID  [8]uint8
 	)
-	if event.PidTp.Tp.TraceId == zeroTraceID || event.PidTp.Tp.SpanId == zeroSpanID {
+	if e.orig.PidTp.Tp.TraceId == zeroTraceID || e.orig.PidTp.Tp.SpanId == zeroSpanID {
 		// No trace context to inject, write original log line
-		_, err = f.Write(logLine)
-		return request.Span{}, true, err
+		_, err := f.Write([]byte(e.logLine))
+		if err != nil {
+			p.log.Error("failed to write log line", "error", err)
+		}
+		return
 	}
 
 	var (
 		b       bytes.Buffer
-		spanID  = trace.SpanID(event.PidTp.Tp.SpanId)
-		traceID = trace.TraceID(event.PidTp.Tp.TraceId)
+		spanID  = trace.SpanID(e.orig.PidTp.Tp.SpanId)
+		traceID = trace.TraceID(e.orig.PidTp.Tp.TraceId)
 	)
 
 	var m map[string]any
-	if err := json.Unmarshal(logLine[:event.Len], &m); err == nil {
+	if err := json.Unmarshal([]byte(e.logLine), &m); err == nil {
 		// JSON -> enrich with context
 		m["trace_id"] = traceID.String()
 		m["span_id"] = spanID.String()
@@ -327,17 +364,19 @@ func (p *Tracer) handleLogEvent(_ *ebpfcommon.EBPFParseContext, _ *config.EBPFTr
 		out, err2 := json.Marshal(m)
 		if err2 != nil {
 			p.log.Warn("failed to marshal enriched log line, writing original", "error", err2)
-			b.Write(logLine[:event.Len])
-			return request.Span{}, true, nil
+			b.Write([]byte(e.logLine))
+			return
 		}
 
 		b.Write(out)
 		b.WriteByte('\n')
 	} else {
 		// Not JSON -> preserve the original logline
-		b.Write(logLine[:event.Len])
+		b.Write([]byte(e.logLine[:e.orig.Len]))
 	}
 
-	_, err = f.Write(b.Bytes())
-	return request.Span{}, true, err
+	_, err := f.Write(b.Bytes())
+	if err != nil {
+		p.log.Error("failed to write enriched log line", "error", err)
+	}
 }

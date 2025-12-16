@@ -39,7 +39,7 @@ typedef struct log_event {
 
 const log_event_t *log_event__unused __attribute__((unused));
 
-enum tty_driver_type__new {
+enum tty_driver_type___new {
     TTY_DRIVER_TYPE_SYSTEM,
     TTY_DRIVER_TYPE_CONSOLE,
     TTY_DRIVER_TYPE_SERIAL,
@@ -48,7 +48,7 @@ enum tty_driver_type__new {
     TTY_DRIVER_TYPE_SYSCONS,
 };
 
-enum tty_driver_subtype__new {
+enum tty_driver_subtype___new {
     SYSTEM_TYPE_TTY = 1,
     SYSTEM_TYPE_CONSOLE,
     SYSTEM_TYPE_SYSCONS,
@@ -71,7 +71,7 @@ struct tty_dev {
     struct tty_termios termios;
 };
 
-static __always_inline void tty_dev__fill(struct tty_dev *dev, struct tty_struct *tty) {
+static __always_inline void tty_dev_fill(struct tty_dev *dev, struct tty_struct *tty) {
     BPF_CORE_READ_INTO(&dev->major, tty, driver, major);
     BPF_CORE_READ_INTO(&dev->minor, tty, driver, minor_start);
     dev->minor += BPF_CORE_READ(tty, index);
@@ -79,16 +79,16 @@ static __always_inline void tty_dev__fill(struct tty_dev *dev, struct tty_struct
 }
 
 static __always_inline bool tty_driver_is_pty(struct tty_struct *tty) {
-    if (bpf_core_enum_value_exists(enum tty_driver_type__new, TTY_DRIVER_TYPE_PTY)) {
-        int typ = bpf_core_enum_value(enum tty_driver_type__new, TTY_DRIVER_TYPE_PTY);
+    if (bpf_core_enum_value_exists(enum tty_driver_type___new, TTY_DRIVER_TYPE_PTY)) {
+        int typ = bpf_core_enum_value(enum tty_driver_type___new, TTY_DRIVER_TYPE_PTY);
         return BPF_CORE_READ(tty, driver, type) == typ;
     }
     return BPF_CORE_READ(tty, driver, type) == k_tty_driver_type_pty;
 }
 
 static __always_inline bool tty_driver_is_master(struct tty_struct *tty) {
-    if (bpf_core_enum_value_exists(enum tty_driver_subtype__new, PTY_TYPE_MASTER)) {
-        int typ = bpf_core_enum_value(enum tty_driver_subtype__new, PTY_TYPE_MASTER);
+    if (bpf_core_enum_value_exists(enum tty_driver_subtype___new, PTY_TYPE_MASTER)) {
+        int typ = bpf_core_enum_value(enum tty_driver_subtype___new, PTY_TYPE_MASTER);
         return BPF_CORE_READ(tty, driver, subtype) == typ;
     }
     return BPF_CORE_READ(tty, driver, subtype) == k_tty_driver_subtype_pty_master;

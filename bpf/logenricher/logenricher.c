@@ -99,17 +99,20 @@ __write(struct kiocb *iocb, struct iov_iter *from, const int fd, const struct ta
     }
 
     const long eagain = -11;
-    u8 retries = 8;
+    u8 retries = 3;
     if (e->len > 0) {
         // From this point on, the responsibility of writing to stdout is on us,
         // so if something fails, we must always fallback to writing the original data.
-retry:
+    retry:
         if (retries == 0) {
             bpf_dbg_printk("logenricher: exceeded max retries writing log event to ringbuf!");
             return 0;
         }
-        const long err = bpf_ringbuf_output(
-            &log_events, e, (sizeof(log_event_t) + e->len) & k_log_event_max_size_mask, 0);
+        const long err =
+            bpf_ringbuf_output(&log_events,
+                               e,
+                               (sizeof(log_event_t) + e->len) & k_log_event_max_size_mask,
+                               log_events_flags());
         if (err == eagain) {
             retries--;
             goto retry;
@@ -154,10 +157,10 @@ int BPF_KPROBE(obi_kprobe_tty_write, struct kiocb *iocb, struct iov_iter *from) 
     struct tty_dev slave = {};
     if (is_master) {
         struct tty_struct *lnk = BPF_CORE_READ(tty, link);
-        tty_dev__fill(&master, tty);
-        tty_dev__fill(&slave, lnk);
+        tty_dev_fill(&master, tty);
+        tty_dev_fill(&slave, lnk);
     } else {
-        tty_dev__fill(&slave, tty);
+        tty_dev_fill(&slave, tty);
     }
 
     if (slave.major == 0 && slave.minor == 0) {
