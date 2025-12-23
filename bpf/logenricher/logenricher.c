@@ -73,6 +73,9 @@ __write(struct kiocb *iocb, struct iov_iter *from, const int fd, const struct ta
     trace_key_t t_key = {};
     trace_key_from_pid_tid_with_p_key(&t_key, &pk, pid_tgid);
     tp_info_pid_t *tp_info = find_parent_process_trace(&t_key);
+    bpf_dbg_printk("logenricher: GREPME tpinfo: trace_id=%llx span_id=%llx",
+                    tp_info ? tp_info->tp.trace_id : 0,
+                    tp_info ? tp_info->tp.span_id : 0);
 
     log_event_t *e = (log_event_t *)log_event_mem();
     if (!e) {

@@ -287,6 +287,7 @@ func (p *Tracer) Required() bool {
 func (p *Tracer) handleLogEvent(_ *ebpfcommon.EBPFParseContext, _ *config.EBPFTracer, record *ringbuf.Record, _ ebpfcommon.ServiceFilter) (request.Span, bool, error) {
 	hdrSize := uint32(unsafe.Sizeof(BpfLogEventT{})) - uint32(unsafe.Sizeof(uintptr(0))) // Remove `log` placeholder
 
+	fmt.Println("GREPME handleLogEvent called, record size:", len(record.RawSample), "hdrSize:", hdrSize, "data", record.RawSample[hdrSize:])
 	event, err := ebpfcommon.ReinterpretCast[BpfLogEventT](record.RawSample)
 	if err != nil {
 		// This should never happen -- if it does, we can't really recover

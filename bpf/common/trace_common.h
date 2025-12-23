@@ -286,12 +286,12 @@ static __always_inline unsigned char *extract_flags(unsigned char *tp_start) {
 static __always_inline void delete_server_trace(pid_connection_info_t *pid_conn,
                                                 trace_key_t *t_key) {
     delete_trace_info_for_connection(&pid_conn->conn, TRACE_TYPE_SERVER);
-    int __attribute__((unused)) res = bpf_map_delete_elem(&server_traces, t_key);
+    //int __attribute__((unused)) res = bpf_map_delete_elem(&server_traces, t_key); GREPME: revert
     bpf_dbg_printk("Deleting server span for id=%llx, pid=%d, ns=%x",
                    bpf_get_current_pid_tgid(),
                    t_key->p_key.pid,
                    t_key->p_key.ns);
-    bpf_dbg_printk("Deleting server span for res = %d", res);
+    //bpf_dbg_printk("Deleting server span for res = %d", res);
 }
 
 static __always_inline void delete_client_trace_info(pid_connection_info_t *pid_conn) {
