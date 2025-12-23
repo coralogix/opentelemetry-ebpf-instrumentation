@@ -311,12 +311,63 @@ func (e LogEvent) filePath() string {
 	if e.orig.Fd != 0 {
 		// This is a pipe write, use the target process pipe fd
 		fp = procFdPath(int(e.orig.Fd))
+		fmt.Println("GREPME pipe write to fp:", fp)
 	} else {
 		// TTY write
 		fp = unix.ByteSliceToString(e.orig.FilePath[:])
 		if fp == "" {
 			// Fallback to process stdout in the case path resolver failed
 			fp = procFdPath(1)
+		}
+		fmt.Println("GREPME tty write to fp:", fp)
+	}
+
+	// Check existence and type
+	if info, err := os.Lstat(fp); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("GREPME file does not exist:", fp)
+		} else {
+			fmt.Println("GREPME lstat error for", fp, "error:", err)
+		}
+	} else {
+		mode := info.Mode()
+		switch {
+		case mode.IsRegular():
+			fmt.Println("GREPME file is a regular file:", fp)
+		case mode.IsDir():
+			fmt.Println("GREPME file is a directory (unexpected):", fp)
+		case mode&os.ModeSymlink != 0:
+			target, rerr := os.Readlink(fp)
+			if rerr != nil {
+				fmt.Println("GREPME symlink, but failed to read target for", fp, "error:", rerr)
+			} else {
+				fmt.Println("GREPME file is a symlink:", fp, "->", target)
+				// Try to stat the target to determine its type
+				if tinfo, serr := os.Stat(fp); serr == nil {
+					//nolint:gocritic
+					if tinfo.Mode().IsRegular() {
+						fmt.Println("GREPME symlink target is a regular file:", target)
+					} else if tinfo.Mode()&os.ModeNamedPipe != 0 {
+						fmt.Println("GREPME symlink target is a named pipe (FIFO):", target)
+					} else if tinfo.Mode()&os.ModeSocket != 0 {
+						fmt.Println("GREPME symlink target is a socket:", target)
+					} else if tinfo.Mode()&os.ModeCharDevice != 0 {
+						fmt.Println("GREPME symlink target is a char device:", target)
+					} else {
+						fmt.Println("GREPME symlink target type unknown:", target, "mode:", tinfo.Mode())
+					}
+				} else {
+					fmt.Println("GREPME failed to stat symlink target:", target, "error:", serr)
+				}
+			}
+		case mode&os.ModeNamedPipe != 0:
+			fmt.Println("GREPME file is a named pipe (FIFO):", fp)
+		case mode&os.ModeSocket != 0:
+			fmt.Println("GREPME file is a socket:", fp)
+		case mode&os.ModeCharDevice != 0:
+			fmt.Println("GREPME file is a char device:", fp)
+		default:
+			fmt.Println("GREPME file type unknown for", fp, "mode:", mode)
 		}
 	}
 
@@ -341,6 +392,7 @@ func (p *Tracer) handle(e LogEvent) {
 		zeroSpanID  [8]uint8
 	)
 	if e.orig.PidTp.Tp.TraceId == zeroTraceID || e.orig.PidTp.Tp.SpanId == zeroSpanID {
+		p.log.Warn("GREPME no trace/span id!")
 		// No trace context to inject, write original log line
 		_, err := f.Write([]byte(e.logLine))
 		if err != nil {
@@ -370,8 +422,10 @@ func (p *Tracer) handle(e LogEvent) {
 
 		b.Write(out)
 		b.WriteByte('\n')
+		p.log.Warn("GREPME wrote log line", "line", b.String())
 	} else {
 		// Not JSON -> preserve the original logline
+		p.log.Warn("GREPME not json!", "line", e.logLine)
 		b.Write([]byte(e.logLine[:e.orig.Len]))
 	}
 
