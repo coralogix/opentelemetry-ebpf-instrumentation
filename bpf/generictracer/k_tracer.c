@@ -1096,7 +1096,7 @@ int BPF_KPROBE(obi_kprobe_sys_exit, int status) {
     bpf_dbg_printk(
         "sys_exit %d, pid=%d, valid_pid(id)=%d", id, pid_from_pid_tgid(id), valid_pid(id));
 
-    bpf_map_delete_elem(&clone_map, &task.p_key);
+    //bpf_map_delete_elem(&clone_map, &task.p_key);
     // This won't delete trace ids for traces with extra_id, like NodeJS. But,
     // we expect that it doesn't matter, since NodeJS main thread won't exit.
     //bpf_map_delete_elem(&server_traces, &task); GREPME: revert
