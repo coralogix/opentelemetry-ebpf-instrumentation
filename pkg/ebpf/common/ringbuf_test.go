@@ -43,6 +43,7 @@ func TestForwardRingbuf_CapacityFull(t *testing.T) {
 		slog.With("test", "TestForwardRingbuf_CapacityFull"),
 		metrics,
 		nil,
+		0,
 	)(t.Context(), forwardedMessagesQueue)
 
 	// WHEN it starts receiving trace events
@@ -88,13 +89,14 @@ func TestForwardRingbuf_Deadline(t *testing.T) {
 	fltr := TestPidsFilter{services: map[uint32]svc.Attrs{}}
 	fltr.AllowPID(1, 1, &svc.Attrs{UID: svc.UID{Name: "myService"}}, PIDTypeGo)
 	go ForwardRingbuf(
-		&config.EBPFTracer{BatchLength: 10, BatchTimeout: 20 * time.Millisecond},
+		&config.EBPFTracer{BatchLength: 10},
 		nil,   // the source ring buffer can be null
 		&fltr, // change fltr to a pointer
 		ReadBPFTraceAsSpan,
 		slog.With("test", "TestForwardRingbuf_Deadline"),
 		metrics,
 		nil,
+		20*time.Millisecond,
 	)(t.Context(), forwardedMessagesQueue)
 
 	// WHEN it receives, after a timeout, less events than its internal buffer
@@ -135,6 +137,7 @@ func TestForwardRingbuf_Close(t *testing.T) {
 		slog.With("test", "TestForwardRingbuf_Close"),
 		metrics,
 		nil,
+		0,
 		&closable,
 	)(t.Context(), msg.NewQueue[[]request.Span](msg.ChannelBufferLen(100)))
 

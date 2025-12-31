@@ -527,6 +527,7 @@ func (p *Tracer) Run(ctx context.Context, ebpfEventContext *ebpfcommon.EBPFEvent
 		p.pidsFilter,
 		p.bpfObjects.Events,
 		p.metrics,
+		p.cfg.EBPF.BatchTimeout,
 	)(ctx, append(p.closers, &p.bpfObjects), eventsChan)
 }
 

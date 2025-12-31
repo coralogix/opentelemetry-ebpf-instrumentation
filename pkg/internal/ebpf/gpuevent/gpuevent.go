@@ -239,6 +239,7 @@ func (p *Tracer) Run(ctx context.Context, ebpfEventContext *ebpfcommon.EBPFEvent
 		p.log,
 		p.metrics,
 		eventsChan,
+		p.cfg.EBPF.BatchTimeout,
 		append(p.closers, &p.bpfObjects)...,
 	)(ctx, eventsChan)
 }

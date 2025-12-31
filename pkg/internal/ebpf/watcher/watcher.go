@@ -97,6 +97,7 @@ func (p *Watcher) Run(ctx context.Context) {
 		p.log,
 		nil,
 		nil,
+		p.cfg.EBPF.BatchTimeout,
 		append(p.closers, &p.bpfObjects)...,
 	)(ctx, nil)
 }

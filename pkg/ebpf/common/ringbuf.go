@@ -46,9 +46,10 @@ type ringBufForwarder struct {
 	reader     func(*EBPFParseContext, *config.EBPFTracer, *ringbuf.Record, ServiceFilter) (request.Span, bool, error)
 	// filter the input spans, eliminating these from processes whose PID
 	// belong to a process that does not match the discovery policies
-	filter       ServiceFilter
-	metrics      imetrics.Reporter
-	parseContext *EBPFParseContext
+	filter            ServiceFilter
+	metrics           imetrics.Reporter
+	parseContext      *EBPFParseContext
+	ringbufferTimeout time.Duration
 }
 
 // SharedRingbuf returns a function reads HTTPRequestTraces from an input ring buffer, accumulates them into an
@@ -61,6 +62,7 @@ func SharedRingbuf(
 	filter ServiceFilter,
 	ringbuffer *ebpf.Map,
 	metrics imetrics.Reporter,
+	ringbufferTimeout time.Duration,
 ) func(context.Context, []io.Closer, *msg.Queue[[]request.Span]) {
 	eventContext.RingBufLock.Lock()
 	defer eventContext.RingBufLock.Unlock()
@@ -76,7 +78,8 @@ func SharedRingbuf(
 		cfg: cfg, logger: log, ringbuffer: ringbuffer,
 		closers: nil, reader: ReadBPFTraceAsSpan,
 		filter: filter, metrics: metrics,
-		parseContext: parseContext,
+		parseContext:      parseContext,
+		ringbufferTimeout: ringbufferTimeout,
 	}
 	eventContext.SharedRingBuffer = &rbf
 	return eventContext.SharedRingBuffer.sharedReadAndForward
@@ -90,13 +93,15 @@ func ForwardRingbuf(
 	logger *slog.Logger,
 	metrics imetrics.Reporter,
 	spansChan *msg.Queue[[]request.Span],
+	ringbufferTimeout time.Duration,
 	closers ...io.Closer,
 ) func(context.Context, *msg.Queue[[]request.Span]) {
 	rbf := ringBufForwarder{
 		cfg: cfg, logger: logger, ringbuffer: ringbuffer,
 		closers: closers, reader: reader,
 		filter: filter, metrics: metrics,
-		parseContext: NewEBPFParseContext(cfg, spansChan, filter),
+		parseContext:      NewEBPFParseContext(cfg, spansChan, filter),
+		ringbufferTimeout: ringbufferTimeout,
 	}
 	return rbf.readAndForward
 }
@@ -141,8 +146,8 @@ func (rbf *ringBufForwarder) readAndForward(ctx context.Context, spansChan *msg.
 
 func (rbf *ringBufForwarder) readAndForwardInner(ctx context.Context, eventsReader ringBufReader, spansChan *msg.Queue[[]request.Span]) {
 	// Forwards periodically on timeout, if the batch is not full
-	if rbf.cfg.BatchTimeout > 0 {
-		rbf.ticker = time.NewTicker(rbf.cfg.BatchTimeout)
+	if rbf.ringbufferTimeout > 0 {
+		rbf.ticker = time.NewTicker(rbf.ringbufferTimeout)
 		go rbf.bgFlushOnTimeout(ctx, spansChan)
 	}
 
@@ -203,7 +208,7 @@ func (rbf *ringBufForwarder) processAndForward(record ringbuf.Record, spansChan 
 		rbf.logger.Debug("submitting traces after batch is full", "len", rbf.spansLen)
 		rbf.flushEvents(spansChan)
 		if rbf.ticker != nil {
-			rbf.ticker.Reset(rbf.cfg.BatchTimeout)
+			rbf.ticker.Reset(rbf.ringbufferTimeout)
 		}
 	}
 }
