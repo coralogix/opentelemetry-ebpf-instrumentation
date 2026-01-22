@@ -165,7 +165,9 @@ func TCPToCouchbaseToSpan(trace *TCPRequestInfo, data *CouchbaseInfo) request.Sp
 
 	// Build the database namespace: bucket.scope
 	dbNamespace := data.Bucket
-	if data.Scope != "" {
+	if dbNamespace == "" {
+		dbNamespace = data.Scope
+	} else if data.Scope != "" {
 		dbNamespace += "." + data.Scope
 	}
 
