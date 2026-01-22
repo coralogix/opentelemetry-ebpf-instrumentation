@@ -793,7 +793,7 @@ func TestTracesInstrumentations(t *testing.T) {
 		{
 			name:     "all instrumentations",
 			instr:    []instrumentations.Instrumentation{instrumentations.InstrumentationALL},
-			expected: []string{"GET /foo", "PUT /bar", "/grpcFoo", "/grpcGoo", "SELECT credentials", "SET", "GET", "publish important-topic", "process important-topic", "insert mycollection"},
+			expected: []string{"GET /foo", "PUT /bar", "/grpcFoo", "/grpcGoo", "SELECT credentials", "SET", "GET", "publish important-topic", "process important-topic", "insert mycollection", "GET couchbase-collection"},
 		},
 		{
 			name:     "http only",
@@ -840,6 +840,11 @@ func TestTracesInstrumentations(t *testing.T) {
 			instr:    []instrumentations.Instrumentation{instrumentations.InstrumentationMongo},
 			expected: []string{"insert mycollection"},
 		},
+		{
+			name:     "couchbase",
+			instr:    []instrumentations.Instrumentation{instrumentations.InstrumentationCouchbase},
+			expected: []string{"GET couchbase-collection"},
+		},
 	}
 
 	spans := []request.Span{
@@ -853,7 +858,7 @@ func TestTracesInstrumentations(t *testing.T) {
 		{Type: request.EventTypeKafkaClient, Method: "process", Path: "important-topic", Statement: "test"},
 		{Type: request.EventTypeKafkaServer, Method: "publish", Path: "important-topic", Statement: "test"},
 		{Type: request.EventTypeMongoClient, Method: "insert", Path: "mycollection", DBNamespace: "mydatabase"},
-		{Type: request.EventTypeCouchbaseClient, Method: "GET", Path: "mycollection", DBNamespace: "mybucket.myscope"},
+		{Type: request.EventTypeCouchbaseClient, Method: "GET", Path: "couchbase-collection", DBNamespace: "mybucket.myscope"},
 	}
 
 	for _, tt := range tests {
