@@ -4,7 +4,9 @@ This document describes the Couchbase protocol parser that OBI provides.
 
 ## Protocol Overview
 
-Couchbase uses the [Memcached Binary Protocol](https://github.com/couchbase/memcached/blob/master/docs/BinaryProtocol.md) for client-server communication. This is a binary protocol with a fixed 24-byte header followed by optional body data.
+Couchbase uses
+the [Memcached Binary Protocol](https://github.com/couchbase/memcached/blob/master/docs/BinaryProtocol.md) for
+client-server communication. This is a binary protocol with a fixed 24-byte header followed by optional body data.
 
 ### Packet Header Format
 
@@ -24,18 +26,21 @@ Header (24 bytes):
 ```
 
 **Magic bytes** identify the packet direction:
+
 - `0x80` - Client request (client → server)
 - `0x81` - Server response (server → client)
 - `0x82` - Server request (server → client, for server-initiated commands)
 - `0x83` - Client response (client → server, response to server request)
 
 **Bytes 6-7** serve dual purpose:
+
 - In requests: VBucket ID (partition identifier)
 - In responses: Status code
 
 ### Body Structure
 
 The body follows the header and contains (in order):
+
 1. **Extras** - Command-specific extra data (e.g., flags, expiration for SET)
 2. **Key** - Document key (for key-based operations)
 3. **Value** - Document value or additional data
@@ -47,10 +52,10 @@ Body length = `extras_length + key_length + value_length`
 These commands are tracked for state but don't generate spans:
 They are used to enrich subsequent operations with bucket and collection context.
 
-| Opcode | Name | Purpose |
-|--------|------|---------|
-| 0x89 | SELECT_BUCKET | Selects the bucket for the connection |
-| 0xbb | GET_COLLECTION_ID | Resolves scope.collection to collection ID |
+| Opcode | Name              | Purpose                                    |
+|:-------|:------------------|:-------------------------------------------|
+| 0x89   | SELECT_BUCKET     | Selects the bucket for the connection      |
+| 0xbb   | GET_COLLECTION_ID | Resolves scope.collection to collection ID |
 
 ## Bucket/Scope/Collection Tracking
 
@@ -60,17 +65,21 @@ Couchbase uses a hierarchical namespace: **Bucket → Scope → Collection**
 
 Unlike protocols where namespace is per-request, Couchbase uses connection-level state:
 
-1. **SELECT_BUCKET (0x89)**: Client sends bucket name in key field. On success, all subsequent operations use this bucket.
+1. **SELECT_BUCKET (0x89)**: Client sends bucket name in key field. On success, all subsequent operations use this
+   bucket.
 
-2. **GET_COLLECTION_ID (0xbb)**: Client sends `scope.collection` in value field to resolve to a Collection ID (CID). On success, we cache the scope and collection names.
+2. **GET_COLLECTION_ID (0xbb)**: Client sends `scope.collection` in value field to resolve to a Collection ID (CID). On
+   success, we cache the scope and collection names.
 
 This is analogous to:
+
 - MySQL's `USE database`
 - Redis's `SELECT db_number`
 
 ### Per-Connection Cache
 
 OBI maintains a per-connection cache (`couchbaseBucketCache`) that stores:
+
 - `Bucket` - Selected bucket name
 - `Scope` - Current scope name
 - `Collection` - Current collection name
@@ -81,18 +90,22 @@ OBI maintains a per-connection cache (`couchbaseBucketCache`) that stores:
 
 The Couchbase packet parsing flow:
 
-1. TCP packets arrive at `ReadTCPRequestIntoSpan` in [tcp_detect_transform.go](../../../pkg/ebpf/common/tcp_detect_transform.go)
+1. TCP packets arrive at `ReadTCPRequestIntoSpan`
+   in [tcp_detect_transform.go](../../../pkg/ebpf/common/tcp_detect_transform.go)
 
-2. `ProcessPossibleCouchbaseEvent` in [couchbase_detect_transform.go](../../../pkg/ebpf/common/couchbase_detect_transform.go) attempts to parse the packet
+2. `ProcessPossibleCouchbaseEvent`
+   in [couchbase_detect_transform.go](../../../pkg/ebpf/common/couchbase_detect_transform.go) attempts to parse the
+   packet
 
 3. Parsing logic lives in the [couchbasekv package](../../../pkg/internal/ebpf/couchbasekv/):
-   - `types.go` - Protocol constants (Magic, Opcode, Status, DataType)
-   - `header.go` - Header and Packet parsing with truncation tolerance
-   - `reader.go` - PacketReader utility for reading binary data
+    - `types.go` - Protocol constants (Magic, Opcode, Status, DataType)
+    - `header.go` - Header and Packet parsing with truncation tolerance
+    - `reader.go` - PacketReader utility for reading binary data
 
 ### Truncation Tolerance
 
 The parser handles truncated packets gracefully:
+
 - Header fields are always available (24 bytes minimum)
 - Key and value are parsed up to available bytes
 - Partial keys/values are returned without error
@@ -101,15 +114,15 @@ The parser handles truncated packets gracefully:
 
 OBI generates spans with the following OpenTelemetry semantic conventions:
 
-| Attribute | Source | Example |
-|-----------|--------|---------|
-| `db.system.name` | Constant | `"couchbase"` |
-| `db.operation.name` | Opcode | `"GET"`, `"SET"` |
-| `db.namespace` | Bucket + Scope | `"mybucket.myscope"` |
-| `db.collection.name` | Collection | `"mycollection"` |
-| `db.response.status_code` | Status (on error) | `"1"` |
-| `server.address` | Connection info | Server hostname |
-| `server.port` | Connection info | `11210` |
+| Attribute                 | Source            | Example              |
+|---------------------------|-------------------|----------------------|
+| `db.system.name`          | Constant          | `"couchbase"`        |
+| `db.operation.name`       | Opcode            | `"GET"`, `"SET"`     |
+| `db.namespace`            | Bucket + Scope    | `"mybucket.myscope"` |
+| `db.collection.name`      | Collection        | `"mycollection"`     |
+| `db.response.status_code` | Status (on error) | `"1"`                |
+| `server.address`          | Connection info   | Server hostname      |
+| `server.port`             | Connection info   | `11210`              |
 
 ## Configuration
 
