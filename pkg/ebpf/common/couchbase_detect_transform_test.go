@@ -219,11 +219,11 @@ func TestHandleGetCollectionID(t *testing.T) {
 			}
 
 			reqPacket, err := couchbasekv.ParsePacket(
-				makeCouchbaseRequestPacket(couchbasekv.OpcodeGetCollectionID, "", tt.scopeCollection, nil),
+				makeCouchbaseRequestPacket(couchbasekv.OpcodeCollectionsGetID, "", tt.scopeCollection, nil),
 			)
 			require.NoError(t, err)
 
-			responseBuf := makeCouchbaseResponsePacket(couchbasekv.OpcodeGetCollectionID, tt.responseStatus, "")
+			responseBuf := makeCouchbaseResponsePacket(couchbasekv.OpcodeCollectionsGetID, tt.responseStatus, "")
 
 			handleGetCollectionID(connInfo, reqPacket, responseBuf, cache)
 
@@ -329,7 +329,7 @@ func TestProcessCouchbaseEvent(t *testing.T) {
 		},
 		{
 			name:           "GET_COLLECTION_ID is ignored",
-			opcode:         couchbasekv.OpcodeGetCollectionID,
+			opcode:         couchbasekv.OpcodeCollectionsGetID,
 			key:            "",
 			value:          "scope.collection",
 			responseStatus: couchbasekv.StatusSuccess,
@@ -600,8 +600,8 @@ func TestProcessPossibleCouchbaseEventConnectionIsolation(t *testing.T) {
 	assert.True(t, ignore)
 
 	// Connection 1 sets scope/collection
-	getCollID1Req := makeCouchbaseRequestPacket(couchbasekv.OpcodeGetCollectionID, "", "scope1.coll1", nil)
-	getCollID1Resp := makeCouchbaseResponsePacket(couchbasekv.OpcodeGetCollectionID, couchbasekv.StatusSuccess, "")
+	getCollID1Req := makeCouchbaseRequestPacket(couchbasekv.OpcodeCollectionsGetID, "", "scope1.coll1", nil)
+	getCollID1Resp := makeCouchbaseResponsePacket(couchbasekv.OpcodeCollectionsGetID, couchbasekv.StatusSuccess, "")
 
 	event1 = &TCPRequestInfo{ConnInfo: connInfo1, Direction: 1}
 	_, ignore, err = ProcessPossibleCouchbaseEvent(event1, getCollID1Req, getCollID1Resp, cache)
@@ -609,8 +609,8 @@ func TestProcessPossibleCouchbaseEventConnectionIsolation(t *testing.T) {
 	assert.True(t, ignore)
 
 	// Connection 2 sets different scope/collection
-	getCollID2Req := makeCouchbaseRequestPacket(couchbasekv.OpcodeGetCollectionID, "", "scope2.coll2", nil)
-	getCollID2Resp := makeCouchbaseResponsePacket(couchbasekv.OpcodeGetCollectionID, couchbasekv.StatusSuccess, "")
+	getCollID2Req := makeCouchbaseRequestPacket(couchbasekv.OpcodeCollectionsGetID, "", "scope2.coll2", nil)
+	getCollID2Resp := makeCouchbaseResponsePacket(couchbasekv.OpcodeCollectionsGetID, couchbasekv.StatusSuccess, "")
 
 	event2 = &TCPRequestInfo{ConnInfo: connInfo2, Direction: 1}
 	_, ignore, err = ProcessPossibleCouchbaseEvent(event2, getCollID2Req, getCollID2Resp, cache)

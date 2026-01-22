@@ -11,32 +11,49 @@ import (
 
 func TestMagicIsRequest(t *testing.T) {
 	assert.True(t, MagicClientRequest.IsRequest())
+	assert.True(t, MagicAltClientRequest.IsRequest())
 	assert.True(t, MagicServerRequest.IsRequest())
-	assert.False(t, MagicServerResponse.IsRequest())
 	assert.False(t, MagicClientResponse.IsRequest())
+	assert.False(t, MagicAltClientResponse.IsRequest())
+	assert.False(t, MagicServerResponse.IsRequest())
 }
 
 func TestMagicIsResponse(t *testing.T) {
-	assert.True(t, MagicServerResponse.IsResponse())
 	assert.True(t, MagicClientResponse.IsResponse())
+	assert.True(t, MagicAltClientResponse.IsResponse())
+	assert.True(t, MagicServerResponse.IsResponse())
 	assert.False(t, MagicClientRequest.IsResponse())
+	assert.False(t, MagicAltClientRequest.IsResponse())
 	assert.False(t, MagicServerRequest.IsResponse())
+}
+
+func TestMagicIsAltFormat(t *testing.T) {
+	assert.True(t, MagicAltClientRequest.IsAltFormat())
+	assert.True(t, MagicAltClientResponse.IsAltFormat())
+	assert.False(t, MagicClientRequest.IsAltFormat())
+	assert.False(t, MagicClientResponse.IsAltFormat())
+	assert.False(t, MagicServerRequest.IsAltFormat())
+	assert.False(t, MagicServerResponse.IsAltFormat())
 }
 
 func TestMagicIsValid(t *testing.T) {
 	assert.True(t, MagicClientRequest.IsValid())
-	assert.True(t, MagicServerResponse.IsValid())
-	assert.True(t, MagicServerRequest.IsValid())
+	assert.True(t, MagicAltClientRequest.IsValid())
 	assert.True(t, MagicClientResponse.IsValid())
+	assert.True(t, MagicAltClientResponse.IsValid())
+	assert.True(t, MagicServerRequest.IsValid())
+	assert.True(t, MagicServerResponse.IsValid())
 	assert.False(t, Magic(0x00).IsValid())
 	assert.False(t, Magic(0xFF).IsValid())
 }
 
 func TestMagicString(t *testing.T) {
 	assert.Equal(t, "ClientRequest", MagicClientRequest.String())
-	assert.Equal(t, "ServerResponse", MagicServerResponse.String())
-	assert.Equal(t, "ServerRequest", MagicServerRequest.String())
+	assert.Equal(t, "AltClientRequest", MagicAltClientRequest.String())
 	assert.Equal(t, "ClientResponse", MagicClientResponse.String())
+	assert.Equal(t, "AltClientResponse", MagicAltClientResponse.String())
+	assert.Equal(t, "ServerRequest", MagicServerRequest.String())
+	assert.Equal(t, "ServerResponse", MagicServerResponse.String())
 	assert.Equal(t, "Unknown", Magic(0xFF).String())
 }
 
@@ -85,7 +102,9 @@ func TestOpcodeString(t *testing.T) {
 		{OpcodeDelVBucket, "DEL_VBUCKET"},
 		{OpcodeListBuckets, "LIST_BUCKETS"},
 		{OpcodeSelectBucket, "SELECT_BUCKET"},
-		{Opcode(0xFE), "UNKNOWN"},
+		{OpcodeGetErrorMap, "GET_ERROR_MAP"},
+		{OpcodeInvalid, "INVALID"},
+		{Opcode(0x4B), "UNKNOWN"}, // Use an unused opcode for unknown test
 	}
 
 	for _, tt := range tests {
@@ -100,6 +119,7 @@ func TestOpcodeIsQuiet(t *testing.T) {
 		OpcodeGetQ, OpcodeGetKQ, OpcodeSetQ, OpcodeAddQ, OpcodeReplaceQ,
 		OpcodeDeleteQ, OpcodeIncrementQ, OpcodeDecrementQ, OpcodeQuitQ,
 		OpcodeFlushQ, OpcodeAppendQ, OpcodePrependQ, OpcodeGATQ,
+		OpcodeGetQMeta, OpcodeSetQWithMeta, OpcodeAddQWithMeta, OpcodeDelQWithMeta,
 	}
 
 	for _, op := range quietOpcodes {
@@ -111,6 +131,7 @@ func TestOpcodeIsQuiet(t *testing.T) {
 		OpcodeIncrement, OpcodeDecrement, OpcodeQuit, OpcodeFlush,
 		OpcodeNoop, OpcodeVersion, OpcodeGetK, OpcodeAppend,
 		OpcodePrepend, OpcodeStat, OpcodeTouch, OpcodeGAT, OpcodeHello,
+		OpcodeGetMeta, OpcodeSetWithMeta, OpcodeAddWithMeta, OpcodeDelWithMeta,
 	}
 
 	for _, op := range nonQuietOpcodes {
@@ -131,8 +152,9 @@ func TestStatusString(t *testing.T) {
 		{StatusItemNotStored, "ItemNotStored"},
 		{StatusNonNumeric, "NonNumeric"},
 		{StatusVBucketNotHere, "VBucketNotHere"},
-		{StatusNotConnected, "NotConnected"},
-		{StatusStaleAuthContext, "StaleAuthContext"},
+		{StatusNoBucket, "NoBucket"},
+		{StatusLocked, "Locked"},
+		{StatusAuthStale, "AuthStale"},
 		{StatusAuthError, "AuthError"},
 		{StatusAuthContinue, "AuthContinue"},
 		{StatusOutOfRange, "OutOfRange"},
@@ -143,6 +165,13 @@ func TestStatusString(t *testing.T) {
 		{StatusInternalError, "InternalError"},
 		{StatusBusy, "Busy"},
 		{StatusTemporaryFailure, "TemporaryFailure"},
+		// New status codes
+		{StatusDcpStreamNotFound, "DcpStreamNotFound"},
+		{StatusRateLimitedNetworkIngress, "RateLimitedNetworkIngress"},
+		{StatusBucketPaused, "BucketPaused"},
+		{StatusUnknownCollection, "UnknownCollection"},
+		{StatusDurabilityInvalidLevel, "DurabilityInvalidLevel"},
+		{StatusSubdocPathNotFound, "SubdocPathNotFound"},
 		{Status(0xFFFF), "Unknown"},
 	}
 

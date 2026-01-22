@@ -209,6 +209,11 @@ func (p *Packet) ValueString() string {
 	return string(p.Value)
 }
 
+// KeyString returns the key as a string.
+func (p *Packet) ExtrasString() string {
+	return string(p.Extras)
+}
+
 // IsComplete returns true if the packet body was fully parsed (not truncated).
 func (p *Packet) IsComplete() bool {
 	return !p.Truncated

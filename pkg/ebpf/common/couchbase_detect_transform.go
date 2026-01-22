@@ -110,7 +110,7 @@ func processCouchbaseEvent(connInfo BpfConnectionInfoT, requestBuf []byte, respo
 	}
 
 	// Handle GET_COLLECTION_ID command - this resolves scope.collection to a CID
-	if reqPacket.Header.Opcode == couchbasekv.OpcodeGetCollectionID {
+	if reqPacket.Header.Opcode == couchbasekv.OpcodeCollectionsGetID {
 		handleGetCollectionID(connInfo, reqPacket, responseBuf, bucketCache)
 		// Don't create a span for GET_COLLECTION_ID - it's a setup command
 		return nil, true, nil
