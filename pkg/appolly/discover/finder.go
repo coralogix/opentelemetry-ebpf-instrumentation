@@ -172,6 +172,5 @@ func newGenericTracersGroup(pidFilter ebpfcommon.ServiceFilter, cfg *obi.Config,
 			tracers = append(tracers, logEnricher)
 		}
 	}
-
 	return tracers
 }

@@ -978,6 +978,8 @@ func (r *metricsReporter) observe(span *request.Span) {
 					labelValues(span, r.attrDNSLookupDuration)...,
 				).Metric.Observe(duration)
 			}
+		case request.EventTypeAppNetTcpRtt:
+			fmt.Println("Pino observe metrics!")
 		}
 	}
 
