@@ -100,8 +100,8 @@ $(TOOLS)/setup-envtest: PACKAGE=sigs.k8s.io/controller-runtime/tools/setup-envte
 KIND ?= $(TOOLS)/kind
 $(TOOLS)/kind: PACKAGE=sigs.k8s.io/kind
 
-GOLICENSES = $(TOOLS)/go-licenses
-$(TOOLS)/go-licenses: PACKAGE=github.com/google/go-licenses/v2
+GO_LICENCE_DETECTOR = $(TOOLS)/go-licence-detector
+$(TOOLS)/go-licence-detector: PACKAGE=go.elastic.co/go-licence-detector
 
 GOTESTSUM = $(TOOLS)/gotestsum
 $(TOOLS)/gotestsum: PACKAGE=gotest.tools/gotestsum
@@ -110,7 +110,7 @@ MULTIMOD = $(TOOLS)/multimod
 $(TOOLS)/multimod: PACKAGE=go.opentelemetry.io/build-tools/multimod
 
 .PHONY: tools
-tools: $(BPF2GO) $(GOLANGCI_LINT) $(GO_OFFSETS_TRACKER) $(GINKGO) $(ENVTEST) $(KIND) $(GOLICENSES) $(GOTESTSUM) $(MULTIMOD)
+tools: $(BPF2GO) $(GOLANGCI_LINT) $(GO_OFFSETS_TRACKER) $(GINKGO) $(ENVTEST) $(KIND) $(GO_LICENCE_DETECTOR) $(GOTESTSUM) $(MULTIMOD)
 
 ### Development Tools (end) #################################################
 
@@ -140,7 +140,7 @@ fmt: $(GOLANGCI_LINT)
 
 .PHONY: clang-tidy
 clang-tidy:
-	cd bpf && find . -type f \( -name '*.c' -o -name '*.h' \) ! -path "./bpfcore/*" ! -path "./NOTICES/*" | xargs clang-tidy
+	cd bpf && find . -type f \( -name '*.c' -o -name '*.h' \) ! -path "./bpfcore/*" | xargs clang-tidy
 
 .PHONY: lint
 lint: $(GOLANGCI_LINT) vanity-import-check
@@ -213,12 +213,12 @@ compile-cache-for-coverage:
 .PHONY: test
 test: $(ENVTEST)
 	@echo "### Testing code"
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -race -a ./... -coverpkg=./... -coverprofile $(TEST_OUTPUT)/cover.all.txt
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" go test -short -race -a ./... -coverpkg=./... -coverprofile $(TEST_OUTPUT)/cover.all.txt
 
 .PHONY: test-privileged
 test-privileged: $(ENVTEST)
 	@echo "### Testing code with privileged tests enabled"
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" PRIVILEGED_TESTS=true go test -race -a ./... -coverpkg=./... -coverprofile $(TEST_OUTPUT)/cover.all.txt
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" PRIVILEGED_TESTS=true go test -short -race -a ./... -coverpkg=./... -coverprofile $(TEST_OUTPUT)/cover.all.txt
 
 .PHONY: cov-exclude-generated
 cov-exclude-generated:
@@ -305,13 +305,13 @@ cleanup-integration-test: $(KIND)
 run-integration-test:
 	@echo "### Running integration tests"
 	go clean -testcache
-	go test -p 1 -failfast -v -timeout 60m -a ./internal/test/integration --tags=integration
+	go test -p 1 -failfast -v -timeout 60m -a ./internal/test/integration
 
 .PHONY: run-integration-test-k8s
 run-integration-test-k8s:
 	@echo "### Running integration tests"
 	go clean -testcache
-	go test -p 1 -failfast -v -timeout 60m -a ./internal/test/integration/k8s/... --tags=integration
+	go test -p 1 -failfast -v -timeout 60m -a ./internal/test/integration/k8s/...
 
 .PHONY: run-integration-test-vm
 run-integration-test-vm:
@@ -335,7 +335,6 @@ run-integration-test-vm:
 			-timeout $$TEST_TIMEOUT \
 			-failfast \
 			-v -a \
-			-tags=integration \
 			-run="^($(TEST_PATTERN))\$$" ./internal/test/integration; \
 	fi
 
@@ -343,15 +342,15 @@ run-integration-test-vm:
 run-integration-test-arm:
 	@echo "### Running integration tests"
 	go clean -testcache
-	go test -p 1 -failfast -v -timeout 90m -a ./internal/test/integration --tags=integration -run "^TestMultiProcess"
+	go test -p 1 -failfast -v -timeout 90m -a ./internal/test/integration -run "^TestMultiProcess"
 
 .PHONY: integration-test-matrix-json
 integration-test-matrix-json:
-	@./scripts/generate-integration-matrix.sh "$${TEST_TAGS:-integration}" internal/test/integration "$${PARTITIONS:-5}"
+	@./scripts/generate-integration-matrix.sh internal/test/integration "$${PARTITIONS:-5}"
 
 .PHONY: vm-integration-test-matrix-json
 vm-integration-test-matrix-json:
-	@./scripts/generate-integration-matrix.sh "$${TEST_TAGS:-integration}" internal/test/integration "$${PARTITIONS:-5}" "TestMultiProcess"
+	@./scripts/generate-integration-matrix.sh internal/test/integration "$${PARTITIONS:-5}" "TestMultiProcess"
 
 .PHONY: k8s-integration-test-matrix-json
 k8s-integration-test-matrix-json:
@@ -429,7 +428,7 @@ oats-test-debug: oats-prereq
 
 .PHONY: license-header-check
 license-header-check:
-	@licRes=$$(for f in $$(find . -type f \( -iname '*.go' -o -iname '*.sh' -o -iname '*.c' -o -iname '*.h' \) ! -path './.git/*' ! -path './NOTICES/*' ) ; do \
+	@licRes=$$(for f in $$(find . -type f \( -iname '*.go' -o -iname '*.sh' -o -iname '*.c' -o -iname '*.h' \) ! -path './.git/*' ) ; do \
 	           awk '/Copyright The OpenTelemetry Authors|generated|GENERATED/ && NR<=4 { found=1; next } END { if (!found) print FILENAME }' $$f; \
 	   done); \
 	   if [ -n "$${licRes}" ]; then \
@@ -455,40 +454,37 @@ protoc-gen:
 
 .PHONY: clang-format
 clang-format:
-	find ./bpf -type f -name "*.c" ! -path "./NOTICES/*" | xargs -P 0 -n 1 clang-format -i
-	find ./bpf -type f -name "*.h" ! -path "./NOTICES/*" | xargs -P 0 -n 1 clang-format -i
+	find ./bpf -type f -name "*.c" | xargs -P 0 -n 1 clang-format -i
+	find ./bpf -type f -name "*.h" | xargs -P 0 -n 1 clang-format -i
 
 .PHONY: clean-ebpf-generated-files
 clean-ebpf-generated-files:
 	find . -name "*_bpfel*" | xargs rm
 
-NOTICES_DIR ?= ./NOTICES
-
-C_LICENSES := $(shell find ./bpf -type f -name 'LICENSE*')
-TARGET_C_LICENSES := $(patsubst ./%,$(NOTICES_DIR)/%,$(C_LICENSES))
+TARGET_C_LICENSES := $(shell find ./bpf -type f -name 'LICENSE*')
 # BPF code is licensed under the BSD-2-Clause, GPL-2.0-only, or LGPL-2.1 which
 # require redistribution of the license and code.
-BPF_FILES := $(shell find ./bpf/bpfcore/ -type f )
-TARGET_BPF_FILES := $(patsubst ./%,$(NOTICES_DIR)/%,$(BPF_FILES))
+TARGET_BPF_FILES := $(shell find ./bpf/bpfcore/ -type f )
 TARGET_BPF := $(TARGET_C_LICENSES) $(TARGET_BPF_FILES)
 
 .PHONY: notices-update
 notices-update: docker-generate go-notices-update $(TARGET_BPF)
 
 .PHONY: go-notices-update
-go-notices-update: $(GOLICENSES)
-	@$(GOLICENSES) save ./... --save_path=$(NOTICES_DIR) --force
-
-$(NOTICES_DIR)/%: %
-	@mkdir -p $(dir $@)
-	@cp $< $@
+go-notices-update: $(GO_LICENCE_DETECTOR)
+	go list -m -json all | $(GO_LICENCE_DETECTOR) \
+		-includeIndirect \
+		-rules .go-licence-detector.rules \
+		-noticeTemplate NOTICE.tmpl \
+		-noticeOut NOTICE \
+		-depsOut ""
 
 .PHONY: check-clean-work-tree
 check-clean-work-tree:
 	if [ -n "$$(git status --porcelain)" ]; then \
 		git status; \
 		git --no-pager diff; \
-		echo 'Working tree is not clean, did you forget to run "make"?' \
+		echo 'Working tree is not clean, did you forget to run "make"?'; \
 		exit 1; \
 	fi
 
@@ -525,12 +521,12 @@ check-ebpf-ver-synced:
 .PHONY: vanity-import-check
 vanity-import-check:
 	@go install github.com/jcchavezs/porto/cmd/porto@latest
-	@porto --include-internal --skip-dirs "^NOTICES/[^/]*\.[^/]*/.*" -l . || ( echo "(run: make vanity-import-fix)"; exit 1 )
+	@porto --include-internal -l . || ( echo "(run: make vanity-import-fix)"; exit 1 )
 
 .PHONY: vanity-import-fix
-vanity-import-fix: $(PORTO)
+vanity-import-fix:
 	@go install github.com/jcchavezs/porto/cmd/porto@latest
-	@porto --include-internal --skip-dirs "^NOTICES/[^/]*\.[^/]*/.*" -w .
+	@porto --include-internal -w .
 
 .PHONY: regenerate-port-lookup
 regenerate-port-lookup:
