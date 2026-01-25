@@ -9,20 +9,13 @@ from couchbase.exceptions import DocumentNotFoundException
 
 app = FastAPI()
 
-cluster = None
-bucket = None
-collection = None
-
 
 def get_collection():
-    global cluster, bucket, collection
-    if collection is None:
-        auth = PasswordAuthenticator("Administrator", "password")
-        cluster = Cluster("couchbase://couchbase", ClusterOptions(auth))
-        cluster.wait_until_ready(timedelta(seconds=30))
-        bucket = cluster.bucket("test-bucket")
-        collection = bucket.scope("test-scope").collection("test-collection")
-    return collection
+    auth = PasswordAuthenticator("Administrator", "password")
+    cluster = Cluster("couchbase://couchbase", ClusterOptions(auth))
+    cluster.wait_until_ready(timedelta(seconds=30))
+    bucket = cluster.bucket("test-bucket")
+    return bucket.scope("test-scope").collection("test-collection")
 
 
 @app.get("/couchbase")
