@@ -204,7 +204,7 @@ const (
 	OpcodeDisableTraffic   Opcode = 0xae
 	OpcodeIfconfig         Opcode = 0xaf
 	OpcodeReturnMeta       Opcode = 0xb2
-	OpcodeCompactDb        Opcode = 0xb3
+	OpcodeCompactDB        Opcode = 0xb3
 	OpcodeSetClusterConfig Opcode = 0xb4
 	OpcodeGetClusterConfig Opcode = 0xb5
 	OpcodeGetRandomKey     Opcode = 0xb6
@@ -519,7 +519,7 @@ func (o Opcode) String() string {
 		return "IFCONFIG"
 	case OpcodeReturnMeta:
 		return "RETURN_META"
-	case OpcodeCompactDb:
+	case OpcodeCompactDB:
 		return "COMPACT_DB"
 	case OpcodeSetClusterConfig:
 		return "SET_CLUSTER_CONFIG"
@@ -701,7 +701,7 @@ const (
 	StatusUnknownCollection              Status = 0x0088 // Unknown collection
 	StatusCannotApplyCollectionsManifest Status = 0x008a // Cannot apply collections manifest
 	StatusUnknownScope                   Status = 0x008c // Unknown scope
-	StatusDcpStreamIdInvalid             Status = 0x008d // DCP stream ID invalid
+	StatusDcpStreamIDInvalid             Status = 0x008d // DCP stream ID invalid
 
 	// Durability errors
 	StatusDurabilityInvalidLevel      Status = 0x00a0 // Invalid durability level
@@ -714,7 +714,7 @@ const (
 	StatusRangeScanCancelled Status = 0x00a5 // Range scan cancelled
 	StatusRangeScanMore      Status = 0x00a6 // Range scan more data available
 	StatusRangeScanComplete  Status = 0x00a7 // Range scan complete
-	StatusVbUuidNotEqual     Status = 0x00a8 // VBucket UUID not equal
+	StatusVbUUIDNotEqual     Status = 0x00a8 // VBucket UUID not equal
 
 	// Sub-document errors
 	StatusSubdocPathNotFound             Status = 0x00c0 // Path not found
@@ -723,7 +723,7 @@ const (
 	StatusSubdocPathTooBig               Status = 0x00c3 // Path too big
 	StatusSubdocDocTooDeep               Status = 0x00c4 // Document too deep
 	StatusSubdocValueCantInsert          Status = 0x00c5 // Value can't be inserted
-	StatusSubdocDocNotJson               Status = 0x00c6 // Document not JSON
+	StatusSubdocDocNotJSON               Status = 0x00c6 // Document not JSON
 	StatusSubdocNumOutOfRange            Status = 0x00c7 // Number out of range
 	StatusSubdocDeltaInvalid             Status = 0x00c8 // Delta invalid
 	StatusSubdocPathExists               Status = 0x00c9 // Path already exists
@@ -850,7 +850,7 @@ func (s Status) String() string {
 		return "CannotApplyCollectionsManifest"
 	case StatusUnknownScope:
 		return "UnknownScope"
-	case StatusDcpStreamIdInvalid:
+	case StatusDcpStreamIDInvalid:
 		return "DcpStreamIdInvalid"
 
 	// Durability errors
@@ -872,7 +872,7 @@ func (s Status) String() string {
 		return "RangeScanMore"
 	case StatusRangeScanComplete:
 		return "RangeScanComplete"
-	case StatusVbUuidNotEqual:
+	case StatusVbUUIDNotEqual:
 		return "VbUuidNotEqual"
 
 	// Sub-document errors
@@ -888,7 +888,7 @@ func (s Status) String() string {
 		return "SubdocDocTooDeep"
 	case StatusSubdocValueCantInsert:
 		return "SubdocValueCantInsert"
-	case StatusSubdocDocNotJson:
+	case StatusSubdocDocNotJSON:
 		return "SubdocDocNotJson"
 	case StatusSubdocNumOutOfRange:
 		return "SubdocNumOutOfRange"

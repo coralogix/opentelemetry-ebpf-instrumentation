@@ -642,6 +642,8 @@ func TestProcessPossibleCouchbaseEventConnectionIsolation(t *testing.T) {
 }
 
 // makeCouchbaseRequestPacketWithOpaque creates a request packet with a specific opaque value for matching
+//
+//nolint:unparam
 func makeCouchbaseRequestPacketWithOpaque(opcode couchbasekv.Opcode, key string, value string, extras []byte, opaque uint32) []byte {
 	keyLen := uint16(len(key))
 	extrasLen := uint8(len(extras))
@@ -703,8 +705,12 @@ func TestProcessCouchbaseEventPipelinedPackets(t *testing.T) {
 		getResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusSuccess, "myvalue", 1002)
 
 		// Concatenate into pipelined buffers
-		requestBuf := append(selectBucketReq, getReq...)
-		responseBuf := append(selectBucketResp, getResp...)
+		requestBuf := make([]byte, 0, len(selectBucketReq)+len(getReq))
+		requestBuf = append(requestBuf, selectBucketReq...)
+		requestBuf = append(requestBuf, getReq...)
+		responseBuf := make([]byte, 0, len(selectBucketResp)+len(getResp))
+		responseBuf = append(responseBuf, selectBucketResp...)
+		responseBuf = append(responseBuf, getResp...)
 
 		// Process the pipelined packets
 		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
@@ -740,8 +746,12 @@ func TestProcessCouchbaseEventPipelinedPackets(t *testing.T) {
 		getCollIDResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeCollectionsGetID, couchbasekv.StatusSuccess, "", 1002)
 
 		// Concatenate into pipelined buffers
-		requestBuf := append(selectBucketReq, getCollIDReq...)
-		responseBuf := append(selectBucketResp, getCollIDResp...)
+		requestBuf := make([]byte, 0, len(selectBucketReq)+len(getCollIDReq))
+		requestBuf = append(requestBuf, selectBucketReq...)
+		requestBuf = append(requestBuf, getCollIDReq...)
+		responseBuf := make([]byte, 0, len(selectBucketResp)+len(getCollIDResp))
+		responseBuf = append(responseBuf, selectBucketResp...)
+		responseBuf = append(responseBuf, getCollIDResp...)
 
 		// Process the pipelined packets - both should be ignored (cached for future use)
 		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
@@ -777,8 +787,12 @@ func TestProcessCouchbaseEventPipelinedPackets(t *testing.T) {
 		getResp2 := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusKeyNotFound, "", 1002)
 
 		// Concatenate into pipelined buffers
-		requestBuf := append(getReq1, getReq2...)
-		responseBuf := append(getResp1, getResp2...)
+		requestBuf := make([]byte, 0, len(getReq1)+len(getReq2))
+		requestBuf = append(requestBuf, getReq1...)
+		requestBuf = append(requestBuf, getReq2...)
+		responseBuf := make([]byte, 0, len(getResp1)+len(getResp2))
+		responseBuf = append(responseBuf, getResp1...)
+		responseBuf = append(responseBuf, getResp2...)
 
 		// Process the pipelined packets - should return the first KV operation
 		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
@@ -812,8 +826,12 @@ func TestProcessCouchbaseEventPipelinedWithSetupCommands(t *testing.T) {
 	getResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusSuccess, "myvalue", 1002)
 
 	// Concatenate into pipelined buffers
-	requestBuf := append(selectBucketReq, getReq...)
-	responseBuf := append(selectBucketResp, getResp...)
+	requestBuf := make([]byte, 0, len(selectBucketReq)+len(getReq))
+	requestBuf = append(requestBuf, selectBucketReq...)
+	requestBuf = append(requestBuf, getReq...)
+	responseBuf := make([]byte, 0, len(selectBucketResp)+len(getResp))
+	responseBuf = append(responseBuf, selectBucketResp...)
+	responseBuf = append(responseBuf, getResp...)
 
 	// Process the pipelined packets
 	info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)

@@ -61,8 +61,8 @@ func handleSelectBucketWithResponse(connInfo BpfConnectionInfoT, reqPacket *couc
 	}
 
 	// Check if bucket selection was successful
-	// there might be cases where the response is nil (e.g., truncated), we assum
-	if respPacket != nil && !(respPacket.IsResponse() && respPacket.Header.Status.IsSuccess()) {
+	// there might be cases where the response is nil (e.g., truncated), we assume success
+	if respPacket != nil && (!respPacket.IsResponse() || !respPacket.Header.Status.IsSuccess()) {
 		return
 	}
 
@@ -139,7 +139,7 @@ func processCouchbaseEvent(connInfo BpfConnectionInfoT, requestBuf []byte, respo
 	}
 
 	// Parse all response packets from the buffer
-	respPackets, err := couchbasekv.ParsePackets(responseBuf)
+	respPackets, _ := couchbasekv.ParsePackets(responseBuf)
 
 	// Build a map of response packets by Opaque for matching
 	respByOpaque := make(map[uint32]*couchbasekv.Packet)

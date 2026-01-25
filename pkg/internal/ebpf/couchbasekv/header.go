@@ -204,7 +204,7 @@ func (p *Packet) ValueString() string {
 	return string(p.Value)
 }
 
-// KeyString returns the key as a string.
+// ExtrasString returns the extras as a string.
 func (p *Packet) ExtrasString() string {
 	return string(p.Extras)
 }
