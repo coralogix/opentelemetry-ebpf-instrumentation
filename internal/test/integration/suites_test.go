@@ -474,14 +474,14 @@ func TestSuite_PythonMongo(t *testing.T) {
 }
 
 func TestSuite_PythonCouchbase(t *testing.T) {
-	//compose, err := docker.ComposeSuite("docker-compose-python-couchbase.yml", path.Join(pathOutput, "test-suite-python-couchbase.log"))
-	//require.NoError(t, err)
+	compose, err := docker.ComposeSuite("docker-compose-python-couchbase.yml", path.Join(pathOutput, "test-suite-python-couchbase.log"))
+	require.NoError(t, err)
 
-	//compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
-	//require.NoError(t, compose.Up())
+	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
+	require.NoError(t, compose.Up())
 	t.Run("Python Couchbase metrics", testREDMetricsPythonCouchbaseOnly)
 	t.Run("Python Couchbase error", testREDMetricsPythonCouchbaseError)
-	//require.NoError(t, compose.Close())
+	require.NoError(t, compose.Close())
 }
 
 func TestSuite_PythonSQLSSL(t *testing.T) {
