@@ -88,7 +88,7 @@ func (s InstrumentationSelection) RedisEnabled() bool {
 }
 
 func (s InstrumentationSelection) DBEnabled() bool {
-	return s.SQLEnabled() || s.RedisEnabled() || s.MongoEnabled()
+	return s.SQLEnabled() || s.RedisEnabled() || s.MongoEnabled() || s.CouchbaseEnabled()
 }
 
 func (s InstrumentationSelection) KafkaEnabled() bool {
