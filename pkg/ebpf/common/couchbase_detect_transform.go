@@ -5,6 +5,7 @@ package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 
 import (
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -56,6 +57,7 @@ func handleSelectBucket(connInfo BpfConnectionInfoT, reqPacket *couchbasekv.Pack
 // handleSelectBucketWithResponse processes the SELECT_BUCKET command with an already-parsed response.
 func handleSelectBucketWithResponse(connInfo BpfConnectionInfoT, reqPacket *couchbasekv.Packet, respPacket *couchbasekv.Packet, bucketCache *simplelru.LRU[BpfConnectionInfoT, CouchbaseBucketInfo]) {
 	bucketName := reqPacket.KeyString()
+	slog.Debug("Couchbase SELECT_BUCKET", "bucket", bucketName)
 	if bucketCache == nil || bucketName == "" {
 		return
 	}
@@ -66,6 +68,7 @@ func handleSelectBucketWithResponse(connInfo BpfConnectionInfoT, reqPacket *couc
 		return
 	}
 
+	slog.Debug("Adding Couchbase bucket to cache", "bucket", bucketName, "conn", connInfo)
 	bucketCache.Add(connInfo, CouchbaseBucketInfo{
 		Bucket:     bucketName,
 		Scope:      "",
@@ -86,6 +89,7 @@ func handleGetCollectionID(connInfo BpfConnectionInfoT, reqPacket *couchbasekv.P
 // handleGetCollectionIDWithResponse processes the GET_COLLECTION_ID command with an already-parsed response.
 func handleGetCollectionIDWithResponse(connInfo BpfConnectionInfoT, reqPacket *couchbasekv.Packet, respPacket *couchbasekv.Packet, bucketCache *simplelru.LRU[BpfConnectionInfoT, CouchbaseBucketInfo]) {
 	scopeCollection := reqPacket.ValueString()
+	slog.Debug("Couchbase GET_COLLECTION_ID", "scope.collection", scopeCollection)
 	if bucketCache == nil || scopeCollection == "" {
 		return
 	}
@@ -98,6 +102,7 @@ func handleGetCollectionIDWithResponse(connInfo BpfConnectionInfoT, reqPacket *c
 	// Parse scope.collection from the value
 	parts := strings.SplitN(scopeCollection, ".", 2)
 	if len(parts) != 2 {
+		slog.Debug("Couchbase GET_COLLECTION_ID: invalid scope.collection format", "value", scopeCollection)
 		return
 	}
 
@@ -108,6 +113,7 @@ func handleGetCollectionIDWithResponse(connInfo BpfConnectionInfoT, reqPacket *c
 	}
 	bucketInfo.Scope = parts[0]
 	bucketInfo.Collection = parts[1]
+	slog.Debug("Updating Couchbase bucket cache with scope and collection", "scope", bucketInfo.Scope, "collection", bucketInfo.Collection, "conn", connInfo)
 	bucketCache.Add(connInfo, bucketInfo)
 }
 
@@ -174,6 +180,7 @@ func processCouchbaseEvent(connInfo BpfConnectionInfoT, requestBuf []byte, respo
 
 		if !reqPacket.Header.Opcode.IsKVOperation() {
 			// Ignore non-KV operations
+			slog.Debug("Ignoring non-KV Couchbase operation", "opcode", reqPacket.Header.Opcode.String())
 			continue
 		}
 
