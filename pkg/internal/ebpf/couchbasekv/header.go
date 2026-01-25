@@ -5,7 +5,6 @@ package couchbasekv // import "go.opentelemetry.io/obi/pkg/internal/ebpf/couchba
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 )
 
@@ -165,10 +164,6 @@ func ParsePackets(segment []byte) ([]*Packet, error) {
 		packet, err := ParsePacket(remaining)
 		if err != nil {
 			return packets, err
-		}
-
-		if offset+packet.Header.TotalLen() > len(segment) {
-			return packets, errors.New("incomplete packet")
 		}
 
 		packets = append(packets, packet)

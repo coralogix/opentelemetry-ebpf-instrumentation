@@ -622,12 +622,14 @@ func (o Opcode) String() string {
 	}
 }
 
-// IsQuiet returns true if this opcode is a "quiet" variant that doesn't
-// send a response on cache miss or success.
-func (o Opcode) IsQuiet() bool {
+func (o Opcode) IsKVOperation() bool {
 	switch o {
-	case OpcodeGetQ, OpcodeGetKQ, OpcodeSetQ, OpcodeAddQ, OpcodeReplaceQ,
-		OpcodeDeleteQ, OpcodeIncrementQ, OpcodeDecrementQ, OpcodeQuitQ,
+	case OpcodeGet, OpcodeSet, OpcodeAdd, OpcodeReplace, OpcodeDelete,
+		OpcodeIncrement, OpcodeDecrement, OpcodeGetK, OpcodeAppend,
+		OpcodePrepend, OpcodeTouch, OpcodeGAT,
+		OpcodeGetMeta, OpcodeSetWithMeta, OpcodeAddWithMeta, OpcodeDelWithMeta,
+		OpcodeGetQ, OpcodeGetKQ, OpcodeSetQ, OpcodeAddQ, OpcodeReplaceQ,
+		OpcodeDeleteQ, OpcodeIncrementQ, OpcodeDecrementQ,
 		OpcodeFlushQ, OpcodeAppendQ, OpcodePrependQ, OpcodeGATQ,
 		OpcodeGetQMeta, OpcodeSetQWithMeta, OpcodeAddQWithMeta, OpcodeDelQWithMeta:
 		return true

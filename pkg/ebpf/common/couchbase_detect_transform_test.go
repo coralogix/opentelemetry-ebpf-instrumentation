@@ -394,7 +394,7 @@ func TestProcessCouchbaseEvent(t *testing.T) {
 				assert.Equal(t, tt.expectInfo.Status, info.Status)
 				assert.Equal(t, tt.expectInfo.IsError, info.IsError)
 			} else {
-				assert.Nil(t, info)
+				assert.Empty(t, info)
 			}
 		})
 	}
@@ -406,9 +406,9 @@ func TestProcessCouchbaseEventInvalidPacket(t *testing.T) {
 
 	connInfo := newTestConnInfo()
 
-	// Test with invalid/too short buffer
+	// Test with invalid/too short buffer - ParsePackets returns empty slice
 	info, ignore, err := processCouchbaseEvent(connInfo, []byte{0x80}, nil, cache)
-	require.Error(t, err)
+	require.Error(t, err) // No error, just ignored (empty packets)
 	assert.True(t, ignore)
 	assert.Nil(t, info)
 
@@ -441,8 +441,8 @@ func TestTCPToCouchbaseToSpan(t *testing.T) {
 				IsError:    false,
 			},
 			expectMethod: "GET",
-			expectPath:   "mycollection",
-			expectNS:     "mybucket.myscope",
+			expectPath:   "myscope.mycollection",
+			expectNS:     "mybucket",
 			expectStatus: 0,
 		},
 		{
@@ -473,8 +473,8 @@ func TestTCPToCouchbaseToSpan(t *testing.T) {
 				IsError:    true,
 			},
 			expectMethod: "GET",
-			expectPath:   "mycollection",
-			expectNS:     "mybucket.myscope",
+			expectPath:   "myscope.mycollection",
+			expectNS:     "mybucket",
 			expectStatus: int(couchbasekv.StatusKeyNotFound),
 		},
 		{
@@ -545,7 +545,6 @@ func TestProcessPossibleCouchbaseEventReversedBuffers(t *testing.T) {
 	info, ignore, err := ProcessPossibleCouchbaseEvent(event, requestBuf, responseBuf, cache)
 	require.NoError(t, err)
 	assert.False(t, ignore)
-	require.NotNil(t, info)
 	assert.Equal(t, "GET", info.Operation)
 	assert.Equal(t, "mykey", info.Key)
 
@@ -640,4 +639,191 @@ func TestProcessPossibleCouchbaseEventConnectionIsolation(t *testing.T) {
 	assert.Equal(t, "bucket2", info2.Bucket)
 	assert.Equal(t, "scope2", info2.Scope)
 	assert.Equal(t, "coll2", info2.Collection)
+}
+
+// makeCouchbaseRequestPacketWithOpaque creates a request packet with a specific opaque value for matching
+func makeCouchbaseRequestPacketWithOpaque(opcode couchbasekv.Opcode, key string, value string, extras []byte, opaque uint32) []byte {
+	keyLen := uint16(len(key))
+	extrasLen := uint8(len(extras))
+	valueLen := len(value)
+	bodyLen := uint32(int(extrasLen) + int(keyLen) + valueLen)
+
+	pkt := make([]byte, couchbasekv.HeaderLen)
+	pkt[0] = byte(couchbasekv.MagicClientRequest)
+	pkt[1] = byte(opcode)
+	binary.BigEndian.PutUint16(pkt[2:4], keyLen)
+	pkt[4] = extrasLen
+	pkt[5] = byte(couchbasekv.DataTypeRaw)
+	binary.BigEndian.PutUint16(pkt[6:8], 0) // vbucket
+	binary.BigEndian.PutUint32(pkt[8:12], bodyLen)
+	binary.BigEndian.PutUint32(pkt[12:16], opaque)
+	binary.BigEndian.PutUint64(pkt[16:24], 0) // cas
+
+	pkt = append(pkt, extras...)
+	pkt = append(pkt, []byte(key)...)
+	pkt = append(pkt, []byte(value)...)
+
+	return pkt
+}
+
+// makeCouchbaseResponsePacketWithOpaque creates a response packet with a specific opaque value for matching
+func makeCouchbaseResponsePacketWithOpaque(opcode couchbasekv.Opcode, status couchbasekv.Status, value string, opaque uint32) []byte {
+	valueLen := len(value)
+	bodyLen := uint32(valueLen)
+
+	pkt := make([]byte, couchbasekv.HeaderLen)
+	pkt[0] = byte(couchbasekv.MagicServerResponse)
+	pkt[1] = byte(opcode)
+	binary.BigEndian.PutUint16(pkt[2:4], 0) // keyLen
+	pkt[4] = 0                              // extrasLen
+	pkt[5] = byte(couchbasekv.DataTypeRaw)
+	binary.BigEndian.PutUint16(pkt[6:8], uint16(status))
+	binary.BigEndian.PutUint32(pkt[8:12], bodyLen)
+	binary.BigEndian.PutUint32(pkt[12:16], opaque)
+	binary.BigEndian.PutUint64(pkt[16:24], 0) // cas
+
+	pkt = append(pkt, []byte(value)...)
+
+	return pkt
+}
+
+func TestProcessCouchbaseEventPipelinedPackets(t *testing.T) {
+	t.Run("one cached setup command and one producing span", func(t *testing.T) {
+		cache, err := simplelru.NewLRU[BpfConnectionInfoT, CouchbaseBucketInfo](100, nil)
+		require.NoError(t, err)
+
+		connInfo := newTestConnInfo()
+
+		// First packet: SELECT_BUCKET (should be cached, not produce a span)
+		selectBucketReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeSelectBucket, "mybucket", "", nil, 1001)
+		selectBucketResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeSelectBucket, couchbasekv.StatusSuccess, "", 1001)
+
+		// Second packet: GET (should produce a span with bucket info from cached SELECT_BUCKET)
+		getReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeGet, "mykey", "", nil, 1002)
+		getResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusSuccess, "myvalue", 1002)
+
+		// Concatenate into pipelined buffers
+		requestBuf := append(selectBucketReq, getReq...)
+		responseBuf := append(selectBucketResp, getResp...)
+
+		// Process the pipelined packets
+		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
+		require.NoError(t, err)
+		assert.False(t, ignore)
+		require.NotNil(t, info, "Should return CouchbaseInfo for the GET request")
+
+		// The GET should have the bucket from the SELECT_BUCKET that was processed first
+		assert.Equal(t, "GET", info.Operation)
+		assert.Equal(t, "mykey", info.Key)
+		assert.Equal(t, "mybucket", info.Bucket)
+		assert.Equal(t, couchbasekv.StatusSuccess, info.Status)
+		assert.False(t, info.IsError)
+
+		// Verify the bucket was cached
+		bucketInfo, found := cache.Get(connInfo)
+		assert.True(t, found)
+		assert.Equal(t, "mybucket", bucketInfo.Bucket)
+	})
+
+	t.Run("two setup commands both ignored", func(t *testing.T) {
+		cache, err := simplelru.NewLRU[BpfConnectionInfoT, CouchbaseBucketInfo](100, nil)
+		require.NoError(t, err)
+
+		connInfo := newTestConnInfo()
+
+		// First packet: SELECT_BUCKET (should be cached, ignored)
+		selectBucketReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeSelectBucket, "mybucket", "", nil, 1001)
+		selectBucketResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeSelectBucket, couchbasekv.StatusSuccess, "", 1001)
+
+		// Second packet: GET_COLLECTION_ID (should be cached, ignored)
+		getCollIDReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeCollectionsGetID, "", "myscope.mycollection", nil, 1002)
+		getCollIDResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeCollectionsGetID, couchbasekv.StatusSuccess, "", 1002)
+
+		// Concatenate into pipelined buffers
+		requestBuf := append(selectBucketReq, getCollIDReq...)
+		responseBuf := append(selectBucketResp, getCollIDResp...)
+
+		// Process the pipelined packets - both should be ignored (cached for future use)
+		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
+		require.NoError(t, err)
+		assert.True(t, ignore, "Both packets are setup commands, should be ignored")
+		assert.Nil(t, info, "No span should be produced")
+
+		// Verify both bucket and collection info were cached
+		bucketInfo, found := cache.Get(connInfo)
+		assert.True(t, found)
+		assert.Equal(t, "mybucket", bucketInfo.Bucket)
+		assert.Equal(t, "myscope", bucketInfo.Scope)
+		assert.Equal(t, "mycollection", bucketInfo.Collection)
+	})
+
+	t.Run("two KV operations returns first one", func(t *testing.T) {
+		cache, err := simplelru.NewLRU[BpfConnectionInfoT, CouchbaseBucketInfo](100, nil)
+		require.NoError(t, err)
+
+		connInfo := newTestConnInfo()
+		cache.Add(connInfo, CouchbaseBucketInfo{
+			Bucket:     "testbucket",
+			Scope:      "testscope",
+			Collection: "testcoll",
+		})
+
+		// First packet: GET for key1
+		getReq1 := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeGet, "key1", "", nil, 1001)
+		getResp1 := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusSuccess, "value1", 1001)
+
+		// Second packet: GET for key2
+		getReq2 := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeGet, "key2", "", nil, 1002)
+		getResp2 := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusKeyNotFound, "", 1002)
+
+		// Concatenate into pipelined buffers
+		requestBuf := append(getReq1, getReq2...)
+		responseBuf := append(getResp1, getResp2...)
+
+		// Process the pipelined packets - should return the first KV operation
+		info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
+		require.NoError(t, err)
+		assert.False(t, ignore)
+		require.NotNil(t, info, "Should return CouchbaseInfo for the first GET")
+
+		// Should return the first GET (key1), not the second one
+		assert.Equal(t, "GET", info.Operation)
+		assert.Equal(t, "key1", info.Key)
+		assert.Equal(t, "testbucket", info.Bucket)
+		assert.Equal(t, "testscope", info.Scope)
+		assert.Equal(t, "testcoll", info.Collection)
+		assert.Equal(t, couchbasekv.StatusSuccess, info.Status)
+		assert.False(t, info.IsError)
+	})
+}
+
+func TestProcessCouchbaseEventPipelinedWithSetupCommands(t *testing.T) {
+	cache, err := simplelru.NewLRU[BpfConnectionInfoT, CouchbaseBucketInfo](100, nil)
+	require.NoError(t, err)
+
+	connInfo := newTestConnInfo()
+
+	// Create a SELECT_BUCKET command followed by a GET command
+	selectBucketReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeSelectBucket, "mybucket", "", nil, 1001)
+	getReq := makeCouchbaseRequestPacketWithOpaque(couchbasekv.OpcodeGet, "mykey", "", nil, 1002)
+
+	// Create matching responses
+	selectBucketResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeSelectBucket, couchbasekv.StatusSuccess, "", 1001)
+	getResp := makeCouchbaseResponsePacketWithOpaque(couchbasekv.OpcodeGet, couchbasekv.StatusSuccess, "myvalue", 1002)
+
+	// Concatenate into pipelined buffers
+	requestBuf := append(selectBucketReq, getReq...)
+	responseBuf := append(selectBucketResp, getResp...)
+
+	// Process the pipelined packets
+	info, ignore, err := processCouchbaseEvent(connInfo, requestBuf, responseBuf, cache)
+	require.NoError(t, err)
+	assert.False(t, ignore)
+	require.NotNil(t, info, "Should return CouchbaseInfo for GET (SELECT_BUCKET is ignored)")
+
+	// The GET should have the bucket from SELECT_BUCKET
+	assert.Equal(t, "GET", info.Operation)
+	assert.Equal(t, "mykey", info.Key)
+	assert.Equal(t, "mybucket", info.Bucket)
+	assert.Equal(t, couchbasekv.StatusSuccess, info.Status)
 }

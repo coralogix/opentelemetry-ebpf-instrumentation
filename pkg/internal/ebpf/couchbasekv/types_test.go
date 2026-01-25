@@ -114,31 +114,6 @@ func TestOpcodeString(t *testing.T) {
 	}
 }
 
-func TestOpcodeIsQuiet(t *testing.T) {
-	quietOpcodes := []Opcode{
-		OpcodeGetQ, OpcodeGetKQ, OpcodeSetQ, OpcodeAddQ, OpcodeReplaceQ,
-		OpcodeDeleteQ, OpcodeIncrementQ, OpcodeDecrementQ, OpcodeQuitQ,
-		OpcodeFlushQ, OpcodeAppendQ, OpcodePrependQ, OpcodeGATQ,
-		OpcodeGetQMeta, OpcodeSetQWithMeta, OpcodeAddQWithMeta, OpcodeDelQWithMeta,
-	}
-
-	for _, op := range quietOpcodes {
-		assert.True(t, op.IsQuiet(), "expected %s to be quiet", op.String())
-	}
-
-	nonQuietOpcodes := []Opcode{
-		OpcodeGet, OpcodeSet, OpcodeAdd, OpcodeReplace, OpcodeDelete,
-		OpcodeIncrement, OpcodeDecrement, OpcodeQuit, OpcodeFlush,
-		OpcodeNoop, OpcodeVersion, OpcodeGetK, OpcodeAppend,
-		OpcodePrepend, OpcodeStat, OpcodeTouch, OpcodeGAT, OpcodeHello,
-		OpcodeGetMeta, OpcodeSetWithMeta, OpcodeAddWithMeta, OpcodeDelWithMeta,
-	}
-
-	for _, op := range nonQuietOpcodes {
-		assert.False(t, op.IsQuiet(), "expected %s to not be quiet", op.String())
-	}
-}
-
 func TestStatusString(t *testing.T) {
 	tests := []struct {
 		status   Status
