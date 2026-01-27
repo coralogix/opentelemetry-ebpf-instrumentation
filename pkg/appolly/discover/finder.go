@@ -146,7 +146,6 @@ func newCommonTracersGroup(cfg *obi.Config) []ebpf.Tracer {
 	if cfg.EBPF.ContextPropagation.HasIPOptions() {
 		tracers = append(tracers, tctracer.New(cfg))
 	}
-
 	return tracers
 }
 

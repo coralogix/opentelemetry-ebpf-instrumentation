@@ -208,3 +208,9 @@ const (
 const (
 	DNSQuestionName = Name(semconv.DNSQuestionNameKey)
 )
+
+// App network events
+const (
+	AppNetworkTcpRttPort  = Name("port")  // TODO (pinoOgni): test, used as label
+	AppNetworkTcpRttNetns = Name("netns") // TODO (pinoOgni): test, used as label
+)

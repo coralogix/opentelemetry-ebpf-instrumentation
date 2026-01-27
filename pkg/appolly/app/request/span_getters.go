@@ -318,6 +318,10 @@ func spanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 		}
 	case attr.DNSQuestionName:
 		getter = func(span *Span) attribute.KeyValue { return DNSQuestionName(span.Path) }
+	case attr.AppNetworkTcpRttNetns:
+		getter = func(span *Span) attribute.KeyValue { return AppNetNetns(int(span.AppNet.TcpRtt.Netns)) }
+	case attr.AppNetworkTcpRttPort:
+		getter = func(span *Span) attribute.KeyValue { return AppNetPort(int(span.AppNet.TcpRtt.Port)) }
 	}
 	// default: unlike the Prometheus getters, we don't check here for service name nor k8s metadata
 	// because they are already attributes of the Resource instead of the attributes.

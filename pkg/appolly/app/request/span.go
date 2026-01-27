@@ -51,6 +51,7 @@ const (
 	EventTypeDNS
 	EventTypeCouchbaseClient
 	EventTypeAppNetTcpRtt
+	EventTypeAppNetTcpFailedConnections
 )
 
 const (
@@ -200,6 +201,16 @@ type Elasticsearch struct {
 	DBSystemName     string `json:"dbSystemName"`
 }
 
+type AppNet struct {
+	TcpRtt TcpRtt
+}
+
+type TcpRtt struct {
+	Srtt  uint32 `json:"srtt"`
+	Netns uint32 `json:"netns"`
+	Port  uint16 `json:"port"`
+}
+
 type AWS struct {
 	// https://opentelemetry.io/docs/specs/semconv/object-stores/s3/
 	S3 AWSS3 `json:"s3"`
@@ -271,7 +282,7 @@ type Span struct {
 	GraphQL           *GraphQL       `json:"-"`
 	Elasticsearch     *Elasticsearch `json:"-"`
 	AWS               *AWS           `json:"-"`
-
+	AppNet            *AppNet        `json:"-"`
 	// OverrideTraceName is set under some conditions, like spanmetrics reaching the maximum
 	// cardinality for trace names.
 	OverrideTraceName string `json:"-"`
