@@ -14,4 +14,5 @@ struct {
     __type(key, struct sock_port_ns);
     __type(value, bool);
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+    __uint(pinning, OBI_PIN_INTERNAL);
 } listening_ports SEC(".maps");

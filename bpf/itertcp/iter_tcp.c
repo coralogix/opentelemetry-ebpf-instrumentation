@@ -7,7 +7,7 @@
 
 #include <common/sock_port_ns.h>
 
-#include <generictracer/maps/listening_ports.h>
+#include <maps/listening_ports.h>
 
 SEC("iter/tcp")
 int obi_iter_tcp(struct bpf_iter__tcp *ctx) {

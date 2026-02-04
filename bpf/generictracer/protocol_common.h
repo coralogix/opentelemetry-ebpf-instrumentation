@@ -13,7 +13,7 @@
 
 #include <generictracer/maps/connection_meta_mem.h>
 #include <generictracer/maps/iovec_mem.h>
-#include <generictracer/maps/listening_ports.h>
+#include <maps/listening_ports.h>
 #include <generictracer/maps/protocol_args_mem.h>
 
 #include <logger/bpf_dbg.h>
