@@ -146,6 +146,7 @@ func newCommonTracersGroup(cfg *obi.Config) []ebpf.Tracer {
 	if cfg.EBPF.ContextPropagation.HasIPOptions() {
 		tracers = append(tracers, tctracer.New(cfg))
 	}
+
 	return tracers
 }
 
@@ -171,5 +172,6 @@ func newGenericTracersGroup(pidFilter ebpfcommon.ServiceFilter, cfg *obi.Config,
 			tracers = append(tracers, logEnricher)
 		}
 	}
+
 	return tracers
 }

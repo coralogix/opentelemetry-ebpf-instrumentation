@@ -22,7 +22,7 @@
 #include <generictracer/k_unix_sock.h>
 #include <generictracer/maps/active_accept_args.h>
 #include <generictracer/maps/active_connect_args.h>
-#include <maps/listening_ports.h>
+#include <generictracer/maps/listening_ports.h>
 #include <generictracer/maps/tcp_connection_map.h>
 #include <generictracer/protocol_http.h>
 #include <generictracer/protocol_http2.h>

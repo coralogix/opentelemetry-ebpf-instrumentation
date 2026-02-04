@@ -67,16 +67,7 @@ func spanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 			return ServerAddr(HostAsServer(s))
 		}
 	case attr.ServerPort:
-		getter = func(s *Span) attribute.KeyValue {
-			if s.Type == EventTypeAppNetTcpRtt {
-				if s.AppNet.TcpRtt.Direction == 0 { // TODO (pinoOgni) remove hardcoded value
-					return ServerPort(s.PeerPort)
-				} else {
-					return ServerPort(s.HostPort)
-				}
-			}
-			return ServerPort(s.HostPort)
-		}
+		getter = func(s *Span) attribute.KeyValue { return ServerPort(s.HostPort) }
 	case attr.RPCMethod:
 		getter = func(s *Span) attribute.KeyValue {
 			if s.Type == EventTypeHTTPClient && s.SubType == HTTPSubtypeAWSS3 && s.AWS != nil {
@@ -327,14 +318,11 @@ func spanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 		}
 	case attr.DNSQuestionName:
 		getter = func(span *Span) attribute.KeyValue { return DNSQuestionName(span.Path) }
-	case attr.AppNetworkDirection:
-		getter = func(s *Span) attribute.KeyValue {
-			if s.AppNet.TcpRtt.Direction == 0 { // TODO (pinoOgni) remove hardcoded value
-				return AppNetworkDirection("inbound")
-			} else {
-				return AppNetworkDirection("outbound")
-			}
-		}
+	case attr.SrcAddress:
+		getter = func(s *Span) attribute.KeyValue { return SourceAddr(s.Peer) }
+	case attr.DstAddress:
+		getter = func(s *Span) attribute.KeyValue { return DestinationAddr(s.Host) }
+		// TODO (pinoOgni) add src port and dst port
 	}
 	// default: unlike the Prometheus getters, we don't check here for service name nor k8s metadata
 	// because they are already attributes of the Resource instead of the attributes.
