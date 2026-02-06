@@ -10,3 +10,4 @@ This directory contains documentation that is not useful for our users but might
 - [Context Propagation Architecture](context-propagation.md): how OpenTelemetry context propagation works in the eBPF instrumentation.
 - [Protocols](protocols/README.md): documentation about supported protocols.
 - [BPF print format](bpf-print-format.md): it explains a uniform standard for all BPF print debug statements across the project.
+- [Metrics](./metrics.md): it explains Netolly and Appolly metrics.
