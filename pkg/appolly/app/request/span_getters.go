@@ -319,9 +319,19 @@ func spanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 	case attr.DNSQuestionName:
 		getter = func(span *Span) attribute.KeyValue { return DNSQuestionName(span.Path) }
 	case attr.SrcAddress:
-		getter = func(s *Span) attribute.KeyValue { return SourceAddr(s.Peer) }
+		getter = func(s *Span) attribute.KeyValue {
+			if s.Type == EventTypeAppNetTCPRtt {
+				return SourceAddr(s.Peer)
+			}
+			return SourceAddr("")
+		}
 	case attr.DstAddress:
-		getter = func(s *Span) attribute.KeyValue { return DestinationAddr(s.Host) }
+		getter = func(s *Span) attribute.KeyValue {
+			if s.Type == EventTypeAppNetTCPRtt {
+				return DestinationAddr(s.Host)
+			}
+			return DestinationAddr("")
+		}
 		// TODO (pinoOgni) add src port and dst port
 	}
 	// default: unlike the Prometheus getters, we don't check here for service name nor k8s metadata
