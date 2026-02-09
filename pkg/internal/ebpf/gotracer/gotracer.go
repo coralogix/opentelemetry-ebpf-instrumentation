@@ -258,8 +258,11 @@ func (p *Tracer) GoProbes() map[string][]*ebpfcommon.ProbeDesc {
 	m := map[string][]*ebpfcommon.ProbeDesc{
 		// Go runtime
 		"runtime.newproc1": {{
-			Start: p.bpfObjects.ObiUprobeProcNewproc1,
-			End:   p.bpfObjects.ObiUprobeProcNewproc1Ret,
+			Start: p.bpfObjects.ObiUprobeRuntimeNewproc1,
+			End:   p.bpfObjects.ObiUprobeRuntimeNewproc1Return,
+		}},
+		"runtime.casgstatus": {{
+			Start: p.bpfObjects.ObiUprobeRuntimeCasgstatus,
 		}},
 		// Go net/http
 		"net/http.serverHandler.ServeHTTP": {{
