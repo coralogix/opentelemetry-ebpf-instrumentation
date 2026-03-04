@@ -54,7 +54,7 @@ type ContextInfo struct {
 	// This is useful when OBI runs in vendored mode
 	OverrideNetExportQueue *msg.Queue[[]*netebpf.Record]
 
-	// OverrideNetExportQueue allows overriding the output queue of the network exporter
+	// OverrideStatsExportQueue allows overriding the output queue of the network exporter
 	// to connect your own network exporters outside the OBI code base. If left unset, OBI will
 	// create its own private queue.
 	// This is useful when OBI runs in vendored mode

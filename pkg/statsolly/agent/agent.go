@@ -67,7 +67,7 @@ func (s Status) String() string {
 	}
 }
 
-var errShutdownTimeout = errors.New("graceful shutdown has timed out while waiting for eBPF network infrastructure to finish")
+var errShutdownTimeout = errors.New("graceful shutdown has timed out while waiting for eBPF statsolly to finish")
 
 // Stats reporting agent
 type Stats struct {
@@ -114,7 +114,7 @@ func StatsAgent(ctxInfo *global.ContextInfo, cfg *obi.Config) (*Stats, error) {
 	}
 	alog.Debug("agent IP: " + agentIP.String())
 
-	statsFetcher, err = newFetcher(cfg, alog)
+	statsFetcher, err = newFetcher()
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,8 @@ func StatsAgent(ctxInfo *global.ContextInfo, cfg *obi.Config) (*Stats, error) {
 	return statsAgent(ctxInfo, cfg, statsFetcher, agentIP, ifaceManager)
 }
 
-func newFetcher(cfg *obi.Config, alog *slog.Logger) (ebpFetcher, error) {
-	// We may need to add some arguments in the future
+func newFetcher() (ebpFetcher, error) {
+	// TODO pinoOgni any arguments needed?
 	return ebpf.NewStatsFetcher()
 }
 
@@ -160,9 +160,7 @@ func statsAgent(
 	agentIP net.IP,
 	ifaceManager *tcmanager.InterfaceManager,
 ) (*Stats, error) {
-	var rbTracer *stats.RingBufTracer
-
-	rbTracer = stats.NewRingBufTracer(statsFetcher)
+	rbTracer := stats.NewRingBufTracer(statsFetcher)
 
 	return &Stats{
 		ctxInfo:      ctxInfo,
@@ -188,6 +186,7 @@ func (s *Stats) Run(ctx context.Context) error {
 
 	s.graph = graph
 
+	// TODO pinoOgni check
 	s.ifaceManager.Start(ctx)
 
 	s.graph.Start(ctx, swarm.WithCancelTimeout(s.cfg.ShutdownTimeout))

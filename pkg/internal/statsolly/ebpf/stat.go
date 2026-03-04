@@ -1,24 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Copyright Red Hat / IBM
-// Copyright Grafana Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// This implementation is a derivation of the code in
-// https://github.com/netobserv/netobserv-ebpf-agent/tree/release-1.4
-
 package ebpf // import "go.opentelemetry.io/obi/pkg/internal/statsolly/ebpf"
 
 import (
@@ -76,7 +58,7 @@ type StatAttrs struct {
 	SrcZone string
 	DstZone string
 
-	// OBIIP provides information about the source of the flow (the Agent that traced it)
+	// OBIIP provides information about the source of the stat (the Agent that traced it)
 	OBIIP    string
 	Metadata map[attr.Name]string
 }
@@ -90,7 +72,8 @@ func (ia *IPAddr) IP() net.IP {
 	return ia[:]
 }
 
-// TODO pinoOgni not sure if this is a good idea
+// SrcIP returns the source IP address of the Stat entry as an IPAddr.
+// TODO: pinoOgni not sure if this is a good idea
 func (s *Stat) SrcIP() *IPAddr {
 	ip := net.ParseIP(s.Attrs.SourceAddress)
 	if ip == nil {
@@ -103,6 +86,7 @@ func (s *Stat) SrcIP() *IPAddr {
 	return &addr
 }
 
+// DstIP returns the destination IP address of the Stat entry as an IPAddr.
 // TODO pinoOgni not sure if this is a good idea
 func (s *Stat) DstIP() *IPAddr {
 	ip := net.ParseIP(s.Attrs.DestinationAddress)

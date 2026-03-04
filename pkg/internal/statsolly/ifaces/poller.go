@@ -1,6 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// TODO pinoOgni, is this needed?
 // Copyright Red Hat / IBM
 // Copyright Grafana Labs
 //
