@@ -22,9 +22,6 @@ import (
 )
 
 const (
-	listenPoll  = "poll"
-	listenWatch = "watch"
-
 	ipTypeAny  = "any"
 	ipTypeIPV4 = "ipv4"
 	ipTypeIPV6 = "ipv6"
@@ -128,7 +125,6 @@ func statsAgent(
 	statsFetcher ebpFetcher,
 	agentIP net.IP,
 ) (*Stats, error) {
-
 	rbTracer := stats.NewRingBufTracer(statsFetcher.StatsEventsMap(), &cfg.EBPF)
 
 	return &Stats{

@@ -136,7 +136,7 @@ func newStatMetricsExporter(
 
 		tcpRtt, err := ebpfEvents.Float64Histogram(attributes.StatTCPRtt.OTEL, metric2.WithUnit("s"))
 		if err != nil {
-			log.Error("creating stats tcp rtt histogra", "error", err)
+			log.Error("creating stats tcp rtt histogram", "error", err)
 			return nil, err
 		}
 
@@ -158,7 +158,7 @@ func (me *statMetricsExporter) Do(ctx context.Context) {
 		for _, v := range i {
 			if me.tcpRtt != nil {
 				tcpRtt, attrs := me.tcpRtt.ForRecord(v)
-				tcpRtt.Record(ctx, float64(v.TCPRtt.Srtt)/1000.0, metric2.WithAttributeSet(attrs))
+				tcpRtt.Record(ctx, float64(v.TCPRtt.SrttUs)/1_000_000.0, metric2.WithAttributeSet(attrs))
 			}
 		}
 	}

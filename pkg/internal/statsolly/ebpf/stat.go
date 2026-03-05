@@ -76,5 +76,5 @@ type StatAttrs struct {
 }
 
 type TCPRtt struct {
-	Srtt uint32 `json:"srtt"`
+	SrttUs uint32 `json:"srtt_us"`
 }

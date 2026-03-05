@@ -108,7 +108,7 @@ func TestFilter(t *testing.T) {
 func fakeRecord(srcPort, dstPort uint16) *ebpf.Stat {
 	return &ebpf.Stat{
 		TCPRtt: &ebpf.TCPRtt{
-			Srtt: 100,
+			SrttUs: 100,
 		},
 		Attrs: ebpf.StatAttrs{
 			SourcePort:      int(srcPort),

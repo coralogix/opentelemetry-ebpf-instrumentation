@@ -14,11 +14,11 @@ import (
 type StatsFetcher struct{}
 
 type StatsTCPRtt struct {
-	_     structs.HostLayout
-	Flags uint8
-	Pad   [3]uint8
-	Srtt  uint32
-	Conn  struct {
+	_      structs.HostLayout
+	Flags  uint8
+	Pad    [3]uint8
+	SrttUs uint32
+	Conn   struct {
 		_      structs.HostLayout
 		S_addr [16]uint8 //nolint:revive,staticcheck
 		D_addr [16]uint8 //nolint:revive,staticcheck

@@ -141,10 +141,9 @@ func (r *statMetricsReporter) collectMetrics(_ context.Context) {
 }
 
 func (r *statMetricsReporter) observeTCPRtt(stat *ebpf.Stat) {
-	if r.tcpRtt == nil || stat.TCPRtt.Srtt == 0 || stat.TCPRtt == nil {
+	if r.tcpRtt == nil || stat.TCPRtt == nil {
 		return
 	}
-
 	r.tcpRtt.WithLabelValues(labelValues(stat, r.statsAttrs)...).
-		Metric.Observe(float64(stat.TCPRtt.Srtt) / 1000.0)
+		Metric.Observe(float64(stat.TCPRtt.SrttUs) / 1_000_000.0)
 }

@@ -16,22 +16,18 @@ import (
 func testStatMetricsTCPRtt(t *testing.T, port string) {
 	// Eventually, Prometheus would make this query visible
 	pq := promtest.Client{HostPort: prometheusHostPort}
-	var results []promtest.Result
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		var err error
-		results, err = pq.Query(`obi_stat_tcp_rtt_seconds_bucket{` +
-			`dst_port="` + port + `"}`)
+		// Observations should appear above the 100ms bucket (pumba injects 100ms delay)
+		bucketAt100ms, err := pq.Query(`obi_stat_tcp_rtt_seconds_bucket{dst_port="` + port + `",le="0.1"}`)
 		require.NoError(ct, err)
-		enoughPromResults(ct, results)
-		val := totalPromCount(ct, results)
-		assert.LessOrEqual(ct, 1, val)
+		enoughPromResults(ct, bucketAt100ms)
 
-		results, err = pq.Query(`obi_stat_tcp_rtt_seconds_count{` +
-			`dst_port="` + port + `"}`)
+		countResults, err := pq.Query(`obi_stat_tcp_rtt_seconds_count{dst_port="` + port + `"}`)
 		require.NoError(ct, err)
-		enoughPromResults(ct, results)
-		val = totalPromCount(ct, results)
-		assert.LessOrEqual(ct, 1, val)
+		enoughPromResults(ct, countResults)
+
+		// if pumba is working, not all observations fit in the <=100ms bucket
+		assert.Less(ct, totalPromCount(ct, bucketAt100ms), totalPromCount(ct, countResults))
 	}, testTimeout, 100*time.Millisecond)
 }
 

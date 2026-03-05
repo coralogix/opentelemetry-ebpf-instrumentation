@@ -300,7 +300,7 @@
       "properties": {
         "batch_length": {
           "type": "integer",
-          "description": "BatchLength allows specifying how many traces will be batched at the initial stage before being forwarded to the next stage Must be at least 1",
+          "description": "BatchLength allows specifying how many items (traces/metrics) will be batched at the initial stage before being forwarded to the next stage Must be at least 1",
           "x-env-var": "OTEL_EBPF_BPF_BATCH_LENGTH"
         },
         "batch_timeout": {
@@ -1760,26 +1760,6 @@
         "geo_ip": {
           "$ref": "#/$defs/GeoIP"
         },
-        "listen_interfaces": {
-          "type": "string",
-          "enum": [
-            "poll",
-            "watch"
-          ],
-          "description": "ListenInterfaces specifies the mechanism used by the agent to listen for added or removed network interfaces. Accepted values are \"watch\" (default) or \"poll\". If the value is \"watch\", interfaces are traced immediately after they are created. This is the recommended setting for most configurations. \"poll\" value is a fallback mechanism that periodically queries the current network interfaces (frequency specified by ListenPollPeriod).",
-          "x-env-var": "OTEL_EBPF_STATS_LISTEN_INTERFACES"
-        },
-        "listen_poll_period": {
-          "type": "string",
-          "pattern": "^[0-9]+(ms|s|m)$",
-          "description": "ListenPollPeriod specifies the periodicity to query the network interfaces when the ListenInterfaces value is set to \"poll\".",
-          "examples": [
-            "30s",
-            "5m",
-            "1ms"
-          ],
-          "x-env-var": "OTEL_EBPF_STATS_LISTEN_POLL_PERIOD"
-        },
         "print_stats": {
           "type": "boolean",
           "description": "Print the stats in the Standard Output, if true",
@@ -1791,7 +1771,7 @@
         }
       },
       "type": "object",
-      "description": "TODO pinoOgni: right now it is a copy and paste of more or less netolly config"
+      "description": "TODO: see if there is a way to merge common fields with NetworkConfig"
     },
     "SvcMetricsConfig": {
       "properties": {

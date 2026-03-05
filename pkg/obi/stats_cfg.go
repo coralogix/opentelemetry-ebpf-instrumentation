@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/obi/pkg/statsolly/cidr"
 )
 
-// TODO pinoOgni: right now it is a copy and paste of more or less netolly config
+// TODO: see if there is a way to merge common fields with NetworkConfig
 type StatsConfig struct {
 	// AgentIP allows overriding the reported Agent IP address on each stat.
 	AgentIP string `yaml:"agent_ip" env:"OTEL_EBPF_STATS_AGENT_IP" validate:"omitempty,ip" jsonschema:"type=string,format=ip"`
@@ -28,15 +28,6 @@ type StatsConfig struct {
 	// If an entry is enclosed by slashes (e.g. `/br-/`), it will match as regular expression,
 	// otherwise it will be matched as a case-sensitive string.
 
-	// ListenInterfaces specifies the mechanism used by the agent to listen for added or removed
-	// network interfaces. Accepted values are "watch" (default) or "poll".
-	// If the value is "watch", interfaces are traced immediately after they are created. This is
-	// the recommended setting for most configurations. "poll" value is a fallback mechanism that
-	// periodically queries the current network interfaces (frequency specified by ListenPollPeriod).
-	ListenInterfaces string `yaml:"listen_interfaces" env:"OTEL_EBPF_STATS_LISTEN_INTERFACES" validate:"oneof=watch poll" jsonschema:"type=string,enum=watch,enum=poll"`
-	// ListenPollPeriod specifies the periodicity to query the network interfaces when the
-	// ListenInterfaces value is set to "poll".
-	ListenPollPeriod time.Duration `yaml:"listen_poll_period" env:"OTEL_EBPF_STATS_LISTEN_POLL_PERIOD" validate:"gte=0"`
 	// CIDRs list, to be set as the "src.cidr" and "dst.cidr"
 	// attribute as a function of the source and destination IP addresses.
 	// If an IP does not match any address here, the attributes won't be set.
@@ -55,16 +46,11 @@ type StatsConfig struct {
 	Print bool `yaml:"print_stats" env:"OTEL_EBPF_STATS_PRINT_STATS" validate:"boolean"`
 
 	GeoIP stats.GeoIP `yaml:"geo_ip"`
-
-	// TODO pinoOgni add more granular configuration
-	// TCPRtt bool `yaml:"rtt" env:"OTEL_EBPF_APP_STATS_METRICS_TCP_RTT" validate:"boolean"`
 }
 
 var DefaultStatsConfig = StatsConfig{
-	AgentIPIface:     "external",
-	AgentIPType:      "any",
-	ListenInterfaces: "watch",
-	ListenPollPeriod: 10 * time.Second,
+	AgentIPIface: "external",
+	AgentIPType:  "any",
 	ReverseDNS: stats.ReverseDNS{
 		Type:     stats.ReverseDNSNone,
 		CacheLen: 256,

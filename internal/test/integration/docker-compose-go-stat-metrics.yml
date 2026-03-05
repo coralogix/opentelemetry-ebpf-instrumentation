@@ -88,6 +88,7 @@ services:
     ports:
       - "9090:9090"
 
+  # pumba is used to add a delay in the client in order to obtain a srtt different from 0
   pumba:
     image: ghcr.io/alexei-led/pumba
     volumes:

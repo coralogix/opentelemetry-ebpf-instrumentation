@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -21,7 +20,7 @@ import (
 type StatsTCPRtt StatsTcpRttT
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
-//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type tcp_rtt_t -target amd64,arm64 Stats ../../../../bpf/statsolly/stats.c -- -I../../../../bpf
+//go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type tcp_rtt_t -target amd64,arm64 Stats ../../../../bpf/statsolly/k_tcp.c -- -I../../../../bpf
 
 type StatsFetcher struct {
 	log         *slog.Logger
@@ -89,20 +88,10 @@ func (m *StatsFetcher) Close() error {
 	var errs []error
 	for _, c := range m.closables {
 		if c != nil {
-			if err := c.Close(); err != nil {
-				errs = append(errs, err)
-			}
+			errs = append(errs, c.Close())
 		}
 	}
-
-	var errStrings []string
-	for _, err := range errs {
-		errStrings = append(errStrings, err.Error())
-	}
-	if len(errStrings) == 0 {
-		return nil
-	}
-	return errors.New(`errors: "` + strings.Join(errStrings, `", "`) + `"`)
+	return errors.Join(errs...)
 }
 
 // StatsEventsMap returns the ring buffer map for stats events.
