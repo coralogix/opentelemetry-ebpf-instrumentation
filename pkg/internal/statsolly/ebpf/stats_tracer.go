@@ -16,8 +16,6 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
-
-	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
 )
 
 type StatsTCPRtt StatsTcpRttT
@@ -26,9 +24,9 @@ type StatsTCPRtt StatsTcpRttT
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type tcp_rtt_t -target amd64,arm64 Stats ../../../../bpf/statsolly/stats.c -- -I../../../../bpf
 
 type StatsFetcher struct {
-	log           *slog.Logger
-	ringbufReader *ringbuf.Reader
-	closables     []io.Closer
+	log         *slog.Logger
+	statsEvents *ebpf.Map
+	closables   []io.Closer
 }
 
 func tlog() *slog.Logger {
@@ -76,16 +74,11 @@ func NewStatsFetcher() (*StatsFetcher, error) {
 		return nil, fmt.Errorf("opening kprobe: %w", err)
 	}
 
-	// read events from ringbuffer
-	stats, err := ringbuf.NewReader(objects.StatsEvents)
-	if err != nil {
-		return nil, fmt.Errorf("accessing to ringbuffer: %w", err)
-	}
 	var closables []io.Closer
 	return &StatsFetcher{
-		log:           tlog,
-		ringbufReader: stats,
-		closables:     append(closables, ktc),
+		log:         tlog,
+		statsEvents: objects.StatsEvents,
+		closables:   append(closables, ktc),
 	}, nil
 }
 
@@ -94,15 +87,6 @@ func (m *StatsFetcher) Close() error {
 	m.log.Debug("unregistering eBPF objects")
 
 	var errs []error
-	// m.ringbufReader.Read is a blocking operation, so we need to close the ring buffer
-	// from another goroutine to avoid the system not being able to exit if there
-	// isn't traffic in a given interface
-	if m.ringbufReader != nil {
-		if err := m.ringbufReader.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
 	for _, c := range m.closables {
 		if c != nil {
 			if err := c.Close(); err != nil {
@@ -115,9 +99,14 @@ func (m *StatsFetcher) Close() error {
 	for _, err := range errs {
 		errStrings = append(errStrings, err.Error())
 	}
+	if len(errStrings) == 0 {
+		return nil
+	}
 	return errors.New(`errors: "` + strings.Join(errStrings, `", "`) + `"`)
 }
 
-func (m *StatsFetcher) ReadRingBuf() (ringbuf.Record, error) {
-	return m.ringbufReader.Read()
+// StatsEventsMap returns the ring buffer map for stats events.
+// The caller (ForwardRingbuf) is responsible for creating and closing the reader.
+func (m *StatsFetcher) StatsEventsMap() *ebpf.Map {
+	return m.statsEvents
 }

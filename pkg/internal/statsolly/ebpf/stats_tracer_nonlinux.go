@@ -8,7 +8,7 @@ package ebpf // import "go.opentelemetry.io/obi/pkg/internal/statsolly/ebpf"
 import (
 	"structs"
 
-	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
+	ciliumebpf "github.com/cilium/ebpf"
 )
 
 type StatsFetcher struct{}
@@ -36,6 +36,6 @@ func (m *StatsFetcher) Close() error {
 	return nil
 }
 
-func (m *StatsFetcher) ReadRingBuf() (ringbuf.Record, error) {
-	return ringbuf.Record{}, nil
+func (m *StatsFetcher) StatsEventsMap() *ciliumebpf.Map {
+	return nil
 }

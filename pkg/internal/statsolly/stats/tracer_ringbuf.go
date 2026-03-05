@@ -5,11 +5,13 @@ package stats // import "go.opentelemetry.io/obi/pkg/internal/statsolly/stats"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 
+	ciliumebpf "github.com/cilium/ebpf"
+
+	"go.opentelemetry.io/obi/pkg/config"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/internal/statsolly/ebpf"
@@ -21,70 +23,55 @@ func rtlog() *slog.Logger {
 	return slog.With("component", "stat.RingBufTracer")
 }
 
-// RingBufTracer receives a single stat via ringbuffer and submits it to the pipeline
+// RingBufTracer reads stat events from an eBPF ring buffer, batches them, and
+// forwards batches to the pipeline using the shared ForwardRingbuf infrastructure.
 type RingBufTracer struct {
-	ringBuffer ringBufReader
+	statsMap *ciliumebpf.Map
+	cfg      *config.EBPFTracer
 }
 
-type ringBufReader interface {
-	ReadRingBuf() (ringbuf.Record, error)
-}
-
-func NewRingBufTracer(reader ringBufReader) *RingBufTracer {
+func NewRingBufTracer(statsMap *ciliumebpf.Map, cfg *config.EBPFTracer) *RingBufTracer {
 	return &RingBufTracer{
-		ringBuffer: reader,
+		statsMap: statsMap,
+		cfg:      cfg,
 	}
 }
 
 func (m *RingBufTracer) TraceLoop(out *msg.Queue[[]*ebpf.Stat]) swarm.RunFunc {
+	forward := ebpfcommon.ForwardRingbuf[*ebpf.Stat](
+		m.cfg,
+		m.statsMap,
+		parseStat,
+		nil, // isValid: all stats are valid
+		nil, // filter: no batch-level filtering
+		rtlog(),
+		nil, // metrics
+	)
 	return func(ctx context.Context) {
 		defer out.MarkCloseable()
-		rtlog := rtlog()
-		for {
-			select {
-			case <-ctx.Done():
-				rtlog.Debug("exiting trace loop due to context cancellation")
-				return
-			default:
-				if err := m.listenAndForwardRingBuffer(ctx, out); err != nil {
-					if errors.Is(err, ringbuf.ErrClosed) {
-						rtlog.Debug("Received signal, exiting..")
-						return
-					}
-					rtlog.Warn("ignoring stat event", "error", err)
-					continue
-				}
-			}
-		}
+		forward(ctx, out)
 	}
 }
 
-func (m *RingBufTracer) listenAndForwardRingBuffer(ctx context.Context, forwardCh *msg.Queue[[]*ebpf.Stat]) error {
-	event, err := m.ringBuffer.ReadRingBuf()
+func parseStat(record *ringbuf.Record) (*ebpf.Stat, bool, error) {
+	stat, err := handleStatEvent(record)
 	if err != nil {
-		return fmt.Errorf("reading from ring buffer: %w", err)
+		return nil, false, err
 	}
-
-	stat, err := m.handleStatEvent(&event)
-	if err != nil {
-		return fmt.Errorf("handle stat event: %w", err)
-	}
-	forwardCh.SendCtx(ctx, []*ebpf.Stat{&stat})
-
-	return nil
+	return &stat, false, nil
 }
 
-func (m *RingBufTracer) handleStatEvent(record *ringbuf.Record) (ebpf.Stat, error) {
+func handleStatEvent(record *ringbuf.Record) (ebpf.Stat, error) {
 	eventType := ebpf.StatType(record.RawSample[0])
 	switch eventType {
 	case ebpf.StatTypeTCPRtt:
-		return m.readTCPRttIntoStat(record)
+		return readTCPRttIntoStat(record)
 	default:
 		return ebpf.Stat{}, fmt.Errorf("unknown stats event [type %d]", uint8(eventType))
 	}
 }
 
-func (m *RingBufTracer) readTCPRttIntoStat(record *ringbuf.Record) (ebpf.Stat, error) {
+func readTCPRttIntoStat(record *ringbuf.Record) (ebpf.Stat, error) {
 	event, err := ebpfcommon.ReinterpretCast[ebpf.StatsTCPRtt](record.RawSample)
 	if err != nil {
 		return ebpf.Stat{}, err

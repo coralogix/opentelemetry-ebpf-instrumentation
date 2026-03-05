@@ -28,7 +28,6 @@ import (
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
 	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
 	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
-	"go.opentelemetry.io/obi/pkg/config"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/internal/goexec"
@@ -274,10 +273,10 @@ func (p *Tracer) Run(ctx context.Context, eventCtx *ebpfcommon.EBPFEventContext,
 	ebpfcommon.ForwardRingbuf(
 		&p.cfg.EBPF,
 		p.bpfObjects.LogEvents,
-		eventCtx.CommonPIDsFilter,
 		p.handleLogEvent,
-		p.log,
 		nil,
+		nil,
+		p.log,
 		nil,
 		append(p.closers, &p.bpfObjects)...,
 	)(ctx, nil)
@@ -289,7 +288,7 @@ func (p *Tracer) Required() bool {
 	return false
 }
 
-func (p *Tracer) handleLogEvent(_ *ebpfcommon.EBPFParseContext, _ *config.EBPFTracer, record *ringbuf.Record, _ ebpfcommon.ServiceFilter) (request.Span, bool, error) {
+func (p *Tracer) handleLogEvent(record *ringbuf.Record) (request.Span, bool, error) {
 	hdrSize := uint32(unsafe.Offsetof(BpfLogEventT{}.Log)) // Remove `log` placeholder
 
 	event, err := ebpfcommon.ReinterpretCast[BpfLogEventT](record.RawSample)

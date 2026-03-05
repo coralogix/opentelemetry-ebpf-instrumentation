@@ -186,7 +186,7 @@ type EBPFParseContext struct {
 
 type EBPFEventContext struct {
 	CommonPIDsFilter ServiceFilter
-	SharedRingBuffer *ringBufForwarder
+	SharedRingBuffer *ringBufForwarder[request.Span]
 	EBPFMaps         map[string]*ebpf.Map
 	RingBufLock      sync.Mutex
 	MapsLock         sync.Mutex

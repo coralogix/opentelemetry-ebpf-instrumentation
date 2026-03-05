@@ -12,7 +12,8 @@ import (
 	"net"
 	"time"
 
-	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
+	ciliumebpf "github.com/cilium/ebpf"
+
 	"go.opentelemetry.io/obi/pkg/internal/statsolly/ebpf"
 	stats "go.opentelemetry.io/obi/pkg/internal/statsolly/stats"
 	"go.opentelemetry.io/obi/pkg/obi"
@@ -88,7 +89,7 @@ type Stats struct {
 
 type ebpFetcher interface {
 	io.Closer
-	ReadRingBuf() (ringbuf.Record, error)
+	StatsEventsMap() *ciliumebpf.Map
 }
 
 // StatsAgent instantiates a new agent, given a configuration.
@@ -128,7 +129,7 @@ func statsAgent(
 	agentIP net.IP,
 ) (*Stats, error) {
 
-	rbTracer := stats.NewRingBufTracer(statsFetcher)
+	rbTracer := stats.NewRingBufTracer(statsFetcher.StatsEventsMap(), &cfg.EBPF)
 
 	return &Stats{
 		ctxInfo:  ctxInfo,

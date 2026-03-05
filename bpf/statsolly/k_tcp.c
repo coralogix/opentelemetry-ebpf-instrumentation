@@ -62,8 +62,7 @@ int BPF_KPROBE(obi_kprobe_tcp_close_srtt, struct sock *sk) {
     se->conn = conn;
 
     bpf_printk("src port %d, dst port %d, srtt %d", se->conn.s_port, se->conn.d_port, se->srtt);
-    // TODO pinoOgni, implement userspace part to use stats_events_flags()
-    bpf_ringbuf_submit(se, 0);
+    bpf_ringbuf_submit(se, stats_events_flags());
 
     return 0;
 }
