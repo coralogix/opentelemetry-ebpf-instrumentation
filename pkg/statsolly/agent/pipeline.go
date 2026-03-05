@@ -71,7 +71,7 @@ func (s *Stats) buildPipeline(ctx context.Context) (*swarm.Runner, error) {
 	if filteredStats == nil {
 		filteredStats = msgh.QueueFromConfig[[]*ebpf.Stat](s.cfg, "filteredStats")
 	}
-	swi.Add(filter.ByAttribute(s.cfg.Filters.Network, nil, selectorCfg.ExtraGroupAttributesCfg, ebpf.StatStringGetters, decoratedStats, filteredStats),
+	swi.Add(filter.ByAttribute(s.cfg.Filters.Stats, nil, selectorCfg.ExtraGroupAttributesCfg, ebpf.StatStringGetters, decoratedStats, filteredStats),
 		swarm.WithID("AttributeFilter"))
 
 	// Terminal nodes export the stats record information out of the pipeline: OTEL, Prom and printer.

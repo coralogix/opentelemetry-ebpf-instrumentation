@@ -13,8 +13,6 @@ import (
 	"go.opentelemetry.io/obi/pkg/pipe/swarm/swarms"
 )
 
-type InterfaceNamer func(ifIndex int) string
-
 // Decorate the stats with extra metadata fields that are not directly fetched by eBPF
 // or by any previous pipeline stage (DNS, Kubernetes...):
 // - The IP address of the agent host.

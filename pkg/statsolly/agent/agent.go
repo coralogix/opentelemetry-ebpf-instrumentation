@@ -160,6 +160,7 @@ func statsAgent(
 	agentIP net.IP,
 	ifaceManager *tcmanager.InterfaceManager,
 ) (*Stats, error) {
+
 	rbTracer := stats.NewRingBufTracer(statsFetcher)
 
 	return &Stats{

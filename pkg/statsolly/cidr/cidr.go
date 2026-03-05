@@ -35,7 +35,7 @@ type ipGrouper struct {
 }
 
 func DecoratorProvider(g Definitions, input, output *msg.Queue[[]*ebpf.Stat]) swarm.InstanceFunc {
-	return func(_ context.Context) (swarm.RunFunc, error) {
+	return func(ctx context.Context) (swarm.RunFunc, error) {
 		if !g.Enabled() {
 			return swarm.Bypass(input, output)
 		}
@@ -50,7 +50,7 @@ func DecoratorProvider(g Definitions, input, output *msg.Queue[[]*ebpf.Stat]) sw
 				for _, stat := range stats {
 					grouper.decorate(stat)
 				}
-				output.Send(stats)
+				output.SendCtx(ctx, stats)
 			})
 		}, nil
 	}
