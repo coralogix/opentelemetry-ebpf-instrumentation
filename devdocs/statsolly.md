@@ -32,7 +32,7 @@ To add a new metric, follow these guidelines:
 3. Add the eBPF probe to the [bpf/statsolly](../bpf/statsolly/) folder. Here, the metric will be calculated and sent to userspace using the `stats_events` ringbuffer.
 4. In the [stat.go](../pkg/internal/statsolly/ebpf/stat.go), simply add a function that handles that metric. This function will convert the event to a `ebpf.Stat`.
 5. To use the **Statsolly pipeline**, you need to modify the `Stat` struct accordingly, by adding a data structure containing all the necessary fields. For example `TCPRtt` struct.
-6. The only thing left is to create the appropriate data structures in the `Prometheus` and `OTEL` exporters by adding the appropriate attributes. Check `statsMetricsReporter` struct for Prometheus and `statsMetricsExporter` struct for OTEL.
+6. The only thing left is to create the appropriate data structures in the `Prometheus` and `OTEL` exporters by adding the appropriate attributes. Check `statMetricsReporter` struct for Prometheus and `statMetricsExporter` struct for OTEL.
 
 ## Notes on attributes
 

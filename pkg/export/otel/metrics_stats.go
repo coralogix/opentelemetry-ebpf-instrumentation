@@ -28,14 +28,14 @@ import (
 	"go.opentelemetry.io/obi/pkg/pipe/swarm"
 )
 
-// StatsMetricsConfig extends MetricsConfig for Network Metrics
-type StatsMetricsConfig struct {
+// StatMetricsConfig extends MetricsConfig for Network Metrics
+type StatMetricsConfig struct {
 	Metrics     *otelcfg.MetricsConfig
 	CommonCfg   *perapp.MetricsConfig
 	SelectorCfg *attributes.SelectorConfig
 }
 
-func (mc *StatsMetricsConfig) Enabled() bool {
+func (mc *StatMetricsConfig) Enabled() bool {
 	return mc.Metrics != nil && mc.Metrics.EndpointEnabled() &&
 		mc.CommonCfg.Features.AnyNetwork()
 }
@@ -64,14 +64,14 @@ func createFilteredStatsResource(hostID string, attrSelector attributes.Selectio
 	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
 }
 
-func newStatsMeterProvider(res *resource.Resource, exporter *sdkmetric.Exporter, interval time.Duration) *metric.MeterProvider {
+func newStatMeterProvider(res *resource.Resource, exporter *sdkmetric.Exporter, interval time.Duration) *metric.MeterProvider {
 	return metric.NewMeterProvider(
 		metric.WithResource(res),
 		metric.WithReader(metric.NewPeriodicReader(*exporter, metric.WithInterval(interval))),
 	)
 }
 
-type statsMetricsExporter struct {
+type statMetricsExporter struct {
 	tcpRtt         *Expirer[*ebpf.Stat, metric2.Float64Histogram, float64]
 	interZoneBytes *Expirer[*ebpf.Stat, metric2.Int64Counter, float64]
 	clock          *expire.CachedClock
@@ -79,9 +79,9 @@ type statsMetricsExporter struct {
 	in             <-chan []*ebpf.Stat
 }
 
-func StatsMetricsExporterProvider(
+func StatMetricsExporterProvider(
 	ctxInfo *global.ContextInfo,
-	cfg *StatsMetricsConfig,
+	cfg *StatMetricsConfig,
 	input *msg.Queue[[]*ebpf.Stat],
 ) swarm.InstanceFunc {
 	return func(ctx context.Context) (swarm.RunFunc, error) {
@@ -92,7 +92,7 @@ func StatsMetricsExporterProvider(
 		if cfg.SelectorCfg.SelectionCfg == nil {
 			cfg.SelectorCfg.SelectionCfg = make(attributes.Selection)
 		}
-		exporter, err := newStatsMetricsExporter(ctx, ctxInfo, cfg, input)
+		exporter, err := newStatMetricsExporter(ctx, ctxInfo, cfg, input)
 		if err != nil {
 			return nil, err
 		}
@@ -100,12 +100,12 @@ func StatsMetricsExporterProvider(
 	}
 }
 
-func newStatsMetricsExporter(
+func newStatMetricsExporter(
 	ctx context.Context,
 	ctxInfo *global.ContextInfo,
-	cfg *StatsMetricsConfig,
+	cfg *StatMetricsConfig,
 	input *msg.Queue[[]*ebpf.Stat],
-) (*statsMetricsExporter, error) {
+) (*statMetricsExporter, error) {
 	log := smlog()
 	log.Debug("instantiating stats metrics exporter provider")
 	exporter, err := ctxInfo.OTELMetricsExporter.Instantiate(ctx)
@@ -127,7 +127,7 @@ func newStatsMetricsExporter(
 
 	ebpfEvents := provider.Meter("stats_ebpf_events")
 
-	nme := &statsMetricsExporter{
+	nme := &statMetricsExporter{
 		clock:     clock,
 		expireTTL: cfg.Metrics.TTL,
 	}
@@ -148,11 +148,11 @@ func newStatsMetricsExporter(
 		nme.tcpRtt = NewExpirer[*ebpf.Stat, metric2.Float64Histogram, float64](ctx, tcpRtt, attrs, clock.Time, cfg.Metrics.TTL)
 	}
 
-	nme.in = input.Subscribe(msg.SubscriberName("otel.StatsMetricsExporter"))
+	nme.in = input.Subscribe(msg.SubscriberName("otel.StatMetricsExporter"))
 	return nme, nil
 }
 
-func (me *statsMetricsExporter) Do(ctx context.Context) {
+func (me *statMetricsExporter) Do(ctx context.Context) {
 	for i := range me.in {
 		me.clock.Update()
 		for _, v := range i {

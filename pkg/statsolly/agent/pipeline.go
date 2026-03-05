@@ -77,7 +77,7 @@ func (s *Stats) buildPipeline(ctx context.Context) (*swarm.Runner, error) {
 	// Terminal nodes export the stats record information out of the pipeline: OTEL, Prom and printer.
 	// Not all the nodes are mandatory here. Is the responsibility of each Provider function to decide
 	// whether each node is going to be instantiated or just ignored.
-	swi.Add(otel.StatsMetricsExporterProvider(s.ctxInfo, &otel.StatsMetricsConfig{
+	swi.Add(otel.StatMetricsExporterProvider(s.ctxInfo, &otel.StatMetricsConfig{
 		Metrics:     &s.cfg.OTELMetrics,
 		SelectorCfg: selectorCfg,
 		CommonCfg:   &s.cfg.Metrics,

@@ -34,7 +34,7 @@ func (p StatsPrometheusConfig) Enabled() bool {
 	return p.Config != nil && p.Config.EndpointEnabled() && (p.CommonCfg.Features.StatMetrics())
 }
 
-type statsMetricsReporter struct {
+type statMetricsReporter struct {
 	cfg *PrometheusConfig
 
 	tcpRtt *Expirer[prometheus.Histogram]
@@ -73,7 +73,7 @@ func newStatsReporter(
 	ctxInfo *global.ContextInfo,
 	cfg *StatsPrometheusConfig,
 	input *msg.Queue[[]*ebpf.Stat],
-) (*statsMetricsReporter, error) {
+) (*statMetricsReporter, error) {
 	group := ctxInfo.MetricAttributeGroups
 	// this property can't be set inside the ConfiguredGroups function, otherwise the
 	// OTEL exporter would report also some prometheus-exclusive attributes
@@ -87,7 +87,7 @@ func newStatsReporter(
 	clock := expire.NewCachedClock(timeNow)
 	// If service name is not explicitly set, we take the service name as set by the
 	// executable inspector
-	mr := &statsMetricsReporter{
+	mr := &statMetricsReporter{
 		cfg:         cfg.Config,
 		promConnect: ctxInfo.Prometheus,
 		clock:       clock,
@@ -124,12 +124,12 @@ func newStatsReporter(
 	return mr, nil
 }
 
-func (r *statsMetricsReporter) reportMetrics(ctx context.Context) {
+func (r *statMetricsReporter) reportMetrics(ctx context.Context) {
 	go r.promConnect.StartHTTP(ctx)
 	r.collectMetrics(ctx)
 }
 
-func (r *statsMetricsReporter) collectMetrics(_ context.Context) {
+func (r *statMetricsReporter) collectMetrics(_ context.Context) {
 	for stats := range r.input {
 		// clock needs to be updated to let the expirer
 		// remove the old metrics
@@ -140,7 +140,7 @@ func (r *statsMetricsReporter) collectMetrics(_ context.Context) {
 	}
 }
 
-func (r *statsMetricsReporter) observeTCPRtt(stat *ebpf.Stat) {
+func (r *statMetricsReporter) observeTCPRtt(stat *ebpf.Stat) {
 	if r.tcpRtt == nil || stat.TCPRtt.Srtt == 0 || stat.TCPRtt == nil {
 		return
 	}
