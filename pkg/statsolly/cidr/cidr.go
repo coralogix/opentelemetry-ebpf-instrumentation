@@ -92,10 +92,10 @@ func (g *ipGrouper) decorate(stat *ebpf.Stat) {
 	if stat.Attrs.Metadata == nil {
 		stat.Attrs.Metadata = map[attr.Name]string{}
 	}
-	if srcCIDR := g.CIDR(stat.SrcIP().IP()); srcCIDR != "" {
+	if srcCIDR := g.CIDR(stat.Attrs.SrcAddr[:]); srcCIDR != "" {
 		stat.Attrs.Metadata[attr.SrcCIDR] = srcCIDR
 	}
-	if dstCIDR := g.CIDR(stat.DstIP().IP()); dstCIDR != "" {
+	if dstCIDR := g.CIDR(stat.Attrs.DstAddr[:]); dstCIDR != "" {
 		stat.Attrs.Metadata[attr.DstCIDR] = dstCIDR
 	}
 }

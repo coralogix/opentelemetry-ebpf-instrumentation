@@ -63,8 +63,11 @@ func GeoIPProvider(cfg *GeoIP, input, output *msg.Queue[[]*ebpf.Stat]) swarm.Ins
 		log := geoiplog()
 		in := input.Subscribe(msg.SubscriberName("stats.GeoIP"))
 		cache := expirable.NewLRU[ebpf.IPAddr, ipInfo](cfg.CacheLen, nil, cfg.CacheTTL)
-		cachedLookup := func(addr *ebpf.IPAddr) (ipInfo, error) {
-			info, ok := cache.Get(*addr)
+		cachedLookup := func(addr ebpf.IPAddr) (ipInfo, error) {
+			if addr.IsZero() {
+				return ipInfo{}, nil
+			}
+			info, ok := cache.Get(addr)
 			if ok {
 				return info, nil
 			}
@@ -72,7 +75,7 @@ func GeoIPProvider(cfg *GeoIP, input, output *msg.Queue[[]*ebpf.Stat]) swarm.Ins
 			if err != nil {
 				return info, err
 			}
-			cache.Add(*addr, info)
+			cache.Add(addr, info)
 			return info, nil
 		}
 
@@ -88,11 +91,11 @@ func GeoIPProvider(cfg *GeoIP, input, output *msg.Queue[[]*ebpf.Stat]) swarm.Ins
 			log.Debug("starting GeoIP node")
 			for stats := range in {
 				for _, stat := range stats {
-					srcInfo, err := cachedLookup(stat.SrcIP())
+					srcInfo, err := cachedLookup(stat.Attrs.SrcAddr)
 					if err != nil {
 						failureLogFn("failed to perform geoip lookup for source", "err", err)
 					}
-					dstInfo, err := cachedLookup(stat.DstIP())
+					dstInfo, err := cachedLookup(stat.Attrs.DstAddr)
 					if err != nil {
 						failureLogFn("failed to perform geoip lookup for destination", "err", err)
 					}

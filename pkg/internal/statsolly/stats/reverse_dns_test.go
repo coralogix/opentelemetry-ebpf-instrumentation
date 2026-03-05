@@ -5,7 +5,6 @@ package stats
 
 import (
 	"errors"
-	"net"
 	"testing"
 	"time"
 
@@ -43,11 +42,8 @@ func TestReverseDNS(t *testing.T) {
 
 	// When it receives stats without source nor destination name
 	s1 := &ebpf.Stat{}
-	srcStr := net.IP(srcIP[:]).String() // Result: "140.82.121.4"
-	dstStr := net.IP(dstIP[:]).String() // Result: "127.0.0.1"
-
-	s1.Attrs.SourceAddress = srcStr
-	s1.Attrs.DestinationAddress = dstStr
+	s1.Attrs.SrcAddr = ebpf.IPAddr(srcIP)
+	s1.Attrs.DstAddr = ebpf.IPAddr(dstIP)
 
 	in.Send([]*ebpf.Stat{s1})
 
@@ -76,11 +72,8 @@ func TestReverseDNS_AlreadyProvidedNames(t *testing.T) {
 	s1 := &ebpf.Stat{
 		Attrs: ebpf.StatAttrs{SrcName: "src", DstName: "dst"},
 	}
-	srcStr := net.IP(srcIP[:]).String() // Result: "140.82.121.4"
-	dstStr := net.IP(dstIP[:]).String() // Result: "127.0.0.1"
-
-	s1.Attrs.SourceAddress = srcStr
-	s1.Attrs.DestinationAddress = dstStr
+	s1.Attrs.SrcAddr = ebpf.IPAddr(srcIP)
+	s1.Attrs.DstAddr = ebpf.IPAddr(dstIP)
 
 	in.Send([]*ebpf.Stat{s1})
 
@@ -111,11 +104,8 @@ func TestReverseDNS_Cache(t *testing.T) {
 	s1 := &ebpf.Stat{
 		Attrs: ebpf.StatAttrs{SrcName: "src"},
 	}
-	srcStr := net.IP(srcIP[:]).String() // Result: "140.82.121.4"
-	dstStr := net.IP(dstIP[:]).String() // Result: "127.0.0.1"
-
-	s1.Attrs.SourceAddress = srcStr
-	s1.Attrs.DestinationAddress = dstStr
+	s1.Attrs.SrcAddr = ebpf.IPAddr(srcIP)
+	s1.Attrs.DstAddr = ebpf.IPAddr(dstIP)
 
 	in.Send([]*ebpf.Stat{s1})
 

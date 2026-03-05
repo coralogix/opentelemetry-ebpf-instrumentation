@@ -21,11 +21,11 @@ func StatGetters(name attr.Name) (attributes.Getter[*Stat, attribute.KeyValue], 
 		getter = func(s *Stat) attribute.KeyValue { return attribute.String(string(attr.OBIIP), s.Attrs.OBIIP) }
 	case attr.SrcAddress:
 		getter = func(s *Stat) attribute.KeyValue {
-			return attribute.String(string(attr.SrcAddress), s.Attrs.SourceAddress)
+			return attribute.String(string(attr.SrcAddress), s.Attrs.SrcAddr.String())
 		}
 	case attr.DstAddress:
 		getter = func(s *Stat) attribute.KeyValue {
-			return attribute.String(string(attr.DstAddress), s.Attrs.DestinationAddress)
+			return attribute.String(string(attr.DstAddress), s.Attrs.DstAddr.String())
 		}
 	case attr.SrcPort:
 		getter = func(s *Stat) attribute.KeyValue {

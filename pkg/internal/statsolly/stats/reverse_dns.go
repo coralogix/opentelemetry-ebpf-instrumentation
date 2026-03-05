@@ -75,10 +75,10 @@ func ReverseDNSProvider(cfg *ReverseDNS, input, output *msg.Queue[[]*ebpf.Stat])
 			for stats := range in {
 				for _, stat := range stats {
 					if stat.Attrs.SrcName == "" {
-						stat.Attrs.SrcName = optGetName(log, cache, stat.Attrs.SourceAddress)
+						stat.Attrs.SrcName = optGetName(log, cache, stat.Attrs.SrcAddr.String())
 					}
 					if stat.Attrs.DstName == "" {
-						stat.Attrs.DstName = optGetName(log, cache, stat.Attrs.DestinationAddress)
+						stat.Attrs.DstName = optGetName(log, cache, stat.Attrs.DstAddr.String())
 					}
 				}
 				output.Send(stats)

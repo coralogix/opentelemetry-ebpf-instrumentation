@@ -15,17 +15,29 @@ import (
 // (same behavior as Go's net.IP type)
 type IPAddr [net.IPv6len]uint8
 
+// IP returns the net.IP equivalent object.
+func (ia IPAddr) IP() net.IP {
+	return ia[:]
+}
+
+// String returns the human-readable IP address, or an empty string if the address is zero.
+func (ia IPAddr) String() string {
+	if ia.IsZero() {
+		return ""
+	}
+	return net.IP(ia[:]).String()
+}
+
+// IsZero reports whether the address is the zero value (unset).
+func (ia IPAddr) IsZero() bool {
+	return ia == (IPAddr{})
+}
+
 type StatType uint8
 
 const (
 	StatTypeTCPRtt StatType = iota + 1
 )
-
-// IPAddr encodes v4 and v6 IPs with a fixed length.
-// IPv4 addresses are encoded as IPv6 addresses with prefix ::ffff/96
-// as described in https://datatracker.ietf.org/doc/html/rfc4038#section-4.2
-// (same behavior as Go's net.IP type)
-// type IPAddr [net.IPv6len]uint8
 
 // Stat contains accumulated metrics from a stats, with extra metadata
 // that is added from the user space
@@ -41,8 +53,8 @@ type Stat struct {
 }
 
 type StatAttrs struct {
-	SourceAddress      string
-	DestinationAddress string
+	SrcAddr IPAddr
+	DstAddr IPAddr
 
 	SourcePort      int
 	DestinationPort int
@@ -65,37 +77,4 @@ type StatAttrs struct {
 
 type TCPRtt struct {
 	Srtt uint32 `json:"srtt"`
-}
-
-// IP returns the net.IP equivalent object
-func (ia *IPAddr) IP() net.IP {
-	return ia[:]
-}
-
-// SrcIP returns the source IP address of the Stat entry as an IPAddr.
-// TODO: pinoOgni not sure if this is a good idea
-func (s *Stat) SrcIP() *IPAddr {
-	ip := net.ParseIP(s.Attrs.SourceAddress)
-	if ip == nil {
-		return nil
-	}
-
-	// Convert []byte to [16]byte
-	var addr IPAddr
-	copy(addr[:], ip.To16())
-	return &addr
-}
-
-// DstIP returns the destination IP address of the Stat entry as an IPAddr.
-// TODO pinoOgni not sure if this is a good idea
-func (s *Stat) DstIP() *IPAddr {
-	ip := net.ParseIP(s.Attrs.DestinationAddress)
-	if ip == nil {
-		return nil
-	}
-
-	// Convert []byte to [16]byte
-	var addr IPAddr
-	copy(addr[:], ip.To16())
-	return &addr
 }

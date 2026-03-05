@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 
 	ciliumebpf "github.com/cilium/ebpf"
 
@@ -77,11 +76,11 @@ func readTCPRttIntoStat(record *ringbuf.Record) (ebpf.Stat, error) {
 		return ebpf.Stat{}, err
 	}
 
-	sourceAddress := ""
-	destinationAddress := ""
+	var srcAddr, dstAddr ebpf.IPAddr
 	destinationPort := 0
 	if event.Conn.S_port != 0 || event.Conn.D_port != 0 {
-		sourceAddress, destinationAddress = reqHostInfo(event.Conn.S_addr, event.Conn.D_addr)
+		srcAddr = ebpf.IPAddr(event.Conn.S_addr)
+		dstAddr = ebpf.IPAddr(event.Conn.D_addr)
 		destinationPort = int(event.Conn.D_port)
 	}
 
@@ -92,30 +91,10 @@ func readTCPRttIntoStat(record *ringbuf.Record) (ebpf.Stat, error) {
 			Srtt: event.Srtt,
 		},
 		Attrs: ebpf.StatAttrs{
-			SourceAddress:      sourceAddress,
-			DestinationAddress: destinationAddress,
-			SourcePort:         sourcePort,
-			DestinationPort:    destinationPort,
+			SrcAddr:         srcAddr,
+			DstAddr:         dstAddr,
+			SourcePort:      sourcePort,
+			DestinationPort: destinationPort,
 		},
 	}, nil
-}
-
-func reqHostInfo(srcAddr, dstAddr [16]uint8) (source, target string) {
-	src := make(net.IP, net.IPv6len)
-	dst := make(net.IP, net.IPv6len)
-	copy(src, srcAddr[:])
-	copy(dst, dstAddr[:])
-
-	srcStr := src.String()
-	dstStr := dst.String()
-
-	if src.IsUnspecified() {
-		srcStr = ""
-	}
-
-	if dst.IsUnspecified() {
-		dstStr = ""
-	}
-
-	return srcStr, dstStr
 }

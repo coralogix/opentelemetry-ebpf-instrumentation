@@ -119,8 +119,8 @@ func (n *decorator) transform(stat *ebpf.Stat) bool {
 	if n.clusterName != "" {
 		stat.Attrs.Metadata[(attr.K8sClusterName)] = n.clusterName
 	}
-	srcOk := n.decorate(stat, attrPrefixSrc, stat.Attrs.SourceAddress)
-	dstOk := n.decorate(stat, attrPrefixDst, stat.Attrs.DestinationAddress)
+	srcOk := n.decorate(stat, attrPrefixSrc, stat.Attrs.SrcAddr.String())
+	dstOk := n.decorate(stat, attrPrefixDst, stat.Attrs.DstAddr.String())
 	return srcOk && dstOk
 }
 

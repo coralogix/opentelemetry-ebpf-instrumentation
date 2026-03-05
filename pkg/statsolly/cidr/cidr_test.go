@@ -4,6 +4,7 @@
 package cidr
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func TestCIDRDecorator_GroupAllUnknownTraffic(t *testing.T) {
 
 func stat(srcIP, dstIP string) *ebpf.Stat {
 	er := ebpf.Stat{}
-	er.Attrs.SourceAddress = srcIP
-	er.Attrs.DestinationAddress = dstIP
+	copy(er.Attrs.SrcAddr[:], net.ParseIP(srcIP).To16())
+	copy(er.Attrs.DstAddr[:], net.ParseIP(dstIP).To16())
 	return &er
 }
