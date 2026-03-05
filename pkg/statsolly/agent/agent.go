@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
-	"go.opentelemetry.io/obi/pkg/internal/ebpf/tcmanager"
 	"go.opentelemetry.io/obi/pkg/internal/statsolly/ebpf"
 	stats "go.opentelemetry.io/obi/pkg/internal/statsolly/stats"
 	"go.opentelemetry.io/obi/pkg/obi"
@@ -75,10 +74,6 @@ type Stats struct {
 	ctxInfo *global.ContextInfo
 	graph   *swarm.Runner
 
-	// input data providers
-	// TODO pinoOgni is this needed?
-	ifaceManager *tcmanager.InterfaceManager
-
 	// elements used to decorate stats with extra information
 	agentIP net.IP
 
@@ -102,7 +97,6 @@ func StatsAgent(ctxInfo *global.ContextInfo, cfg *obi.Config) (*Stats, error) {
 	alog.Info("initializing Stats agent")
 
 	var (
-		ifaceManager *tcmanager.InterfaceManager
 		statsFetcher ebpFetcher
 		err          error
 	)
@@ -119,37 +113,11 @@ func StatsAgent(ctxInfo *global.ContextInfo, cfg *obi.Config) (*Stats, error) {
 		return nil, err
 	}
 
-	ifaceManager = tcmanager.NewInterfaceManager()
-	ifaceManager.SetChannelBufferLen(cfg.ChannelBufferLen)
-	ifaceManager.SetPollPeriod(cfg.Stats.ListenPollPeriod)
-	ifaceManager.SetMonitorMode(monitorMode(cfg, alog))
-
-	return statsAgent(ctxInfo, cfg, statsFetcher, agentIP, ifaceManager)
+	return statsAgent(ctxInfo, cfg, statsFetcher, agentIP)
 }
 
 func newFetcher() (ebpFetcher, error) {
-	// TODO pinoOgni any arguments needed?
 	return ebpf.NewStatsFetcher()
-}
-
-// TODO pinoOgni check
-func monitorMode(cfg *obi.Config, alog *slog.Logger) tcmanager.MonitorMode {
-	switch cfg.Stats.ListenInterfaces {
-	case listenPoll:
-		alog.Debug("listening for new interfaces: use polling",
-			"period", cfg.Stats.ListenPollPeriod)
-
-		return tcmanager.MonitorPoll
-	case listenWatch:
-		alog.Debug("listening for new interfaces: use watching")
-
-		return tcmanager.MonitorWatch
-	}
-
-	alog.Warn("wrong interface listen method. Using file watcher as default",
-		"providedValue", cfg.Stats.ListenInterfaces)
-
-	return tcmanager.MonitorWatch
 }
 
 // statsAgent is a private constructor with injectable dependencies, usable for tests
@@ -158,18 +126,16 @@ func statsAgent(
 	cfg *obi.Config,
 	statsFetcher ebpFetcher,
 	agentIP net.IP,
-	ifaceManager *tcmanager.InterfaceManager,
 ) (*Stats, error) {
 
 	rbTracer := stats.NewRingBufTracer(statsFetcher)
 
 	return &Stats{
-		ctxInfo:      ctxInfo,
-		ifaceManager: ifaceManager,
-		cfg:          cfg,
-		rbTracer:     rbTracer,
-		agentIP:      agentIP,
-		fetcher:      statsFetcher,
+		ctxInfo:  ctxInfo,
+		cfg:      cfg,
+		rbTracer: rbTracer,
+		agentIP:  agentIP,
+		fetcher:  statsFetcher,
 	}, nil
 }
 
@@ -186,9 +152,6 @@ func (s *Stats) Run(ctx context.Context) error {
 	}
 
 	s.graph = graph
-
-	// TODO pinoOgni check
-	s.ifaceManager.Start(ctx)
 
 	s.graph.Start(ctx, swarm.WithCancelTimeout(s.cfg.ShutdownTimeout))
 	s.status = StatusStarted
@@ -217,13 +180,12 @@ func (s *Stats) stop() error {
 
 		alog.Debug("waiting for all nodes to finish their pending work")
 
-		s.ifaceManager.Wait()
-		<-s.graph.Done()
+		err := <-s.graph.Done()
+
 		s.status = StatusStopped
 
-		if err := <-s.graph.Done(); err != nil {
-			stopped <- err
-		}
+		stopped <- err
+
 		close(stopped)
 
 		alog.Info("Stats agent stopped")
