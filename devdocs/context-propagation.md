@@ -301,10 +301,26 @@ Sockets are added to `sock_dir` in two ways:
 
 ## Logs correlation
 
-OBI allows injecting trace context into JSON logs. The following requirements must be met:
+OBI can inject trace context (`trace_id`, `span_id`) into JSON log lines written by the target application. The logenricher intercepts `write()` / `writev()` syscalls via kprobes, looks up `traces_ctx_v1[pid_tgid]` for the calling thread, and uses `bpf_probe_write_user` to splice the fields into the JSON payload in-place.
+
+### Requirements
 
 - Linux kernel version **6.0 or later** (overwriting user memory requires a `UBUF`-type `iov_iter`)
 - `CAP_SYS_ADMIN` capability and permission to use `bpf_probe_write_user` (kernel security lockdown mode should be `[none]`)
 - The target application writes logs in **JSON format**
-- BPFFS mounted at /sys/fs/bpf (or another mountpath configurable via `config.ebpf.bpf_fs_path`)
-- Async primitives: only Go and NodeJS runtimes are currently supported
+- BPFFS mounted at `/sys/fs/bpf` (or another mountpath configurable via `OTEL_EBPF_BPF_FS_PATH`; the map is pinned under `<bpf_fs_path>/otel/traces_ctx_v1`)
+
+### The `traces_ctx_v1` map
+
+`traces_ctx_v1` is a pinned `BPF_MAP_TYPE_LRU_HASH` map keyed by `u64` (`pid_tgid`) with value `obi_ctx_info_t` (`trace_id[16]` + `span_id[8]`). It is set by `obi_ctx__set()` in `server_or_client_trace()` ([trace_common.h:321](bpf/common/trace_common.h#L321)) whenever a server or client span is created for the current thread. It is cleared by `obi_ctx__del()` when a server span completes ([trace_common.h:264](bpf/common/trace_common.h#L264)).
+
+### Context staleness and per-runtime refresh
+
+The base path (`server_or_client_trace()` → `obi_ctx__set()`) works correctly when a single thread processes exactly one request at a time. However, async runtimes can cause `traces_ctx_v1[pid_tgid]` to hold the wrong context:
+
+| Runtime | Problem | Refresh mechanism |
+|---------|---------|-------------------|
+| **Go** | Goroutines multiplex onto OS threads; a goroutine switch changes the active request on a thread. | `casgstatus` uprobe ([go_runtime.c](bpf/gotracer/go_runtime.c)) fires on goroutine state transitions and refreshes `traces_ctx_v1`. |
+| **Node.js** | libuv can batch multiple `sys_recvfrom` calls before invoking JS callbacks, overwriting context mid-flight. | `async_hooks` `before` callback signals the BPF layer via `fs.accessSync('/dev/null/obi-ctx/...')` → `uv_fs_access` uprobe ([nodejs.c](bpf/generictracer/nodejs.c)) restores context from `fd_to_connection` → `trace_info_for_connection()`. |
+| **Java** | Thread pools dispatch work to worker threads that don't have the parent's trace context. | Java agent sends `k_ioctl_java_threads` IOCTL ([java_tls.c](bpf/generictracer/java_tls.c)) mapping child→parent threads. The BPF handler walks the `java_tasks` chain up to 3 levels, looks up `server_traces` for the parent, and calls `obi_ctx__set()` for the child. |
+| **Ruby (Puma)** | When all workers are busy, the reactor thread reads HTTP data (setting context for itself), then hands off to a worker that has no context. | `rb_ary_shift` uprobe ([ruby.c](bpf/generictracer/ruby.c)) fires when a worker picks up a task. It looks up `server_traces_aux` via `puma_task_connections` and calls `obi_ctx__set()` for the worker. In the direct path (worker reads HTTP itself), `server_traces_aux` isn't populated yet, so this is a no-op and `server_or_client_trace()` handles it normally. |

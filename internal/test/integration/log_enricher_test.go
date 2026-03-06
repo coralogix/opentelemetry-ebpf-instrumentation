@@ -53,12 +53,18 @@ var (
 		containerImage: "hatest-testserver-node",
 		message:        "this is a json log from node",
 	}
+	logEnricherRubyConstants = testServerConstants{
+		url:            "http://localhost:8385",
+		smokeEndpoint:  "/smoke",
+		logEndpoint:    "/json_logger",
+		containerImage: "hatest-testserver-logenricher-ruby",
+		message:        "this is a json log from ruby",
+	}
 )
 
-// nodejsTestTraceparents are fixed W3C traceparents used by testLogEnricherNodeJS.
-// Fixed IDs allow exact equality assertions on trace_id and ordering assertions
-// on the enriched container logs.
-var nodejsTestTraceparents = [5]struct{ traceID, parentID string }{
+// testTraceparents are fixed W3C traceparents used by concurrent log enricher
+// tests (Node.js, Ruby). Fixed IDs allow exact equality assertions on trace_id.
+var testTraceparents = [5]struct{ traceID, parentID string }{
 	{"4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7"},
 	{"7b5c1e7d8f2a4b6c9e0d3f1a2b4c5d6e", "1a2b3c4d5e6f7a8b"},
 	{"a1b2c3d4e5f60718293a4b5c6d7e8f90", "fedcba9876543210"},
@@ -121,7 +127,7 @@ func testLogEnricherNodeJS(t *testing.T) {
 		// requests arrive at the server in array order (server delay is 35 ms,
 		// much larger than the stagger), giving a deterministic log order.
 		var wg sync.WaitGroup
-		for i, tp := range nodejsTestTraceparents {
+		for i, tp := range testTraceparents {
 			wg.Add(1)
 			go func(tp struct{ traceID, parentID string }) {
 				defer wg.Done()
@@ -139,7 +145,7 @@ func testLogEnricherNodeJS(t *testing.T) {
 			}(tp)
 			// Small stagger between goroutine starts so HTTP requests reach the
 			// server in the same order they are launched.
-			if i < len(nodejsTestTraceparents)-1 {
+			if i < len(testTraceparents)-1 {
 				time.Sleep(5 * time.Millisecond)
 			}
 		}
@@ -151,8 +157,8 @@ func testLogEnricherNodeJS(t *testing.T) {
 		require.NotEmpty(ct, logs)
 
 		// Find the last log-position of each injected trace_id (most recent retry).
-		lastPos := make(map[string]int, len(nodejsTestTraceparents))
-		lastSpanID := make(map[string]string, len(nodejsTestTraceparents))
+		lastPos := make(map[string]int, len(testTraceparents))
+		lastSpanID := make(map[string]string, len(testTraceparents))
 		for i, line := range logs {
 			var fields map[string]string
 			if json.Unmarshal([]byte(line), &fields) != nil {
@@ -165,7 +171,7 @@ func testLogEnricherNodeJS(t *testing.T) {
 		}
 
 		// Every injected trace_id must appear with a non-empty span_id.
-		for _, tp := range nodejsTestTraceparents {
+		for _, tp := range testTraceparents {
 			_, found := lastPos[tp.traceID]
 			assert.True(ct, found, "no enriched log line found for trace_id %s", tp.traceID)
 			if found {
@@ -175,14 +181,78 @@ func testLogEnricherNodeJS(t *testing.T) {
 
 		// Log lines must appear in the same order requests were made.
 		// Using last-occurrence positions compares within the most recent batch.
-		for i := 0; i < len(nodejsTestTraceparents)-1; i++ {
-			a, b := nodejsTestTraceparents[i], nodejsTestTraceparents[i+1]
+		for i := 0; i < len(testTraceparents)-1; i++ {
+			a, b := testTraceparents[i], testTraceparents[i+1]
 			posA, okA := lastPos[a.traceID]
 			posB, okB := lastPos[b.traceID]
 			if okA && okB {
 				assert.Less(ct, posA, posB,
 					"trace_id %s should appear before %s in logs (request order)",
 					a.traceID, b.traceID)
+			}
+		}
+	}, testTimeout, 500*time.Millisecond)
+}
+
+// testLogEnricherRuby sends concurrent requests that exceed Puma's thread
+// pool size (configured to 2 threads), forcing the reactor thread to buffer
+// HTTP requests before handing them to workers. This exercises the
+// obi_ctx__set call in rb_ary_shift that refreshes traces_ctx_v1 for the
+// worker thread when the reactor already parsed the HTTP request.
+func testLogEnricherRuby(t *testing.T) {
+	waitForTestComponentsNoMetrics(t, logEnricherRubyConstants.url+logEnricherRubyConstants.smokeEndpoint)
+
+	cl, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	require.NoError(t, err)
+	defer cl.Close()
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		// Fire 5 concurrent requests against 2 Puma threads. The server
+		// sleeps 50ms per request, so at least 3 requests will be queued
+		// in the reactor, exercising the reactor→worker handoff path.
+		var wg sync.WaitGroup
+		for _, tp := range testTraceparents {
+			wg.Add(1)
+			go func(tp struct{ traceID, parentID string }) {
+				defer wg.Done()
+				req, err := http.NewRequest(http.MethodGet,
+					logEnricherRubyConstants.url+logEnricherRubyConstants.logEndpoint, nil)
+				if err != nil {
+					return
+				}
+				req.Header.Set("traceparent", fmt.Sprintf("00-%s-%s-01", tp.traceID, tp.parentID))
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return
+				}
+				resp.Body.Close()
+			}(tp)
+		}
+		wg.Wait()
+
+		containerID := testContainerID(ct, cl, logEnricherRubyConstants.containerImage)
+		require.NotEmpty(ct, containerID, "could not find test container ID")
+		logs := containerLogs(ct, cl, containerID)
+		require.NotEmpty(ct, logs)
+
+		// Find the last occurrence of each injected trace_id.
+		lastSpanID := make(map[string]string, len(testTraceparents))
+		for _, line := range logs {
+			var fields map[string]string
+			if json.Unmarshal([]byte(line), &fields) != nil {
+				continue
+			}
+			if tid, ok := fields["trace_id"]; ok {
+				lastSpanID[tid] = fields["span_id"]
+			}
+		}
+
+		// Every injected trace_id must appear with a non-empty span_id.
+		for _, tp := range testTraceparents {
+			sid, found := lastSpanID[tp.traceID]
+			assert.True(ct, found, "no enriched log line found for trace_id %s", tp.traceID)
+			if found {
+				assert.NotEmpty(ct, sid, "span_id missing for trace_id %s", tp.traceID)
 			}
 		}
 	}, testTimeout, 500*time.Millisecond)

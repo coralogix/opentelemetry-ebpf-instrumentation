@@ -1,6 +1,19 @@
 class UsersController < ApplicationController
   before_action :set_user, only: %i[ show update destroy ]
 
+  # GET /smoke
+  def smoke
+    render plain: "OK"
+  end
+
+  # GET /json_logger
+  def json_logger
+    sleep 0.05
+    message = "this is a json log from ruby"
+    puts '{"message":"' + message + '","level":"INFO"}'
+    render plain: message
+  end
+
   # GET /users
   def index
     @users = User.all
