@@ -1273,7 +1273,9 @@
               "k8s",
               "kube",
               "kubernetes",
-              "rdns"
+              "rdns",
+              "socket_filter",
+              "tc"
             ]
           },
           "type": "array",
@@ -1300,7 +1302,10 @@
           "type": "string",
           "enum": [
             "any",
+            "any",
             "ipv4",
+            "ipv4",
+            "ipv6",
             "ipv6"
           ],
           "description": "AgentIPType specifies which type of IP address (IPv4 or IPv6 or any) should the agent report in the AgentID field of each flow. Accepted values are: any (default), ipv4, ipv6. If the AgentIP configuration property is set, this property has no effect.",
@@ -1351,7 +1356,10 @@
           "type": "string",
           "enum": [
             "both",
+            "both",
             "egress",
+            "egress",
+            "ingress",
             "ingress"
           ],
           "description": "Direction allows selecting which flows to trace according to its direction. Accepted values are \"ingress\", \"egress\" or \"both\" (default).",
@@ -1403,6 +1411,8 @@
           "type": "string",
           "enum": [
             "poll",
+            "poll",
+            "watch",
             "watch"
           ],
           "description": "ListenInterfaces specifies the mechanism used by the agent to listen for added or removed network interfaces. Accepted values are \"watch\" (default) or \"poll\". If the value is \"watch\", interfaces are traced immediately after they are created. This is the recommended setting for most configurations. \"poll\" value is a fallback mechanism that periodically queries the current network interfaces (frequency specified by ListenPollPeriod).",
@@ -1444,7 +1454,14 @@
         "source": {
           "type": "string",
           "enum": [
+            "dns",
+            "k8s",
+            "kube",
+            "kubernetes",
+            "rdns",
             "socket_filter",
+            "socket_filter",
+            "tc",
             "tc"
           ],
           "description": "Specify the source type for network events, e.g tc or socket_filter. The tc implementation cannot be used when there are other tc eBPF probes, e.g. Cilium CNI.",
