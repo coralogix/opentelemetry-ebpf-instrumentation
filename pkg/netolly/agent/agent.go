@@ -43,11 +43,8 @@ import (
 )
 
 const (
-	listenPoll       = "poll"
-	listenWatch      = "watch"
-	directionIngress = "ingress"
-	directionEgress  = "egress"
-	directionBoth    = "both"
+	listenPoll  = "poll"
+	listenWatch = "watch"
 )
 
 func alog() *slog.Logger {
@@ -220,11 +217,11 @@ func flowsAgent(
 
 func flowDirections(cfg *obi.NetworkConfig) (ingress, egress bool) {
 	switch cfg.Direction {
-	case directionIngress:
+	case obi.DirectionIngress:
 		return true, false
-	case directionEgress:
+	case obi.DirectionEgress:
 		return false, true
-	case directionBoth:
+	case obi.DirectionBoth:
 		return true, true
 	default:
 		alog().Warn("unknown DIRECTION. Tracing both ingress and egress traffic",

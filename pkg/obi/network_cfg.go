@@ -43,6 +43,14 @@ const (
 	NetworkAgentIPIfaceLocal     = "local"
 )
 
+type Direction string
+
+const (
+	DirectionIngress Direction = "ingress"
+	DirectionEgress  Direction = "egress"
+	DirectionBoth    Direction = "both"
+)
+
 type AgentTypeIface string
 
 func (AgentTypeIface) JSONSchema() *jsonschema.Schema {
@@ -123,7 +131,7 @@ type NetworkConfig struct {
 	DeduperFCTTL time.Duration `yaml:"deduper_fc_ttl" env:"OTEL_EBPF_NETWORK_DEDUPER_FC_TTL" validate:"omitempty,gt=0"`
 	// Direction allows selecting which flows to trace according to its direction. Accepted values
 	// are "ingress", "egress" or "both" (default).
-	Direction string `yaml:"direction" env:"OTEL_EBPF_NETWORK_DIRECTION" validate:"oneof=ingress egress both" jsonschema:"type=string,enum=ingress,enum=egress,enum=both"`
+	Direction Direction `yaml:"direction" env:"OTEL_EBPF_NETWORK_DIRECTION" validate:"oneof=ingress egress both" jsonschema:"type=string,enum=ingress,enum=egress,enum=both"`
 	// Sampling holds the rate at which packets should be sampled and sent to the target collector.
 	// E.g. if set to 100, one out of 100 packets, on average, will be sent to the target collector.
 	Sampling int `yaml:"sampling" env:"OTEL_EBPF_NETWORK_SAMPLING" validate:"omitempty,gt=0"`
@@ -168,7 +176,7 @@ var DefaultNetworkConfig = NetworkConfig{
 	CacheMaxFlows:      5000,
 	CacheActiveTimeout: 5 * time.Second,
 	Deduper:            flowdef.DeduperFirstCome,
-	Direction:          "both",
+	Direction:          DirectionBoth,
 	GuessPorts:         flowdef.PortGuessDisable,
 	ListenInterfaces:   "watch",
 	ListenPollPeriod:   10 * time.Second,
