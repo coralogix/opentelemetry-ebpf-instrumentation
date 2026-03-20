@@ -125,7 +125,7 @@ func FlowsAgent(ctxInfo *global.ContextInfo, cfg *obi.Config) (*Flows, error) {
 
 	alog.Debug("acquiring Agent IP")
 
-	agentIP, err := netip.FetchAgentIP(cfg.NetworkFlows.AgentIP, string(cfg.NetworkFlows.AgentIPIface), cfg.NetworkFlows.AgentIPType)
+	agentIP, err := netip.FetchAgentIP(cfg.NetworkFlows.AgentIP, string(cfg.NetworkFlows.AgentIPIface), string(cfg.NetworkFlows.AgentIPType))
 	if err != nil {
 		return nil, fmt.Errorf("acquiring Agent IP: %w", err)
 	}

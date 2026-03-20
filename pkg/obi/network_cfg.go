@@ -56,6 +56,14 @@ const (
 	EbpfSourceSock Source = "socket_filter"
 )
 
+type AgentIPType string
+
+const (
+	AgentIPTypeAny  AgentIPType = "any"
+	AgentIPTypeIPv4 AgentIPType = "ipv4"
+	AgentIPTypeIPv6 AgentIPType = "ipv6"
+)
+
 type AgentTypeIface string
 
 func (AgentTypeIface) JSONSchema() *jsonschema.Schema {
@@ -99,7 +107,7 @@ type NetworkConfig struct {
 	// AgentIPType specifies which type of IP address (IPv4 or IPv6 or any) should the agent report
 	// in the AgentID field of each flow. Accepted values are: any (default), ipv4, ipv6.
 	// If the AgentIP configuration property is set, this property has no effect.
-	AgentIPType string `yaml:"agent_ip_type" env:"OTEL_EBPF_NETWORK_AGENT_IP_TYPE" validate:"omitempty,oneof=any ipv4 ipv6" jsonschema:"type=string,enum=any,enum=ipv4,enum=ipv6"`
+	AgentIPType AgentIPType `yaml:"agent_ip_type" env:"OTEL_EBPF_NETWORK_AGENT_IP_TYPE" validate:"omitempty,oneof=any ipv4 ipv6" jsonschema:"type=string,enum=any,enum=ipv4,enum=ipv6"`
 	// Interfaces contains the interface names from where flows will be collected. If empty, the agent
 	// will fetch all the interfaces in the system, excepting the ones listed in ExcludeInterfaces.
 	// If an entry is enclosed by slashes (e.g. `/br-/`), it will match as regular expression,
@@ -176,7 +184,7 @@ type NetworkConfig struct {
 var DefaultNetworkConfig = NetworkConfig{
 	Source:             EbpfSourceSock,
 	AgentIPIface:       "external",
-	AgentIPType:        "any",
+	AgentIPType:        AgentIPTypeAny,
 	ExcludeInterfaces:  []string{"lo"},
 	CacheMaxFlows:      5000,
 	CacheActiveTimeout: 5 * time.Second,
