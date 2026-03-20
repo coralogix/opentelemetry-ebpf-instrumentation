@@ -35,8 +35,6 @@ import (
 )
 
 const (
-	EbpfSourceTC                 = "tc"
-	EbpfSourceSock               = "socket_filter"
 	NetworkListenInterfacesWatch = "watch"
 	NetworkListenInterfacesPoll  = "poll"
 	NetworkAgentIPIfaceExternal  = "external"
@@ -49,6 +47,13 @@ const (
 	DirectionIngress Direction = "ingress"
 	DirectionEgress  Direction = "egress"
 	DirectionBoth    Direction = "both"
+)
+
+type Source string
+
+const (
+	EbpfSourceTC   Source = "tc"
+	EbpfSourceSock Source = "socket_filter"
 )
 
 type AgentTypeIface string
@@ -81,7 +86,7 @@ type NetworkConfig struct {
 
 	// Specify the source type for network events, e.g tc or socket_filter. The tc implementation
 	// cannot be used when there are other tc eBPF probes, e.g. Cilium CNI.
-	Source string `yaml:"source" env:"OTEL_EBPF_NETWORK_SOURCE"  validate:"oneof=tc socket_filter" jsonschema:"type=string,enum=tc,enum=socket_filter"`
+	Source Source `yaml:"source" env:"OTEL_EBPF_NETWORK_SOURCE" validate:"oneof=tc socket_filter" jsonschema:"type=string,enum=tc,enum=socket_filter"`
 
 	// AgentIP allows overriding the reported Agent IP address on each flow.
 	AgentIP string `yaml:"agent_ip" env:"OTEL_EBPF_NETWORK_AGENT_IP" validate:"omitempty,ip" jsonschema:"type=string,format=ip"`
