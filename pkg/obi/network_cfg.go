@@ -35,10 +35,8 @@ import (
 )
 
 const (
-	NetworkListenInterfacesWatch = "watch"
-	NetworkListenInterfacesPoll  = "poll"
-	NetworkAgentIPIfaceExternal  = "external"
-	NetworkAgentIPIfaceLocal     = "local"
+	NetworkAgentIPIfaceExternal = "external"
+	NetworkAgentIPIfaceLocal    = "local"
 )
 
 type Direction string
@@ -62,6 +60,13 @@ const (
 	AgentIPTypeAny  AgentIPType = "any"
 	AgentIPTypeIPv4 AgentIPType = "ipv4"
 	AgentIPTypeIPv6 AgentIPType = "ipv6"
+)
+
+type ListenInterfaceType string
+
+const (
+	ListenInterfaceWatch ListenInterfaceType = "watch"
+	ListenInterfacePoll  ListenInterfaceType = "poll"
 )
 
 type AgentTypeIface string
@@ -157,7 +162,7 @@ type NetworkConfig struct {
 	// If the value is "watch", interfaces are traced immediately after they are created. This is
 	// the recommended setting for most configurations. "poll" value is a fallback mechanism that
 	// periodically queries the current network interfaces (frequency specified by ListenPollPeriod).
-	ListenInterfaces string `yaml:"listen_interfaces" env:"OTEL_EBPF_NETWORK_LISTEN_INTERFACES" validate:"oneof=watch poll" jsonschema:"type=string,enum=watch,enum=poll"`
+	ListenInterfaces ListenInterfaceType `yaml:"listen_interfaces" env:"OTEL_EBPF_NETWORK_LISTEN_INTERFACES" validate:"oneof=watch poll" jsonschema:"type=string,enum=watch,enum=poll"`
 	// ListenPollPeriod specifies the periodicity to query the network interfaces when the
 	// ListenInterfaces value is set to "poll".
 	ListenPollPeriod time.Duration `yaml:"listen_poll_period" env:"OTEL_EBPF_NETWORK_LISTEN_POLL_PERIOD" validate:"gte=0"`
@@ -191,7 +196,7 @@ var DefaultNetworkConfig = NetworkConfig{
 	Deduper:            flowdef.DeduperFirstCome,
 	Direction:          DirectionBoth,
 	GuessPorts:         flowdef.PortGuessDisable,
-	ListenInterfaces:   "watch",
+	ListenInterfaces:   ListenInterfaceWatch,
 	ListenPollPeriod:   10 * time.Second,
 	ReverseDNS: rdns.ReverseDNS{
 		Type:     rdns.ReverseDNSNone,

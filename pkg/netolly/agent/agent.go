@@ -42,11 +42,6 @@ import (
 	"go.opentelemetry.io/obi/pkg/pipe/swarm"
 )
 
-const (
-	listenPoll  = "poll"
-	listenWatch = "watch"
-)
-
 func alog() *slog.Logger {
 	return slog.With("component", "agent.Flows")
 }
@@ -159,12 +154,12 @@ func newFetcher(cfg *obi.Config, alog *slog.Logger, ifaceManager *tcmanager.Inte
 
 func monitorMode(cfg *obi.Config, alog *slog.Logger) tcmanager.MonitorMode {
 	switch cfg.NetworkFlows.ListenInterfaces {
-	case listenPoll:
+	case obi.ListenInterfacePoll:
 		alog.Debug("listening for new interfaces: use polling",
 			"period", cfg.NetworkFlows.ListenPollPeriod)
 
 		return tcmanager.MonitorPoll
-	case listenWatch:
+	case obi.ListenInterfaceWatch:
 		alog.Debug("listening for new interfaces: use watching")
 
 		return tcmanager.MonitorWatch
