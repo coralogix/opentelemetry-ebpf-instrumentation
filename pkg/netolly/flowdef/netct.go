@@ -3,9 +3,11 @@
 
 package flowdef // import "go.opentelemetry.io/obi/pkg/netolly/flowdef"
 
+type Deduper string
+
 const (
-	DeduperNone      = "none"
-	DeduperFirstCome = "first_come"
+	DeduperNone      Deduper = "none"
+	DeduperFirstCome Deduper = "first_come"
 )
 
 type PortGuessPolicy string

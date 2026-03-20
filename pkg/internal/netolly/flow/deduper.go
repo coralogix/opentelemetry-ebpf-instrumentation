@@ -38,7 +38,7 @@ func dlog() *slog.Logger {
 }
 
 type Deduper struct {
-	Type               string
+	Type               flowdef.Deduper
 	FCTTL              time.Duration
 	CacheActiveTimeout time.Duration
 }

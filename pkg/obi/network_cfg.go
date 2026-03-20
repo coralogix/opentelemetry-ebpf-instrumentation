@@ -135,7 +135,7 @@ type NetworkConfig struct {
 	// both the physical and a virtual interface).
 	// "first_come" will forward only flows from the first interface the flows are received from.
 	// Default value: first_come
-	Deduper string `yaml:"deduper" env:"OTEL_EBPF_NETWORK_DEDUPER" validate:"oneof=none first_come" jsonschema:"type=string,enum=none,enum=first_come"`
+	Deduper flowdef.Deduper `yaml:"deduper" env:"OTEL_EBPF_NETWORK_DEDUPER" validate:"oneof=none first_come" jsonschema:"type=string,enum=none,enum=first_come"`
 	// DeduperFCTTL specifies the expiry duration of the flows "first_come" deduplicator. After
 	// a flow hasn't been received for that expiry time, the deduplicator forgets it. That means
 	// that a flow from a connection that has been inactive during that period could be forwarded
