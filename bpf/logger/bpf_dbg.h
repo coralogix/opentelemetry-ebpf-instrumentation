@@ -35,7 +35,8 @@ struct {
 } debug_events SEC(".maps");
 
 enum bpf_func_id___x {
-    BPF_FUNC_snprintf___x = 42, /* avoid zero */
+    BPF_FUNC_snprintf___x = 42,      /* avoid zero */
+    BPF_FUNC_trace_vprintk___x = 43, /* avoid zero */
 };
 
 #define bpf_dbg_printk(fmt, args...)                                                               \
@@ -43,7 +44,11 @@ enum bpf_func_id___x {
         if (!g_bpf_debug) {                                                                        \
             break;                                                                                 \
         }                                                                                          \
-        bpf_printk(fmt, ##args);                                                                   \
+        /* bpf_printk with >3 args uses bpf_trace_vprintk (kernel >= 5.16). */                     \
+        /* Guard it so programs still load on older kernels (e.g. 5.15 in CI). */                  \
+        if (bpf_core_enum_value_exists(enum bpf_func_id___x, BPF_FUNC_trace_vprintk___x)) {        \
+            bpf_printk(fmt, ##args);                                                               \
+        }                                                                                          \
         log_info_t *__trace__ = bpf_ringbuf_reserve(&debug_events, sizeof(log_info_t), 0);         \
         if (!__trace__) {                                                                          \
             break;                                                                                 \
@@ -70,5 +75,7 @@ enum bpf_func_id___x {
         if (!g_bpf_debug) {                                                                        \
             break;                                                                                 \
         }                                                                                          \
-        bpf_printk(fmt, ##args);                                                                   \
+        if (bpf_core_enum_value_exists(enum bpf_func_id___x, BPF_FUNC_trace_vprintk___x)) {        \
+            bpf_printk(fmt, ##args);                                                               \
+        }                                                                                          \
     } while (0)
