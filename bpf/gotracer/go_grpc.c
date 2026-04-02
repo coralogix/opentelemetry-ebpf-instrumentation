@@ -22,6 +22,8 @@
 #include <common/ringbuf.h>
 #include <common/trace_helpers.h>
 
+#include <maps/outgoing_trace_map.h>
+
 #include <gotracer/go_common.h>
 #include <gotracer/go_offsets.h>
 #include <gotracer/go_str.h>
@@ -581,11 +583,18 @@ int obi_uprobe_transport_http2Client_NewStream(struct pt_regs *ctx) {
                         bpf_map_update_elem(&ongoing_client_connections, &g_key, &conn, BPF_ANY);
                         bpf_map_update_elem(
                             &cached_grpc_client_connections, &t_ptr, &conn, BPF_ANY);
+
+                        // Cache conn_ptr → connection_info for grpcFramerWriteHeaders
+                        u64 ck = (u64)conn_ptr_key;
+                        bpf_map_update_elem(&grpc_conn_ptr_to_conn, &ck, &conn, BPF_ANY);
                     }
                 }
             }
         } else {
             bpf_map_update_elem(&ongoing_client_connections, &g_key, cached_conn, BPF_ANY);
+
+            u64 ck = (u64)conn_ptr_key;
+            bpf_map_update_elem(&grpc_conn_ptr_to_conn, &ck, cached_conn, BPF_ANY);
         }
 
         if (g_bpf_header_propagation) {
@@ -735,6 +744,28 @@ int obi_uprobe_grpcFramerWriteHeaders(struct pt_regs *ctx) {
 
     if (invocation) {
         bpf_dbg_printk("Found invocation info: %llx", invocation);
+
+        // Write outgoing_trace_map with stream_id so the sk_msg can adopt
+        // the correct trace for this specific HTTP/2 stream.
+        u64 conn_key = (u64)conn_ptr;
+        connection_info_t *conn_info = bpf_map_lookup_elem(&grpc_conn_ptr_to_conn, &conn_key);
+        if (conn_info && valid_trace(invocation->tp.trace_id)) {
+            tp_info_pid_t tp_p = {0};
+            tp_p.tp = invocation->tp;
+            tp_p.valid = 1;
+            tp_p.written = 1;
+            tp_p.pid = pid_from_pid_tgid(bpf_get_current_pid_tgid());
+            tp_p.req_type = EVENT_HTTP_CLIENT;
+
+            egress_key_t e_key = {
+                .d_port = conn_info->d_port,
+                .s_port = conn_info->s_port,
+                .stream_id = (u32)stream_id,
+            };
+            sort_egress_key(&e_key);
+            bpf_map_update_elem(&outgoing_trace_map, &e_key, &tp_p, BPF_ANY);
+        }
+
         void *goroutine_addr = GOROUTINE_PTR(ctx);
         go_addr_key_t g_key = {};
         go_addr_key_from_id(&g_key, goroutine_addr);

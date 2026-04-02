@@ -8,6 +8,7 @@ This directory contains documentation that is not useful for our users but might
 - [Profiling](profiling.md): how to profile OBI.
 - [Features](features.md): features supported by OBI.
 - [Context Propagation Architecture](context-propagation.md): how OpenTelemetry context propagation works in the eBPF instrumentation.
+- [gRPC Context Propagation](grpc-context-propagation.md): HTTP/2 gRPC context propagation via sk_msg HPACK injection and TCP options.
 - [Protocols](protocols/README.md): documentation about supported protocols.
 - [AI Tooling](ai-tooling.md): recommendations for configuring agent tooling for this repository.
 - [BPF print format](bpf-print-format.md): it explains a uniform standard for all BPF print debug statements across the project.

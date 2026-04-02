@@ -6,9 +6,14 @@
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 
+#include <common/h2_defs.h>
 #include <common/iov_iter.h>
 #include <common/http_buf_size.h>
 #include <common/ringbuf.h>
+#include <common/trace_lifecycle.h>
+#include <common/trace_parent.h>
+
+#include <maps/tp_info_mem.h>
 
 #include <generictracer/http2_grpc.h>
 #include <generictracer/k_tracer_tailcall.h>
@@ -56,47 +61,198 @@ static __always_inline u64 uniqueHTTP2ConnId(pid_connection_info_t *p_conn) {
     return random_id;
 }
 
+// Try to parse a traceparent value at the given pointer.
+// Returns 1 if a valid traceparent was found, 0 otherwise.
+static __always_inline u8 try_parse_tp_value(const unsigned char *val, tp_info_t *tp) {
+    if (val[k_tp_val_dash1] != '-' || val[k_tp_val_dash2] != '-' || val[k_tp_val_dash3] != '-') {
+        return 0;
+    }
+    decode_hex(tp->trace_id, &val[k_tp_val_trace_id_start], TRACE_ID_CHAR_LEN);
+    decode_hex(tp->parent_id, &val[k_tp_val_span_id_start], SPAN_ID_CHAR_LEN);
+    tp->flags = 1;
+    return 1;
+}
+
+// Scan captured HEADERS frame data for an HPACK-encoded traceparent.
+// Handles both plaintext (0x0b "traceparent") and huffman-encoded (0x88 <8 bytes>)
+// name formats, matching sk_msg injection and Go uprobe injection respectively.
+static __always_inline u8 parse_hpack_traceparent(const unsigned char *data,
+                                                  u32 data_len,
+                                                  tp_info_t *tp) {
+    if (data_len < k_h2_tp_hpack_huffman_size) {
+        return 0;
+    }
+
+    const u32 max_pos = data_len - k_h2_tp_hpack_huffman_size;
+    const char tp_name[] = "traceparent";
+    static const unsigned char tp_huffman[] = {0x4d, 0x83, 0x21, 0x6b, 0x1d, 0x85, 0xa9, 0x3f};
+
+    for (u16 i = 0; i < k_hpack_tp_max_scan && i <= max_pos; i++) {
+        if (data[i] != k_hpack_literal_no_index) {
+            continue;
+        }
+
+        const u8 name_len_byte = data[i + 1];
+
+        // Plaintext name: 0x0b "traceparent"
+        if (name_len_byte == k_hpack_tp_name_len) {
+            if (bpf_memcmp(&data[i + k_hpack_tp_name_offset], tp_name, k_hpack_tp_name_len) != 0) {
+                continue;
+            }
+            if (data[i + k_hpack_tp_name_offset + k_hpack_tp_name_len] != k_hpack_value_len_tp) {
+                continue;
+            }
+            return try_parse_tp_value(&data[i + k_hpack_tp_val_offset], tp);
+        }
+
+        // Huffman name: 0x88 <8 bytes huffman>
+        if (name_len_byte == (k_hpack_tp_name_huffman_len | 0x80)) {
+            if (bpf_memcmp(&data[i + k_hpack_tp_name_offset],
+                           tp_huffman,
+                           k_hpack_tp_name_huffman_len) != 0) {
+                continue;
+            }
+            if (data[i + k_hpack_tp_name_offset + k_hpack_tp_name_huffman_len] !=
+                k_hpack_value_len_tp) {
+                continue;
+            }
+            return try_parse_tp_value(&data[i + k_hpack_tp_val_offset_huffman], tp);
+        }
+    }
+
+    return 0;
+}
+
+// Adopt the trace context that the Go uprobe wrote to outgoing_trace_map
+// in grpcFramerWriteHeaders. The uprobe has correct parent linking via
+// ongoing_grpc_client_requests, overriding any stale/wrong trace from
+// find_trace_for_client_request.
+static __always_inline void adopt_injected_trace(http2_conn_stream_t *s_key, tp_info_t *tp) {
+    egress_key_t sorted_e = {
+        .d_port = s_key->pid_conn.conn.d_port,
+        .s_port = s_key->pid_conn.conn.s_port,
+        .stream_id = s_key->stream_id,
+    };
+    sort_egress_key(&sorted_e);
+    tp_info_pid_t *injected = bpf_map_lookup_elem(&outgoing_trace_map, &sorted_e);
+    if (injected && injected->valid && injected->written && valid_trace(injected->tp.trace_id)) {
+        bpf_memcpy(tp->trace_id, injected->tp.trace_id, TRACE_ID_SIZE_BYTES);
+        bpf_memcpy(tp->span_id, injected->tp.span_id, SPAN_ID_SIZE_BYTES);
+        bpf_memcpy(tp->parent_id, injected->tp.parent_id, SPAN_ID_SIZE_BYTES);
+        // Consume the per-stream entry now that it has been adopted. sk_msg
+        // (Scenario A order: uprobe → sk_msg → kprobe) has already used it,
+        // so deleting here prevents one stale entry per stream accumulating in
+        // the LRU and evicting active entries on long-lived HTTP/2 connections.
+        bpf_map_delete_elem(&outgoing_trace_map, &sorted_e);
+    }
+}
+
 static __always_inline void http2_grpc_start(
     http2_conn_stream_t *s_key, void *u_buf, int len, u8 direction, u8 ssl, u16 orig_dport) {
     http2_grpc_request_t *existing = bpf_map_lookup_elem(&ongoing_http2_grpc, s_key);
     if (existing) {
         bpf_dbg_printk("already found existing grpcstart, ignoring this exchange");
+        if (existing->type == EVENT_HTTP_CLIENT) {
+            adopt_injected_trace(s_key, &existing->tp);
+        }
         return;
     }
     http2_grpc_request_t *h2g_info = empty_http2_info();
     bpf_dbg_printk("http2/grpc start direction=%d stream=%d", direction, s_key->stream_id);
     //dbg_print_http_connection_info(&s_key->pid_conn.conn); // commented out since GitHub CI doesn't like this call
-    if (h2g_info) {
-        http_connection_metadata_t *meta =
-            connection_meta_by_direction(direction, PACKET_TYPE_REQUEST);
-        if (!meta) {
-            bpf_dbg_printk("Can't get meta memory or connection not found");
-            return;
-        }
-
-        h2g_info->flags = EVENT_K_HTTP2_REQUEST;
-        h2g_info->start_monotime_ns = bpf_ktime_get_ns();
-        h2g_info->len = len;
-        h2g_info->ssl = ssl;
-        h2g_info->conn_info = s_key->pid_conn.conn;
-        if (meta) { // keep verifier happy
-            h2g_info->pid = meta->pid;
-            h2g_info->type = meta->type;
-        }
-
-        h2g_info->new_conn_id = 0;
-        http2_conn_info_data_t *h2g =
-            bpf_map_lookup_elem(&ongoing_http2_connections, &s_key->pid_conn);
-        if (h2g && http2_flag_new(h2g->flags)) {
-            h2g_info->new_conn_id = h2g->id;
-        }
-
-        fixup_connection_info(
-            &h2g_info->conn_info, h2g_info->type == EVENT_HTTP_CLIENT, orig_dport);
-        bpf_probe_read(h2g_info->data, k_kprobes_http2_buf_size, u_buf);
-
-        bpf_map_update_elem(&ongoing_http2_grpc, s_key, h2g_info, BPF_ANY);
+    if (!h2g_info) {
+        return;
     }
+
+    http_connection_metadata_t *meta = connection_meta_by_direction(direction, PACKET_TYPE_REQUEST);
+    if (!meta) {
+        bpf_dbg_printk("Can't get meta memory or connection not found");
+        return;
+    }
+
+    h2g_info->flags = EVENT_K_HTTP2_REQUEST;
+    h2g_info->start_monotime_ns = bpf_ktime_get_ns();
+    h2g_info->len = len;
+    h2g_info->ssl = ssl;
+    h2g_info->conn_info = s_key->pid_conn.conn;
+    if (meta) { // keep verifier happy
+        h2g_info->pid = meta->pid;
+        h2g_info->type = meta->type;
+    }
+
+    h2g_info->new_conn_id = 0;
+    http2_conn_info_data_t *h2g = bpf_map_lookup_elem(&ongoing_http2_connections, &s_key->pid_conn);
+    if (h2g && http2_flag_new(h2g->flags)) {
+        h2g_info->new_conn_id = h2g->id;
+    }
+
+    const u8 is_client = (meta->type == EVENT_HTTP_CLIENT);
+    fixup_connection_info(&h2g_info->conn_info, is_client, orig_dport);
+    bpf_probe_read(h2g_info->data, k_kprobes_http2_buf_size, u_buf);
+
+    tp_info_pid_t *tp_p = tp_info_mem();
+    if (!tp_p) {
+        bpf_map_update_elem(&ongoing_http2_grpc, s_key, h2g_info, BPF_ANY);
+        return;
+    }
+
+    tp_p->tp.ts = bpf_ktime_get_ns();
+    tp_p->tp.flags = 1;
+    tp_p->valid = 1;
+    tp_p->written = 0;
+    tp_p->pid = s_key->pid_conn.pid;
+    tp_p->req_type = meta->type;
+    urand_bytes(tp_p->tp.span_id, SPAN_ID_SIZE_BYTES);
+
+    // Find parent trace context.
+    u8 found_tp = 0;
+    if (is_client) {
+        found_tp = find_trace_for_client_request(&s_key->pid_conn, orig_dport, &tp_p->tp);
+        // Override with Go uprobe's trace if available.
+        adopt_injected_trace(s_key, &tp_p->tp);
+        if (valid_trace(tp_p->tp.trace_id)) {
+            found_tp = 1;
+        }
+    } else {
+        found_tp =
+            find_trace_for_server_request(&s_key->pid_conn.conn, &tp_p->tp, EVENT_HTTP_REQUEST);
+        if (!found_tp) {
+            const unsigned char *hpack = h2g_info->data + k_h2_frame_header_len;
+            const u32 hpack_len = k_kprobes_http2_buf_size - k_h2_frame_header_len;
+            found_tp = parse_hpack_traceparent(hpack, hpack_len, &tp_p->tp);
+        }
+    }
+
+    if (!found_tp) {
+        new_trace_id(&tp_p->tp);
+        bpf_memset(tp_p->tp.parent_id, 0, sizeof(tp_p->tp.parent_id));
+    }
+
+    h2g_info->tp = tp_p->tp;
+
+    const u32 trace_type = is_client ? TRACE_TYPE_CLIENT : TRACE_TYPE_SERVER;
+    set_trace_info_for_connection(&h2g_info->conn_info, trace_type, tp_p);
+    server_or_client_trace(meta->type, &h2g_info->conn_info, tp_p, ssl, orig_dport);
+
+    if (is_client) {
+        // Write to outgoing_trace_map so the sk_msg can adopt the
+        // kprobe's trace context for this specific stream.
+        egress_key_t e_key = {
+            .d_port = h2g_info->conn_info.d_port,
+            .s_port = h2g_info->conn_info.s_port,
+            .stream_id = s_key->stream_id,
+        };
+        sort_egress_key(&e_key);
+        tp_p->written = 1;
+        bpf_map_update_elem(&outgoing_trace_map, &e_key, tp_p, BPF_ANY);
+    } else {
+        trace_key_t t_key = {0};
+        task_tid(&t_key.p_key);
+        t_key.extra_id = extra_runtime_id();
+        bpf_map_update_elem(&server_traces, &t_key, tp_p, BPF_ANY);
+    }
+
+    bpf_map_update_elem(&ongoing_http2_grpc, s_key, h2g_info, BPF_ANY);
 }
 
 static __always_inline void

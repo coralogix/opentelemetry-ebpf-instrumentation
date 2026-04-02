@@ -70,3 +70,13 @@ struct {
         grpc_framer_func_invocation_t); // the goroutine of the round trip request, which is the key for our traceparent info
     __uint(max_entries, MAX_CONCURRENT_REQUESTS);
 } grpc_framer_invocation_map SEC(".maps");
+
+// Maps a raw net.Conn pointer to TCP connection info (ports/IPs).
+// Populated in transport_http2Client_NewStream, read in grpcFramerWriteHeaders
+// to write outgoing_trace_map with the correct stream_id.
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, u64); // key: conn_ptr
+    __type(value, connection_info_t);
+    __uint(max_entries, MAX_CONCURRENT_REQUESTS);
+} grpc_conn_ptr_to_conn SEC(".maps");

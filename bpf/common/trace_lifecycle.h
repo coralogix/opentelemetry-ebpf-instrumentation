@@ -133,6 +133,7 @@ static __always_inline void server_or_client_trace(
         const egress_key_t e_key = {
             .d_port = conn->d_port,
             .s_port = conn->s_port,
+            .stream_id = 0,
         };
 
         if (ssl) {
