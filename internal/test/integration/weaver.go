@@ -138,14 +138,31 @@ func runWeaverValidation(t *testing.T) {
 		t.Logf("weaver diagnostics:\n%s", stderr.String())
 	}
 
-	// Parse the JSON report from stdout.
+	// Parse the JSON report from stdout. Weaver may output multiple JSON
+	// objects (e.g. diagnostics followed by the report), so we decode each
+	// one and look for the report object containing "samples".
 	jsonStr := strings.TrimSpace(stdout.String())
 	if jsonStr == "" {
 		t.Fatalf("weaver produced no JSON output on stdout")
 	}
 
 	var report weaverReport
-	require.NoError(t, json.Unmarshal([]byte(jsonStr), &report), "failed to parse weaver JSON report")
+	dec := json.NewDecoder(strings.NewReader(jsonStr))
+	for dec.More() {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			break
+		}
+		var candidate weaverReport
+		if err := json.Unmarshal(raw, &candidate); err != nil {
+			continue
+		}
+		if len(candidate.Samples) > 0 || candidate.Statistics.TotalEntities > 0 {
+			report = candidate
+			break
+		}
+	}
+	require.NotZero(t, report.Statistics.TotalEntities, "could not find weaver report in stdout")
 
 	validateWeaverReport(t, &report)
 }
