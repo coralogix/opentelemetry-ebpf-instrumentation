@@ -527,7 +527,7 @@ func testREDMetricsForHTTPLibrary(t *testing.T, url, svcName, svcNs string) {
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
 			var err error
-			results, err = pq.Query(`rpc_client_duration_seconds_count{` +
+			results, err = pq.Query(`rpc_client_duration_milliseconds_count{` +
 				`rpc_grpc_status_code="0",` +
 				`service_name="` + svcName + `",` +
 				`service_namespace="` + svcNs + `",` +
@@ -624,7 +624,7 @@ func testREDMetricsGRPCInternal(t *testing.T, opts []grpcclient.PingOption, serv
 	var results []promtest.Result
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		var err error
-		results, err = pq.Query(`rpc_server_duration_seconds_count{` +
+		results, err = pq.Query(`rpc_server_duration_milliseconds_count{` +
 			`rpc_grpc_status_code="0",` +
 			`service_namespace="integration-test",` +
 			`client_address!="127.0.0.1",` + // discard the metrics from testREDMetricsForHTTPLibrary/GorillaURL
@@ -813,7 +813,7 @@ func testREDMetricsForHTTPLibraryNoRoute(t *testing.T, url, svcName string) {
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		var err error
-		results, err = pq.Query(`rpc_client_duration_seconds_count{` +
+		results, err = pq.Query(`rpc_client_duration_milliseconds_count{` +
 			`rpc_grpc_status_code="0",` +
 			`service_name="` + svcName + `",` +
 			`service_namespace="integration-test",` +

@@ -479,14 +479,14 @@ func (mr *MetricsReporter) setupOtelMeters(m *Metrics, meter instrument.Meter) e
 	}
 
 	if mr.is.GRPCEnabled() {
-		grpcDuration, err := meter.Float64Histogram(attributes.RPCServerDuration.OTEL, instrument.WithUnit("s"))
+		grpcDuration, err := meter.Float64Histogram(attributes.RPCServerDuration.OTEL, instrument.WithUnit("ms"))
 		if err != nil {
 			return fmt.Errorf("creating grpc duration histogram metric: %w", err)
 		}
 		m.grpcDuration = NewExpirer[*request.Span, instrument.Float64Histogram, float64](
 			m.ctx, grpcDuration, mr.attrGRPCServer, timeNow, mr.cfg.TTL)
 
-		grpcClientDuration, err := meter.Float64Histogram(attributes.RPCClientDuration.OTEL, instrument.WithUnit("s"))
+		grpcClientDuration, err := meter.Float64Histogram(attributes.RPCClientDuration.OTEL, instrument.WithUnit("ms"))
 		if err != nil {
 			return fmt.Errorf("creating grpc duration histogram metric: %w", err)
 		}
@@ -881,7 +881,9 @@ func otelSpanMetricsAccepted(span *request.Span) bool {
 //nolint:cyclop
 func (r *Metrics) record(span *request.Span, mr *MetricsReporter) {
 	t := span.Timings()
-	duration := t.End.Sub(t.RequestStart).Seconds()
+	d := t.End.Sub(t.RequestStart)
+	duration := d.Seconds()
+	durationMs := float64(d.Nanoseconds()) / 1e6
 
 	ctx := trace.ContextWithSpanContext(r.ctx, trace.SpanContext{}.WithTraceID(span.TraceID).WithSpanID(span.SpanID).WithTraceFlags(trace.TraceFlags(span.TraceFlags)))
 
@@ -902,12 +904,12 @@ func (r *Metrics) record(span *request.Span, mr *MetricsReporter) {
 		case request.EventTypeGRPC:
 			if mr.is.GRPCEnabled() {
 				grpcDuration, attrs := r.grpcDuration.ForRecord(span)
-				grpcDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
+				grpcDuration.Record(ctx, durationMs, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeGRPCClient:
 			if mr.is.GRPCEnabled() {
 				grpcClientDuration, attrs := r.grpcClientDuration.ForRecord(span)
-				grpcClientDuration.Record(ctx, duration, instrument.WithAttributeSet(attrs))
+				grpcClientDuration.Record(ctx, durationMs, instrument.WithAttributeSet(attrs))
 			}
 		case request.EventTypeHTTPClient:
 			// HTTP client subtypes that are database calls get recorded as db client metrics
