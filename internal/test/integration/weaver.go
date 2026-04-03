@@ -29,13 +29,22 @@ const (
 )
 
 // weaverIgnoredSignals lists signals whose violations are expected and should
-// not cause the test to fail. target_info is a Prometheus/OpenMetrics convention
-// (with Prometheus-style instance/job attributes) that is not part of the OTel
-// semantic conventions registry.
+// not cause the test to fail. These are either Prometheus/OpenMetrics conventions
+// or OBI-internal metrics that are not part of the OTel semantic conventions registry.
 // TODO: replace with custom override / filter once
 // https://github.com/open-telemetry/weaver/pull/1256 is merged.
 var weaverIgnoredSignals = map[string]struct{}{
+	// Prometheus/OpenMetrics conventions
 	"metric:target_info": {},
+	// OBI-internal span metrics and service graph metrics
+	"metric:traces_host_info":                          {},
+	"metric:traces_target_info":                        {},
+	"metric:traces_span_metrics_calls_total":           {},
+	"metric:traces_span_metrics_duration":              {},
+	"metric:traces_service_graph_request_total":        {},
+	"metric:traces_service_graph_request_server":       {},
+	"metric:traces_service_graph_request_client":       {},
+	"metric:traces_service_graph_request_failed_total": {},
 }
 
 func SemconvVersion() string {
