@@ -22,6 +22,24 @@ struct {
     __uint(pinning, OBI_PIN_INTERNAL);
 } events SEC(".maps");
 
+// Counts events discarded due to the ringbuffer being full (bpf_ringbuf_reserve returning NULL
+// or bpf_ringbuf_output failing). Keyed by EVENT_* type from event_defs.h.
+// Shared across all BPF programs using the events ringbuf.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, u32);
+    __type(value, u64);
+    __uint(max_entries, EVENT_TYPE_COUNT);
+    __uint(pinning, OBI_PIN_INTERNAL);
+} ringbuf_stats SEC(".maps");
+
+static __always_inline void ringbuf_stats_discard(u32 event_type) {
+    u64 *counter = bpf_map_lookup_elem(&ringbuf_stats, &event_type);
+    if (counter) {
+        __sync_fetch_and_add(counter, 1);
+    }
+}
+
 // To be Injected from the user space during the eBPF program load & initialization
 volatile const u32 wakeup_data_bytes;
 

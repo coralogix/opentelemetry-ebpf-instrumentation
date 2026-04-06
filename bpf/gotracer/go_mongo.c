@@ -213,6 +213,8 @@ int obi_uprobe_mongo_op_execute_ret(struct pt_regs *ctx) {
             trace->end_monotime_ns = bpf_ktime_get_ns();
             task_pid(&trace->pid);
             bpf_ringbuf_submit(trace, get_flags());
+        } else {
+            ringbuf_stats_discard(EVENT_GO_MONGO);
         }
     }
 

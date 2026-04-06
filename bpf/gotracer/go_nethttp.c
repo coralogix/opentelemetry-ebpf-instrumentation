@@ -520,6 +520,7 @@ static __always_inline int serve_http_returns(struct pt_regs *ctx) {
     http_request_trace_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace_t), 0);
     if (!trace) {
         bpf_dbg_printk("can't reserve space in the ringbuffer");
+        ringbuf_stats_discard(EVENT_HTTP_REQUEST);
         goto done;
     }
 
@@ -706,6 +707,7 @@ int obi_uprobe_roundTripReturn(struct pt_regs *ctx) {
     http_request_trace_t *trace = bpf_ringbuf_reserve(&events, sizeof(http_request_trace_t), 0);
     if (!trace) {
         bpf_dbg_printk("can't reserve space in the ringbuffer");
+        ringbuf_stats_discard(EVENT_HTTP_CLIENT);
         goto done;
     }
 

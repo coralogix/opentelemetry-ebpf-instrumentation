@@ -271,6 +271,7 @@ static __always_inline void finish_http(http_info_t *info, pid_connection_info_t
             bpf_ringbuf_submit(trace, get_flags());
         } else {
             bpf_dbg_printk("failed to reserve space in the ringbuf");
+            ringbuf_stats_discard(EVENT_K_HTTP_REQUEST);
         }
 
         // bpf_dbg_printk("Terminating trace for pid=%d", pid_from_pid_tgid(pid_tid));

@@ -118,7 +118,9 @@ static __always_inline void finish_ongoing_tcp_req(pid_connection_info_t *pid_co
         existing_tcp->resp_len = 0;
 
         bpf_dbg_printk("Sending pending TCP trace on close: len=%d", existing_tcp->len);
-        bpf_ringbuf_output(&events, existing_tcp, sizeof(*existing_tcp), get_flags());
+        if (bpf_ringbuf_output(&events, existing_tcp, sizeof(*existing_tcp), get_flags()) != 0) {
+            ringbuf_stats_discard(EVENT_TCP_REQUEST);
+        }
     }
 
     cleanup_trace_info(existing_tcp, pid_conn);
@@ -176,6 +178,8 @@ failed_to_connect_event(pid_connection_info_t *pid_conn, u16 orig_dport, u64 con
 
         tcp_get_or_set_trace_info(req, pid_conn, 0, orig_dport);
         bpf_ringbuf_submit(req, get_flags());
+    } else {
+        ringbuf_stats_discard(EVENT_FAILED_CONNECT);
     }
 }
 
@@ -294,6 +298,7 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
                 bpf_ringbuf_submit(trace, get_flags());
             } else {
                 bpf_dbg_printk("failed to reserve space on the ringbuf");
+                ringbuf_stats_discard(EVENT_TCP_REQUEST);
             }
             cleanup_trace_info(existing, pid_conn);
         }
