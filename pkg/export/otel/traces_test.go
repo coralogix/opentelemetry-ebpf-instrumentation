@@ -18,6 +18,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/otel/attribute"
@@ -2232,6 +2233,108 @@ func generateTracesForSpans(t *testing.T, tr *tracesOTELReceiver, spans []reques
 	}
 
 	return res
+}
+
+// TestGetQueueConfig_QueueSizeAtLeastBatchMaxSize is a regression test for the
+// "element size too large" bug.
+//
+// Before the fix, getQueueConfig set queueConfig.Sizer = RequestSizerTypeItems
+// without ever assigning queueConfig.QueueSize, so the sending queue stayed at
+// the OTel default of 1000 items while batchCfg.MaxSize was set to the user's
+// MaxQueueSize. When MaxQueueSize > 1000 every batch produced by the batcher
+// exceeded the queue capacity, and the OTel exporter helper rejected each one
+// with errSizeTooLarge -> permanent span loss.
+//
+// This test verifies the invariant that, for any non-pathological config, the
+// resolved queueConfig.QueueSize is always >= batchCfg.MaxSize, so a full
+// batch can always fit in the queue.
+func TestGetQueueConfig_QueueSizeAtLeastBatchMaxSize(t *testing.T) {
+	cases := []struct {
+		name         string
+		cfg          otelcfg.TracesConfig
+		wantBatchMax int64
+		wantQueueMin int64 // QueueSize must be >= this
+	}{
+		{
+			name: "default OBI config (4096 batch) — the original bug repro",
+			cfg: otelcfg.TracesConfig{
+				BatchMaxSize: 4096,
+				BatchTimeout: 15 * time.Second,
+			},
+			wantBatchMax: 4096,
+			wantQueueMin: 4096, // pre-fix this was 1000 → element size too large
+		},
+		{
+			name: "explicit queue_size override is respected",
+			cfg: otelcfg.TracesConfig{
+				BatchMaxSize: 1000,
+				QueueSize:    16384,
+				BatchTimeout: 1 * time.Second,
+			},
+			wantBatchMax: 1000,
+			wantQueueMin: 16384,
+		},
+		{
+			name: "deprecated max_queue_size YAML key is honored",
+			cfg: otelcfg.TracesConfig{
+				DeprecatedMaxQueueSize: 2048,
+				BatchTimeout:           1 * time.Second,
+			},
+			wantBatchMax: 2048,
+			wantQueueMin: 2048,
+		},
+		{
+			name: "small batch (under OTel default) still safe",
+			cfg: otelcfg.TracesConfig{
+				BatchMaxSize: 100,
+				BatchTimeout: 1 * time.Second,
+			},
+			wantBatchMax: 100,
+			wantQueueMin: 200,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opt := getQueueConfig(tc.cfg)
+			require.True(t, opt.HasValue(), "queue config should be enabled")
+			qc := opt.Get()
+
+			require.True(t, qc.Batch.HasValue(), "batch config should be set")
+			batch := qc.Batch.Get()
+
+			assert.Equal(t, tc.wantBatchMax, batch.MaxSize, "batch MaxSize")
+			assert.GreaterOrEqual(t, qc.QueueSize, tc.wantQueueMin,
+				"queue capacity must be >= expected minimum")
+
+			// The core invariant: a full batch must always fit in the queue.
+			// If this fails, the OTel memory queue will reject every batch
+			// with errSizeTooLarge and drop spans permanently.
+			assert.GreaterOrEqual(t, qc.QueueSize, batch.MaxSize,
+				"queue.QueueSize (%d) must be >= batch.MaxSize (%d) "+
+					"to avoid 'element size too large' permanent drops",
+				qc.QueueSize, batch.MaxSize)
+
+			// Sanity: the sizer must be Items, otherwise the units of
+			// QueueSize and MaxSize don't match and the comparison above
+			// is meaningless.
+			assert.Equal(t, exporterhelper.RequestSizerTypeItems, qc.Sizer,
+				"sizer must be items so QueueSize and MaxSize share the same unit")
+		})
+	}
+}
+
+// TestNormalizeQueueConfig_RejectsInvalidExplicitConfig verifies that a user
+// who explicitly sets queue_size < batch_max_size gets a clear error instead
+// of silently dropping every batch at runtime.
+func TestNormalizeQueueConfig_RejectsInvalidExplicitConfig(t *testing.T) {
+	cfg := otelcfg.TracesConfig{
+		BatchMaxSize: 4096,
+		QueueSize:    100, // user mistake: smaller than batch
+	}
+	err := cfg.NormalizeQueueConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "element size too large")
 }
 
 type TestExporter struct {
