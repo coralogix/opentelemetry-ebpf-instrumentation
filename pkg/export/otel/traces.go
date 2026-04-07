@@ -300,37 +300,35 @@ func getTracesExporter(ctx context.Context, cfg otelcfg.TracesConfig, im imetric
 }
 
 func getQueueConfig(cfg otelcfg.TracesConfig) configoptional.Optional[exporterhelper.QueueBatchConfig] {
+	// Resolve deprecated alias and defaults. Errors here are logged and the
+	// caller proceeds with whatever the normalizer left in place; startup
+	// validation in provideLoop is the place to hard-fail.
+	if err := cfg.NormalizeQueueConfig(); err != nil {
+		slog.Error("invalid traces queue configuration", "error", err)
+	}
 	// enable batching only if the queue config is enabled
-	if cfg.MaxQueueSize <= 0 && cfg.BatchTimeout <= 0 {
+	if cfg.BatchMaxSize <= 0 && cfg.BatchTimeout <= 0 {
 		return configoptional.None[exporterhelper.QueueBatchConfig]()
 	}
 	queueConfig := exporterhelper.NewDefaultQueueConfig()
 	queueConfig.Sizer = exporterhelper.RequestSizerTypeItems
 	// Avoid continuously seeing "sending queue is full" errors in the standard output
 	queueConfig.BlockOnOverflow = true
+	if cfg.QueueSize > 0 {
+		queueConfig.QueueSize = int64(cfg.QueueSize)
+	}
 	batchCfg := exporterhelper.BatchConfig{
 		Sizer: queueConfig.Sizer,
 	}
 	batchSet := false
-	if cfg.MaxQueueSize > 0 {
+	if cfg.BatchMaxSize > 0 {
 		batchSet = true
-		batchCfg.MaxSize = int64(cfg.MaxQueueSize)
-		// The queue capacity must be >= the batch max size, otherwise the
-		// memory queue rejects every batch with "element size too large" and
-		// drops spans permanently.
-		// The minimum safe multiplier is 2 (one batch being assembled + one
-		// batch waiting to be sent). We use 4 to leave headroom for transient
-		// export latency spikes so the queue does not immediately back-pressure
-		// the eBPF reader on a brief collector slowdown. The exact value is a
-		// tuning choice, not a correctness requirement.
-		if minQueue := int64(cfg.MaxQueueSize) * 4; queueConfig.QueueSize < minQueue {
-			queueConfig.QueueSize = minQueue
-		}
+		batchCfg.MaxSize = int64(cfg.BatchMaxSize)
 	}
 	if cfg.BatchTimeout > 0 {
 		batchSet = true
 		batchCfg.FlushTimeout = cfg.BatchTimeout
-		batchCfg.MinSize = int64(cfg.MaxQueueSize)
+		batchCfg.MinSize = int64(cfg.BatchMaxSize)
 	}
 	if batchSet {
 		queueConfig.Batch = configoptional.Some(batchCfg)

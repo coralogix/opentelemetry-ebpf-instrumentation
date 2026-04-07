@@ -40,7 +40,26 @@ type TracesConfig struct {
 
 	// Configuration options below this line will remain undocumented at the moment,
 	// but can be useful for performance-tuning of some customers.
-	MaxQueueSize int           `yaml:"max_queue_size" env:"OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE"`
+
+	// BatchMaxSize is the maximum number of spans that the batcher will accumulate
+	// before flushing a batch to the sending queue.
+	// It also accepts OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE for backwards compatibility:
+	// that env var was historically the batch max size despite its misleading name.
+	BatchMaxSize int `yaml:"batch_max_size" env:"OTEL_EBPF_OTLP_TRACES_BATCH_MAX_SIZE,expand" envDefault:"${OTEL_EBPF_OTLP_TRACES_MAX_QUEUE_SIZE}"`
+
+	// DeprecatedMaxQueueSize accepts the legacy `max_queue_size` YAML key for
+	// backwards compatibility. It is copied into BatchMaxSize by
+	// NormalizeQueueConfig with a deprecation warning. Do not read this field
+	// directly; use BatchMaxSize. The env var equivalent is handled
+	// transparently via the envDefault expansion on BatchMaxSize above.
+	DeprecatedMaxQueueSize int `yaml:"max_queue_size" env:"-"`
+
+	// QueueSize is the maximum number of spans that the sending queue will hold
+	// before applying back-pressure. It must be >= BatchMaxSize, otherwise the
+	// memory queue rejects every batch with "element size too large" and drops
+	// spans permanently. If left at 0 it defaults to 2 * BatchMaxSize.
+	QueueSize int `yaml:"queue_size" env:"OTEL_EBPF_OTLP_TRACES_QUEUE_SIZE"`
+
 	BatchTimeout time.Duration `yaml:"batch_timeout" env:"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT"`
 
 	// Configuration options for BackOffConfig of the traces exporter.
@@ -71,6 +90,29 @@ func (m TracesConfig) MarshalYAML() (any, error) {
 		"endpoint": {},
 	}
 	return omitFieldsForYAML(m, omit), nil
+}
+
+// NormalizeQueueConfig applies the default QueueSize and validates that
+// QueueSize >= BatchMaxSize. It returns an error if the user explicitly set
+// an invalid combination.
+func (m *TracesConfig) NormalizeQueueConfig() error {
+	if m.BatchMaxSize == 0 && m.DeprecatedMaxQueueSize > 0 {
+		tlog().Warn("traces.max_queue_size is deprecated, use traces.batch_max_size instead",
+			"value", m.DeprecatedMaxQueueSize)
+		m.BatchMaxSize = m.DeprecatedMaxQueueSize
+	}
+	if m.QueueSize == 0 && m.BatchMaxSize > 0 {
+		// Default to 2x batch size: enough to hold one batch being assembled
+		// plus one batch waiting to be sent. Users can override for more
+		// headroom against export latency spikes.
+		m.QueueSize = 2 * m.BatchMaxSize
+	}
+	if m.BatchMaxSize > 0 && m.QueueSize < m.BatchMaxSize {
+		return fmt.Errorf("traces.queue_size (%d) must be >= traces.batch_max_size (%d): "+
+			"otherwise the sending queue rejects every batch with \"element size too large\"",
+			m.QueueSize, m.BatchMaxSize)
+	}
+	return nil
 }
 
 // Enabled specifies that the OTEL traces node is enabled if and only if
