@@ -95,6 +95,8 @@ func (m *TracesConfig) NormalizeQueueConfig() error {
 		// transient latency spikes, ensuring brief collector slowdowns don't immediately
 		// back-pressure the eBPF reader.
 		m.QueueSize = 4 * m.BatchMaxSize
+		tlog().Info("traces.queue_size not set, defaulting to 4 * batch_max_size",
+			"queue_size", m.QueueSize, "batch_max_size", m.BatchMaxSize)
 	}
 	if m.BatchMaxSize > 0 && m.QueueSize < m.BatchMaxSize {
 		return fmt.Errorf("traces.queue_size (%d) must be >= traces.batch_max_size (%d): "+
