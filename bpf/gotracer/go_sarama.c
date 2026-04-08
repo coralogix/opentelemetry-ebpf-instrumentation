@@ -161,6 +161,8 @@ int obi_uprobe_sarama_response_promise_handle(struct pt_regs *ctx) {
                     __builtin_memcpy(trace, req, sizeof(kafka_client_req_t));
                     task_pid(&trace->pid);
                     bpf_ringbuf_submit(trace, get_flags());
+                } else {
+                    ringbuf_stats_discard(EVENT_GO_KAFKA);
                 }
             }
             bpf_map_delete_elem(&kafka_requests, &k_key);

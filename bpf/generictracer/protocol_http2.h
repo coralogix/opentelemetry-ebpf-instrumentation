@@ -112,6 +112,8 @@ http2_grpc_end(http2_conn_stream_t *stream, http2_grpc_request_t *prev_info, voi
             bpf_probe_read(prev_info->ret_data, k_kprobes_http2_ret_buf_size, u_buf);
             __builtin_memcpy(trace, prev_info, sizeof(http2_grpc_request_t));
             bpf_ringbuf_submit(trace, get_flags());
+        } else {
+            ringbuf_stats_discard(EVENT_K_HTTP2_REQUEST);
         }
     }
 

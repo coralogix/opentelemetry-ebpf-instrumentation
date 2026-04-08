@@ -343,6 +343,7 @@ static __always_inline int process_sql_return(void *goroutine_addr, u8 error, u8
         bpf_ringbuf_submit(trace, get_flags());
     } else {
         bpf_dbg_printk("can't reserve space in the ringbuffer");
+        ringbuf_stats_discard(EVENT_SQL_CLIENT);
     }
     return 0;
 }

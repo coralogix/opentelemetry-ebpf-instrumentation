@@ -108,6 +108,9 @@ type Reporter interface {
 	// BPFPacketStats sets the counters of how many packets have been internally accounted vs how many packets
 	// have been ignored due to internal BPF map collisions
 	BPFPacketStats(count, ignored uint64)
+	// BPFRingbufDiscards reports the number of events discarded due to the ringbuffer being full,
+	// keyed by event type name
+	BPFRingbufDiscards(eventType string, discards uint64)
 }
 
 // NoopReporter is a metrics Reporter that just does nothing
@@ -131,3 +134,4 @@ func (n NoopReporter) BpfMapMaxEntries(_, _, _ string, _ int)          {}
 func (n NoopReporter) BpfInternalMetricsScrapeInterval() time.Duration { return 0 }
 func (n NoopReporter) InformerLag(_ float64)                           {}
 func (n NoopReporter) BPFPacketStats(_, _ uint64)                      {}
+func (n NoopReporter) BPFRingbufDiscards(_ string, _ uint64)           {}

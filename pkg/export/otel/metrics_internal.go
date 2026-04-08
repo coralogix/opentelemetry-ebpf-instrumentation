@@ -47,6 +47,9 @@ type InternalMetricsReporter struct {
 	totalIgnoredPackets   uint64
 	bpfPacketCount        instrument.Int64Counter
 	bpfIgnoredPacketCount instrument.Int64Counter
+
+	totalRingbufDiscards map[string]uint64
+	bpfRingbufDiscards   instrument.Int64Counter
 }
 
 func imlog() *slog.Logger {
@@ -195,6 +198,15 @@ func NewInternalMetricsReporter(ctx context.Context, ctxInfo *global.ContextInfo
 		return nil, err
 	}
 
+	bpfRingbufDiscards, err := meter.Int64Counter(
+		attr.VendorPrefix+".bpf.ringbuf.discards.total",
+		instrument.WithDescription("Total number of events discarded due to the eBPF ringbuffer being full"),
+		instrument.WithUnit("{event}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &InternalMetricsReporter{
 		ctx:                              ctx,
 		tracerFlushes:                    tracerFlushes,
@@ -213,6 +225,8 @@ func NewInternalMetricsReporter(ctx context.Context, ctxInfo *global.ContextInfo
 		informerLag:                      informerLag,
 		bpfPacketCount:                   bpfPacketCount,
 		bpfIgnoredPacketCount:            bpfIgnoredPacketCount,
+		bpfRingbufDiscards:               bpfRingbufDiscards,
+		totalRingbufDiscards:             make(map[string]uint64),
 	}, nil
 }
 
@@ -343,4 +357,14 @@ func (p *InternalMetricsReporter) BPFPacketStats(count, ignored uint64) {
 	p.bpfPacketCount.Add(p.ctx, int64(count-p.totalPackets))
 	p.bpfIgnoredPacketCount.Add(p.ctx, int64(ignored-p.totalIgnoredPackets))
 	p.totalPackets, p.totalIgnoredPackets = count, ignored
+}
+
+// BPFRingbufDiscards is only called from collectInternalMetrics' single-goroutine ticker loop.
+func (p *InternalMetricsReporter) BPFRingbufDiscards(eventType string, discards uint64) {
+	prev := p.totalRingbufDiscards[eventType]
+	if discards > prev {
+		p.bpfRingbufDiscards.Add(p.ctx, int64(discards-prev),
+			instrument.WithAttributes(attribute.String("event_type", eventType)))
+	}
+	p.totalRingbufDiscards[eventType] = discards
 }

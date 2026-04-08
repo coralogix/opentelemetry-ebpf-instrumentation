@@ -13,6 +13,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
 
+	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/export/connector"
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
 	"go.opentelemetry.io/obi/pkg/export/otel"
@@ -152,6 +153,10 @@ func (bc *BPFCollector) collectInternalMetrics(ctx context.Context) {
 				bc.ctxInfo.Metrics.BpfMapEntries(metric.mapID, metric.mapName, metric.mapType, int(metric.entries))
 				bc.ctxInfo.Metrics.BpfMapMaxEntries(metric.mapID, metric.mapName, metric.mapType, metric.maxEntries)
 			}
+
+			for eventType, count := range bc.getRingbufDiscards() {
+				bc.ctxInfo.Metrics.BPFRingbufDiscards(eventType, count)
+			}
 		}
 	}
 }
@@ -188,6 +193,10 @@ func (bc *BPFCollector) Collect(ch chan<- prometheus.Metric) {
 			metric.mapType,
 			strconv.FormatUint(uint64(metric.maxEntries), 10),
 		)
+	}
+
+	for eventType, count := range bc.getRingbufDiscards() {
+		bc.internalMetrics.BPFRingbufDiscards(eventType, count)
 	}
 }
 
@@ -275,6 +284,78 @@ func getFuncName(info *ebpf.ProgramInfo, id ebpf.ProgramID, log *slog.Logger) st
 		}
 	}
 	return info.Name
+}
+
+const ringbufStatsMapName = "ringbuf_stats"
+
+// ringbufEventTypeNames maps C-side EVENT_* constants to human-readable names.
+// Indices match the defines in bpf/common/event_defs.h.
+var ringbufEventTypeNames = [ebpfcommon.EventTypeCount]string{
+	0:                                  "unknown",
+	1:                                  "http_request",
+	2:                                  "grpc_request",
+	3:                                  "http_client",
+	4:                                  "grpc_client",
+	ebpfcommon.EventTypeSQL:            "sql_client",
+	ebpfcommon.EventTypeKHTTP:          "k_http_request",
+	ebpfcommon.EventTypeKHTTP2:         "k_http2_request",
+	ebpfcommon.EventTypeTCP:            "tcp_request",
+	ebpfcommon.EventTypeGoSarama:       "go_kafka",
+	ebpfcommon.EventTypeGoRedis:        "go_redis",
+	ebpfcommon.EventTypeGoKafkaGo:      "go_kafka_seg",
+	ebpfcommon.EventTypeTCPLargeBuffer: "tcp_large_buffer",
+	ebpfcommon.EventOTelSDKGo:          "go_span",
+	ebpfcommon.EventTypeGoMongo:        "go_mongo",
+	ebpfcommon.EventTypeFailedConnect:  "failed_connect",
+	ebpfcommon.EventTypeDNS:            "dns_request",
+}
+
+// getRingbufDiscards reads per-event-type discard counters from the BPF ringbuf_stats map.
+// It scans all BPF maps on the host and matches by name, so in theory a map from another
+// BPF program with the same name could collide. This matches the existing getMapMetrics pattern.
+func (bc *BPFCollector) getRingbufDiscards() map[string]uint64 {
+	for id := ebpf.MapID(0); ; {
+		nextID, err := ebpf.MapGetNextID(id)
+		if err != nil {
+			break
+		}
+		id = nextID
+
+		m, err := ebpf.NewMapFromID(id)
+		if err != nil {
+			continue
+		}
+
+		info, err := m.Info()
+		if err != nil {
+			m.Close()
+			continue
+		}
+
+		if info.Name != ringbufStatsMapName || info.Type != ebpf.PerCPUArray {
+			m.Close()
+			continue
+		}
+
+		result := make(map[string]uint64)
+		for i := uint32(0); i < ebpfcommon.EventTypeCount; i++ {
+			var perCPUValues []uint64
+			if err := m.Lookup(i, &perCPUValues); err != nil {
+				continue
+			}
+			var total uint64
+			for _, v := range perCPUValues {
+				total += v
+			}
+			if total > 0 {
+				name := ringbufEventTypeNames[i]
+				result[name] = total
+			}
+		}
+		m.Close()
+		return result
+	}
+	return nil
 }
 
 func (bc *BPFCollector) getMapMetrics() []BpfMapMetrics {

@@ -209,6 +209,8 @@ int obi_uprobe_protocol_roundtrip_ret(struct pt_regs *ctx) {
                 __builtin_memcpy(&trace->tp, &(topic_ptr->tp), sizeof(tp_info_t));
                 task_pid(&trace->pid);
                 bpf_ringbuf_submit(trace, get_flags());
+            } else {
+                ringbuf_stats_discard(EVENT_GO_KAFKA_SEG);
             }
         }
         bpf_map_delete_elem(&ongoing_produce_messages, &m_key);
@@ -305,6 +307,8 @@ int obi_uprobe_reader_read_ret(struct pt_regs *ctx) {
                 trace->end_monotime_ns = bpf_ktime_get_ns();
                 task_pid(&trace->pid);
                 bpf_ringbuf_submit(trace, get_flags());
+            } else {
+                ringbuf_stats_discard(EVENT_GO_KAFKA_SEG);
             }
         } else {
             bpf_dbg_printk("Found request with no start time, ignoring...");

@@ -72,6 +72,7 @@ const (
 	EventTypeGoMongo        = 14 // EVENT_GO_MONGO - Go MongoDB spans
 	EventTypeFailedConnect  = 15 // EVENT_FAILED_CONNECT - Failed Connections
 	EventTypeDNS            = 16 // EVENT_DNS_REQUEST - DNS events
+	EventTypeCount          = 17 // EVENT_TYPE_COUNT - must equal highest event type + 1
 )
 
 // Kernel-side classification

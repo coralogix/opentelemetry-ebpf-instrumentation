@@ -194,6 +194,8 @@ static __always_inline u8 handle_dns(struct __sk_buff *skb,
             read_skb_bytes(skb, dns_off, req->buf, len);
             bpf_d_printk("sending dns trace [%s]", __FUNCTION__);
             bpf_ringbuf_submit(req, get_flags());
+        } else {
+            ringbuf_stats_discard(EVENT_DNS_REQUEST);
         }
 
         return 1;
@@ -234,6 +236,8 @@ static __always_inline u8 handle_dns_buf(const unsigned char *buf,
             bpf_probe_read(req->buf, sizeof(req->buf), buf);
             bpf_d_printk("sending dns trace [%s]", __FUNCTION__);
             bpf_ringbuf_submit(req, get_flags());
+        } else {
+            ringbuf_stats_discard(EVENT_DNS_REQUEST);
         }
 
         return 1;

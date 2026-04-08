@@ -282,7 +282,9 @@ int obi_uprobe_nonRecordingSpan_End(struct pt_regs *ctx) {
         update_tp_parent_go(&gp_key, &span->prev_tp);
     }
 
-    bpf_ringbuf_output(&events, span, sizeof(otel_span_t), get_flags());
+    if (bpf_ringbuf_output(&events, span, sizeof(otel_span_t), get_flags()) != 0) {
+        ringbuf_stats_discard(EVENT_GO_SPAN);
+    }
     bpf_dbg_printk("submitted manual span trace");
 
     bpf_map_delete_elem(&active_spans, &s_key);

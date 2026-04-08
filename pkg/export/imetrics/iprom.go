@@ -6,6 +6,7 @@ package imetrics // import "go.opentelemetry.io/obi/pkg/export/imetrics"
 import (
 	"context"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -49,6 +50,10 @@ type PrometheusReporter struct {
 	totalIgnoredPackets   uint64
 	bpfPacketCount        prometheus.Counter
 	bpfIgnoredPacketCount prometheus.Counter
+
+	ringbufMu            sync.Mutex
+	totalRingbufDiscards map[string]uint64
+	bpfRingbufDiscards   *prometheus.CounterVec
 }
 
 func NewPrometheusReporter(cfg *InternalMetricsConfig, manager *connector.PrometheusManager, registry *prometheus.Registry) *PrometheusReporter {
@@ -137,6 +142,11 @@ func NewPrometheusReporter(cfg *InternalMetricsConfig, manager *connector.Promet
 			Name: attr.VendorPrefix + "_bpf_network_packets_total",
 			Help: "How many network packets have been internally accounted",
 		}),
+		totalRingbufDiscards: make(map[string]uint64),
+		bpfRingbufDiscards: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: attr.VendorPrefix + "_bpf_ringbuf_discards_total",
+			Help: "Total number of events discarded due to the eBPF ringbuffer being full",
+		}, []string{"event_type"}),
 	}
 	metrics := []prometheus.Collector{
 		pr.tracerFlushes,
@@ -155,6 +165,7 @@ func NewPrometheusReporter(cfg *InternalMetricsConfig, manager *connector.Promet
 		pr.informerLag,
 		pr.bpfPacketCount,
 		pr.bpfIgnoredPacketCount,
+		pr.bpfRingbufDiscards,
 	}
 	if registry != nil {
 		registry.MustRegister(metrics...)
@@ -244,4 +255,14 @@ func (p *PrometheusReporter) BPFPacketStats(count, ignored uint64) {
 	p.bpfPacketCount.Add(float64(count - p.totalPackets))
 	p.bpfIgnoredPacketCount.Add(float64(ignored - p.totalIgnoredPackets))
 	p.totalPackets, p.totalIgnoredPackets = count, ignored
+}
+
+func (p *PrometheusReporter) BPFRingbufDiscards(eventType string, discards uint64) {
+	p.ringbufMu.Lock()
+	defer p.ringbufMu.Unlock()
+	prev := p.totalRingbufDiscards[eventType]
+	if discards > prev {
+		p.bpfRingbufDiscards.WithLabelValues(eventType).Add(float64(discards - prev))
+	}
+	p.totalRingbufDiscards[eventType] = discards
 }
