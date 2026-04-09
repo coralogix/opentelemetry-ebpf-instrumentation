@@ -146,6 +146,12 @@ func (pt *ProcessTracer) makeOtelBPFFSPath() (string, error) {
 		return "", fmt.Errorf("creating bpffs otel path: %w", err)
 	}
 
+	// TEMP WORKAROUND
+	tracesCtxPin := path.Join(otelPath, "traces_ctx_v1")
+	if err := os.Remove(tracesCtxPin); err != nil && !os.IsNotExist(err) {
+		ptlog().Warn("failed to remove stale traces_ctx_v1 pin", "path", tracesCtxPin, "err", err)
+	}
+
 	return otelPath, nil
 }
 
