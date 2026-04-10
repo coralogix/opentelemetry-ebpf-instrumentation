@@ -20,3 +20,4 @@ This directory contains documentation that is not useful for our users but might
 - [Kubernetes Metadata Cache Service (`k8s-cache`)](k8s-cache.md): what the standalone metadata cache service is, why it exists, and how to deploy it alongside OBI.
 - [Metrics](./metrics.md): how the NetO11y, AppO11y, and StatsO11y pipelines turn eBPF events into exported metrics, and where to edit when adding a new one.
 - [Runtime Metrics](runtimes/README.md): developer notes for the `application_runtime` feature and per-runtime coverage.
+- [Pushing internal images](internal-image-push.md): building and pushing multi-arch OBI images to the internal JFrog and ECR registries from any git ref.
