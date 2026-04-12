@@ -1,0 +1,28 @@
+otel_traces_export:
+  endpoint: http://jaeger:4318
+attributes:
+  select:
+    "*":
+      include: ["*"]
+ebpf:
+  payload_extraction:
+    grpc:
+      enrichment:
+        enabled: true
+        policy:
+          default_action:
+            metadata: exclude
+          obfuscation_string: "***"
+        rules:
+          - action: obfuscate
+            scope: all
+            match:
+              patterns:
+                - "x-session-*"
+              case_sensitive: false
+          - action: include
+            scope: all
+            match:
+              patterns:
+                - "x-custom-*"
+              case_sensitive: false
