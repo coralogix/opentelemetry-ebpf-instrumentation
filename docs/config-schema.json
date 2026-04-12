@@ -574,6 +574,104 @@
       "type": "array",
       "description": "List of metric features to enable."
     },
+    "GRPCConfig": {
+      "properties": {
+        "enrichment": {
+          "$ref": "#/$defs/GRPCEnrichmentConfig",
+          "description": "Enrichment configures gRPC metadata extraction with policy-based rules"
+        }
+      },
+      "type": "object",
+      "description": "GRPCConfig holds gRPC-specific payload extraction settings."
+    },
+    "GRPCEnrichmentConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable gRPC metadata enrichment",
+          "x-env-var": "OTEL_EBPF_GRPC_ENRICHMENT_ENABLED"
+        },
+        "policy": {
+          "$ref": "#/$defs/GRPCParsingPolicy",
+          "description": "Policy controls the default behavior"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/GRPCParsingRule"
+          },
+          "type": "array",
+          "description": "Rules is an ordered list of include/exclude/obfuscate rules."
+        }
+      },
+      "type": "object",
+      "description": "GRPCEnrichmentConfig configures gRPC metadata extraction with policy-based rules."
+    },
+    "GRPCParsingDefaultAction": {
+      "properties": {
+        "metadata": {
+          "$ref": "#/$defs/HTTPParsingAction"
+        }
+      },
+      "type": "object",
+      "description": "GRPCParsingDefaultAction specifies the default action for gRPC metadata."
+    },
+    "GRPCParsingMatch": {
+      "properties": {
+        "case_sensitive": {
+          "type": "boolean",
+          "description": "CaseSensitive controls whether metadata key matching is case-sensitive"
+        },
+        "patterns": {
+          "items": {
+            "$ref": "#/$defs/GlobAttr"
+          },
+          "type": "array",
+          "description": "Patterns is a list of glob patterns to match metadata key names against"
+        },
+        "rpc_method_patterns": {
+          "items": {
+            "$ref": "#/$defs/GlobAttr"
+          },
+          "type": "array",
+          "description": "RPCMethodPatterns is a list of glob patterns to match the RPC method path against Example: [\"/mypackage.MyService/*\", \"/routeguide.RouteGuide/GetFeature\"]"
+        }
+      },
+      "type": "object",
+      "description": "GRPCParsingMatch defines matching criteria for a gRPC metadata parsing rule."
+    },
+    "GRPCParsingPolicy": {
+      "properties": {
+        "default_action": {
+          "$ref": "#/$defs/GRPCParsingDefaultAction",
+          "description": "DefaultAction specifies what to do when no rule matches."
+        },
+        "obfuscation_string": {
+          "type": "string",
+          "description": "ObfuscationString is the replacement string used when a rule's action is \"obfuscate\"",
+          "x-env-var": "OTEL_EBPF_GRPC_ENRICHMENT_OBFUSCATION_STRING"
+        }
+      },
+      "type": "object",
+      "description": "GRPCParsingPolicy defines the default action for gRPC metadata enrichment rules."
+    },
+    "GRPCParsingRule": {
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/HTTPParsingAction",
+          "description": "Action of the rule: \"include\", \"exclude\", or \"obfuscate\""
+        },
+        "match": {
+          "$ref": "#/$defs/GRPCParsingMatch",
+          "description": "Match defines the matching criteria for this rule"
+        },
+        "scope": {
+          "$ref": "#/$defs/HTTPParsingScope",
+          "description": "Scope of the rule: \"request\", \"response\", or \"all\""
+        }
+      },
+      "type": "object",
+      "description": "GRPCParsingRule defines a single include/exclude/obfuscate rule for gRPC metadata extraction."
+    },
     "GenAIConfig": {
       "properties": {
         "anthropic": {
@@ -1593,6 +1691,9 @@
     },
     "PayloadExtraction": {
       "properties": {
+        "grpc": {
+          "$ref": "#/$defs/GRPCConfig"
+        },
         "http": {
           "$ref": "#/$defs/HTTPConfig"
         }

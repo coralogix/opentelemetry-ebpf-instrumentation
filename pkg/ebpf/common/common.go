@@ -194,6 +194,7 @@ type EBPFParseContext struct {
 	kafkaTopicUUIDToName       *simplelru.LRU[kafkaparser.UUID, string]
 	payloadExtraction          config.PayloadExtraction
 	httpEnricher               *ebpfhttp.HTTPEnricher
+	grpcEnricher               *GRPCMetadataEnricher
 	dnsEvents                  *expirable.LRU[dnsparser.DNSId, *request.Span]
 	emitSpans                  func([]request.Span)
 }
@@ -299,6 +300,11 @@ func NewEBPFParseContext(cfg *config.EBPFTracer, spansChan *msg.Queue[[]request.
 		httpEnricher = ebpfhttp.NewHTTPEnricher(payloadExtraction.HTTP.Enrichment)
 	}
 
+	var grpcEnricher *GRPCMetadataEnricher
+	if payloadExtraction.GRPC.Enrichment.Enabled {
+		grpcEnricher = NewGRPCMetadataEnricher(payloadExtraction.GRPC.Enrichment)
+	}
+
 	return &EBPFParseContext{
 		protocolDebug:              protocolDebug,
 		h2c:                        h2c,
@@ -312,6 +318,7 @@ func NewEBPFParseContext(cfg *config.EBPFTracer, spansChan *msg.Queue[[]request.
 		kafkaTopicUUIDToName:       kafkaTopicUUIDToName,
 		payloadExtraction:          payloadExtraction,
 		httpEnricher:               httpEnricher,
+		grpcEnricher:               grpcEnricher,
 		dnsEvents:                  dnsEvents,
 		emitSpans:                  emitSpans,
 	}

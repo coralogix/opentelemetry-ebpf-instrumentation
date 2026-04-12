@@ -225,3 +225,69 @@ func TestEnrichmentConfig_Validate_EmptyRules(t *testing.T) {
 	cfg := EnrichmentConfig{}
 	assert.NoError(t, cfg.Validate())
 }
+
+func TestGRPCEnrichmentConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		rules   []GRPCParsingRule
+		wantErr string
+	}{
+		{
+			name: "valid rule with patterns",
+			rules: []GRPCParsingRule{
+				{
+					Action: HTTPParsingActionInclude,
+					Scope:  HTTPParsingScopeAll,
+					Match: GRPCParsingMatch{
+						Patterns: []services.GlobAttr{services.NewGlob("x-custom-*")},
+					},
+				},
+			},
+		},
+		{
+			name: "rule without patterns",
+			rules: []GRPCParsingRule{
+				{
+					Action: HTTPParsingActionInclude,
+					Scope:  HTTPParsingScopeAll,
+					Match:  GRPCParsingMatch{},
+				},
+			},
+			wantErr: "rule 0: gRPC metadata rules require at least one pattern",
+		},
+		{
+			name: "second rule invalid",
+			rules: []GRPCParsingRule{
+				{
+					Action: HTTPParsingActionInclude,
+					Scope:  HTTPParsingScopeAll,
+					Match: GRPCParsingMatch{
+						Patterns: []services.GlobAttr{services.NewGlob("authorization")},
+					},
+				},
+				{
+					Action: HTTPParsingActionObfuscate,
+					Scope:  HTTPParsingScopeRequest,
+					Match:  GRPCParsingMatch{},
+				},
+			},
+			wantErr: "rule 1: gRPC metadata rules require at least one pattern",
+		},
+		{
+			name:  "empty rules",
+			rules: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := GRPCEnrichmentConfig{Rules: tt.rules}
+			err := cfg.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}

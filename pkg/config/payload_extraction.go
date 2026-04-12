@@ -16,6 +16,7 @@ import (
 
 type PayloadExtraction struct {
 	HTTP HTTPConfig `yaml:"http"`
+	GRPC GRPCConfig `yaml:"grpc"`
 }
 
 func (p PayloadExtraction) Enabled() bool {
@@ -24,7 +25,8 @@ func (p PayloadExtraction) Enabled() bool {
 		p.HTTP.AWS.Enabled ||
 		p.HTTP.SQLPP.Enabled ||
 		p.HTTP.GenAI.Enabled() ||
-		p.HTTP.Enrichment.Enabled
+		p.HTTP.Enrichment.Enabled ||
+		p.GRPC.Enrichment.Enabled
 }
 
 type HTTPConfig struct {
@@ -397,6 +399,98 @@ func (HTTPParsingScope) JSONSchema() *jsonschema.Schema {
 		Type: "string",
 		Enum: []any{"request", "response", "all"},
 	}
+}
+
+// GRPCConfig holds gRPC-specific payload extraction settings.
+type GRPCConfig struct {
+	// Enrichment configures gRPC metadata extraction with policy-based rules
+	Enrichment GRPCEnrichmentConfig `yaml:"enrichment"`
+}
+
+// GRPCEnrichmentConfig configures gRPC metadata extraction with policy-based rules.
+type GRPCEnrichmentConfig struct {
+	// Enable gRPC metadata enrichment
+	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_GRPC_ENRICHMENT_ENABLED" validate:"boolean"`
+	// Policy controls the default behavior
+	Policy GRPCParsingPolicy `yaml:"policy"`
+	// Rules is an ordered list of include/exclude/obfuscate rules.
+	Rules []GRPCParsingRule `yaml:"rules"`
+}
+
+// Validate checks the gRPC enrichment config for cross-field consistency errors.
+func (c GRPCEnrichmentConfig) Validate() error {
+	for i, rule := range c.Rules {
+		if len(rule.Match.Patterns) == 0 {
+			return fmt.Errorf("rule %d: gRPC metadata rules require at least one pattern", i)
+		}
+	}
+	return nil
+}
+
+// GRPCParsingPolicy defines the default action for gRPC metadata enrichment rules.
+type GRPCParsingPolicy struct {
+	// DefaultAction specifies what to do when no rule matches.
+	DefaultAction GRPCParsingDefaultAction `yaml:"default_action"`
+	// ObfuscationString is the replacement string used when a rule's action is "obfuscate"
+	ObfuscationString string `yaml:"obfuscation_string" env:"OTEL_EBPF_GRPC_ENRICHMENT_OBFUSCATION_STRING"`
+}
+
+// GRPCParsingDefaultAction specifies the default action for gRPC metadata.
+type GRPCParsingDefaultAction struct {
+	Metadata HTTPParsingAction `yaml:"metadata" validate:"required"`
+}
+
+// GRPCParsingRule defines a single include/exclude/obfuscate rule for gRPC metadata extraction.
+type GRPCParsingRule struct {
+	// Action of the rule: "include", "exclude", or "obfuscate"
+	Action HTTPParsingAction `yaml:"action" validate:"required"`
+	// Scope of the rule: "request", "response", or "all"
+	Scope HTTPParsingScope `yaml:"scope" validate:"required"`
+	// Match defines the matching criteria for this rule
+	Match GRPCParsingMatch `yaml:"match"`
+}
+
+// GRPCParsingMatch defines matching criteria for a gRPC metadata parsing rule.
+type GRPCParsingMatch struct {
+	// Patterns is a list of glob patterns to match metadata key names against
+	Patterns []services.GlobAttr `yaml:"patterns"`
+	// CaseSensitive controls whether metadata key matching is case-sensitive
+	CaseSensitive bool `yaml:"case_sensitive"`
+	// RPCMethodPatterns is a list of glob patterns to match the RPC method path against
+	// Example: ["/mypackage.MyService/*", "/routeguide.RouteGuide/GetFeature"]
+	RPCMethodPatterns []services.GlobAttr `yaml:"rpc_method_patterns"`
+}
+
+// UnmarshalYAML deserializes the gRPC match config and compiles glob patterns.
+func (m *GRPCParsingMatch) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Patterns          []string `yaml:"patterns"`
+		CaseSensitive     bool     `yaml:"case_sensitive"`
+		RPCMethodPatterns []string `yaml:"rpc_method_patterns"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	m.CaseSensitive = raw.CaseSensitive
+
+	// Compile metadata key patterns
+	m.Patterns = make([]services.GlobAttr, 0, len(raw.Patterns))
+	for _, pattern := range raw.Patterns {
+		compilePattern := pattern
+		if !m.CaseSensitive {
+			compilePattern = strings.ToLower(pattern)
+		}
+		m.Patterns = append(m.Patterns, services.NewGlob(compilePattern))
+	}
+
+	// Compile RPC method patterns
+	m.RPCMethodPatterns = make([]services.GlobAttr, 0, len(raw.RPCMethodPatterns))
+	for _, pattern := range raw.RPCMethodPatterns {
+		m.RPCMethodPatterns = append(m.RPCMethodPatterns, services.NewGlob(pattern))
+	}
+
+	return nil
 }
 
 // HTTPMethod represents a validated HTTP method.
