@@ -146,6 +146,11 @@ var DefaultConfig = Config{
 		CouchbaseDBCacheSize:                1024,
 		OverrideBPFLoopEnabled:              false,
 		PayloadExtraction: config.PayloadExtraction{
+			GRPC: config.GRPCConfig{
+				Enrichment: config.GRPCEnrichmentConfig{
+					Enabled: false,
+				},
+			},
 			HTTP: config.HTTPConfig{
 				GraphQL: config.GraphQLConfig{
 					Enabled: false,
