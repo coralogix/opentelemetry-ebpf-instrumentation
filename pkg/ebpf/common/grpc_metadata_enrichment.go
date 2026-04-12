@@ -16,7 +16,7 @@ import (
 // first-match-wins semantics.
 type GRPCMetadataEnricher struct {
 	rules             []config.GRPCParsingRule
-	defaultAction     config.HTTPParsingAction
+	defaultAction     config.ParsingAction
 	obfuscationString string
 }
 
@@ -36,8 +36,8 @@ func (e *GRPCMetadataEnricher) Enrich(
 	requestMetadata map[string][]string,
 	responseMetadata map[string][]string,
 ) bool {
-	reqMD := e.processMetadata(requestMetadata, config.HTTPParsingScopeRequest, span)
-	respMD := e.processMetadata(responseMetadata, config.HTTPParsingScopeResponse, span)
+	reqMD := e.processMetadata(requestMetadata, config.ParsingScopeRequest, span)
+	respMD := e.processMetadata(responseMetadata, config.ParsingScopeResponse, span)
 
 	hasContent := len(reqMD) > 0 || len(respMD) > 0
 	if !hasContent {
@@ -57,13 +57,13 @@ func (e *GRPCMetadataEnricher) Enrich(
 // filtered map. The map is allocated lazily.
 func (e *GRPCMetadataEnricher) processMetadata(
 	metadata map[string][]string,
-	scope config.HTTPParsingScope,
+	scope config.ParsingScope,
 	span *request.Span,
 ) map[string][]string {
 	var result map[string][]string
 	for name, values := range metadata {
 		action := e.resolveMetadataAction(name, scope, span)
-		if action == config.HTTPParsingActionExclude {
+		if action == config.ParsingActionExclude {
 			continue
 		}
 		if result == nil {
@@ -78,9 +78,9 @@ func (e *GRPCMetadataEnricher) processMetadata(
 // by evaluating rules in order (first match wins).
 func (e *GRPCMetadataEnricher) resolveMetadataAction(
 	metadataKey string,
-	scope config.HTTPParsingScope,
+	scope config.ParsingScope,
 	span *request.Span,
-) config.HTTPParsingAction {
+) config.ParsingAction {
 	var lowerName string
 
 	for _, rule := range e.rules {
@@ -104,14 +104,14 @@ func (e *GRPCMetadataEnricher) resolveMetadataAction(
 }
 
 // grpcRuleApplies returns true if the rule's scope and RPC method patterns match.
-func grpcRuleApplies(rule config.GRPCParsingRule, scope config.HTTPParsingScope, span *request.Span) bool {
+func grpcRuleApplies(rule config.GRPCParsingRule, scope config.ParsingScope, span *request.Span) bool {
 	return grpcScopeApplies(rule.Scope, scope) &&
 		rpcMethodMatches(rule.Match.RPCMethodPatterns, span.Path)
 }
 
 // grpcScopeApplies returns true if the rule scope covers the given metadata source.
-func grpcScopeApplies(ruleScope config.HTTPParsingScope, metadataSource config.HTTPParsingScope) bool {
-	return ruleScope == config.HTTPParsingScopeAll || ruleScope == metadataSource
+func grpcScopeApplies(ruleScope config.ParsingScope, metadataSource config.ParsingScope) bool {
+	return ruleScope == config.ParsingScopeAll || ruleScope == metadataSource
 }
 
 // rpcMethodMatches returns true if the RPC method path matches any of the patterns.
@@ -130,18 +130,18 @@ func rpcMethodMatches(patterns []services.GlobAttr, rpcMethod string) bool {
 
 // grpcApplyMetadataAction adds the metadata entry to the map based on the resolved action.
 func grpcApplyMetadataAction(
-	action config.HTTPParsingAction,
+	action config.ParsingAction,
 	name string,
 	values []string,
 	metadata map[string][]string,
 	obfuscationString string,
 ) {
 	switch action {
-	case config.HTTPParsingActionInclude:
+	case config.ParsingActionInclude:
 		metadata[name] = append(metadata[name], values...)
-	case config.HTTPParsingActionObfuscate:
+	case config.ParsingActionObfuscate:
 		metadata[name] = []string{obfuscationString}
-	case config.HTTPParsingActionExclude:
+	case config.ParsingActionExclude:
 		// do nothing
 	}
 }

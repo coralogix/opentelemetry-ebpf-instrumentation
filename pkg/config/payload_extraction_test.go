@@ -14,17 +14,17 @@ import (
 func TestEnrichmentConfig_Validate_HeaderRules(t *testing.T) {
 	tests := []struct {
 		name    string
-		rules   []HTTPParsingRule
+		rules   []ParsingRule
 		wantErr string
 	}{
 		{
 			name: "valid header rule",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeHeaders,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeHeaders,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						Patterns: []services.GlobAttr{services.NewGlob("Content-Type")},
 					},
 				},
@@ -32,24 +32,24 @@ func TestEnrichmentConfig_Validate_HeaderRules(t *testing.T) {
 		},
 		{
 			name: "header rule without patterns",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeHeaders,
-					Scope:  HTTPParsingScopeAll,
-					Match:  HTTPParsingMatch{},
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeHeaders,
+					Scope:  ParsingScopeAll,
+					Match:  ParsingMatch{},
 				},
 			},
 			wantErr: "rule 0: header rules require at least one pattern",
 		},
 		{
 			name: "header rule with obfuscation_json_paths",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionObfuscate,
-					Type:   HTTPParsingRuleTypeHeaders,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionObfuscate,
+					Type:   ParsingRuleTypeHeaders,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						Patterns:             []services.GlobAttr{services.NewGlob("Authorization")},
 						ObfuscationJSONPaths: []JSONPathExpr{{str: "$.password"}},
 					},
@@ -77,28 +77,28 @@ func TestEnrichmentConfig_Validate_BodyRules(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		rules   []HTTPParsingRule
+		rules   []ParsingRule
 		wantErr string
 	}{
 		{
 			name: "valid body include rule",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeRequest,
-					Match:  HTTPParsingMatch{},
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeRequest,
+					Match:  ParsingMatch{},
 				},
 			},
 		},
 		{
 			name: "valid body obfuscate rule",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionObfuscate,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionObfuscate,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						ObfuscationJSONPaths: []JSONPathExpr{jsonPath},
 					},
 				},
@@ -106,12 +106,12 @@ func TestEnrichmentConfig_Validate_BodyRules(t *testing.T) {
 		},
 		{
 			name: "body rule with patterns",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						Patterns: []services.GlobAttr{services.NewGlob("Content-Type")},
 					},
 				},
@@ -120,12 +120,12 @@ func TestEnrichmentConfig_Validate_BodyRules(t *testing.T) {
 		},
 		{
 			name: "body rule with case_sensitive",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						CaseSensitive: true,
 					},
 				},
@@ -134,24 +134,24 @@ func TestEnrichmentConfig_Validate_BodyRules(t *testing.T) {
 		},
 		{
 			name: "body obfuscate without json paths",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionObfuscate,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeAll,
-					Match:  HTTPParsingMatch{},
+					Action: ParsingActionObfuscate,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeAll,
+					Match:  ParsingMatch{},
 				},
 			},
 			wantErr: "rule 0: action \"obfuscate\" on body rule requires obfuscation_json_paths",
 		},
 		{
 			name: "body include with json paths",
-			rules: []HTTPParsingRule{
+			rules: []ParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Type:   HTTPParsingRuleTypeBody,
-					Scope:  HTTPParsingScopeAll,
-					Match: HTTPParsingMatch{
+					Action: ParsingActionInclude,
+					Type:   ParsingRuleTypeBody,
+					Scope:  ParsingScopeAll,
+					Match: ParsingMatch{
 						ObfuscationJSONPaths: []JSONPathExpr{jsonPath},
 					},
 				},
@@ -177,20 +177,20 @@ func TestEnrichmentConfig_Validate_MultipleRules(t *testing.T) {
 	jsonPath, _ := NewJSONPathExpr("$.secret")
 
 	cfg := EnrichmentConfig{
-		Rules: []HTTPParsingRule{
+		Rules: []ParsingRule{
 			{
-				Action: HTTPParsingActionInclude,
-				Type:   HTTPParsingRuleTypeHeaders,
-				Scope:  HTTPParsingScopeAll,
-				Match: HTTPParsingMatch{
+				Action: ParsingActionInclude,
+				Type:   ParsingRuleTypeHeaders,
+				Scope:  ParsingScopeAll,
+				Match: ParsingMatch{
 					Patterns: []services.GlobAttr{services.NewGlob("Content-Type")},
 				},
 			},
 			{
-				Action: HTTPParsingActionObfuscate,
-				Type:   HTTPParsingRuleTypeBody,
-				Scope:  HTTPParsingScopeRequest,
-				Match: HTTPParsingMatch{
+				Action: ParsingActionObfuscate,
+				Type:   ParsingRuleTypeBody,
+				Scope:  ParsingScopeRequest,
+				Match: ParsingMatch{
 					ObfuscationJSONPaths: []JSONPathExpr{jsonPath},
 				},
 			},
@@ -201,20 +201,20 @@ func TestEnrichmentConfig_Validate_MultipleRules(t *testing.T) {
 
 func TestEnrichmentConfig_Validate_SecondRuleInvalid(t *testing.T) {
 	cfg := EnrichmentConfig{
-		Rules: []HTTPParsingRule{
+		Rules: []ParsingRule{
 			{
-				Action: HTTPParsingActionInclude,
-				Type:   HTTPParsingRuleTypeHeaders,
-				Scope:  HTTPParsingScopeAll,
-				Match: HTTPParsingMatch{
+				Action: ParsingActionInclude,
+				Type:   ParsingRuleTypeHeaders,
+				Scope:  ParsingScopeAll,
+				Match: ParsingMatch{
 					Patterns: []services.GlobAttr{services.NewGlob("Content-Type")},
 				},
 			},
 			{
-				Action: HTTPParsingActionInclude,
-				Type:   HTTPParsingRuleTypeHeaders,
-				Scope:  HTTPParsingScopeAll,
-				Match:  HTTPParsingMatch{},
+				Action: ParsingActionInclude,
+				Type:   ParsingRuleTypeHeaders,
+				Scope:  ParsingScopeAll,
+				Match:  ParsingMatch{},
 			},
 		},
 	}
@@ -236,8 +236,8 @@ func TestGRPCEnrichmentConfig_Validate(t *testing.T) {
 			name: "valid rule with patterns",
 			rules: []GRPCParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Scope:  HTTPParsingScopeAll,
+					Action: ParsingActionInclude,
+					Scope:  ParsingScopeAll,
 					Match: GRPCParsingMatch{
 						Patterns: []services.GlobAttr{services.NewGlob("x-custom-*")},
 					},
@@ -248,8 +248,8 @@ func TestGRPCEnrichmentConfig_Validate(t *testing.T) {
 			name: "rule without patterns",
 			rules: []GRPCParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Scope:  HTTPParsingScopeAll,
+					Action: ParsingActionInclude,
+					Scope:  ParsingScopeAll,
 					Match:  GRPCParsingMatch{},
 				},
 			},
@@ -259,15 +259,15 @@ func TestGRPCEnrichmentConfig_Validate(t *testing.T) {
 			name: "second rule invalid",
 			rules: []GRPCParsingRule{
 				{
-					Action: HTTPParsingActionInclude,
-					Scope:  HTTPParsingScopeAll,
+					Action: ParsingActionInclude,
+					Scope:  ParsingScopeAll,
 					Match: GRPCParsingMatch{
 						Patterns: []services.GlobAttr{services.NewGlob("authorization")},
 					},
 				},
 				{
-					Action: HTTPParsingActionObfuscate,
-					Scope:  HTTPParsingScopeRequest,
+					Action: ParsingActionObfuscate,
+					Scope:  ParsingScopeRequest,
 					Match:  GRPCParsingMatch{},
 				},
 			},

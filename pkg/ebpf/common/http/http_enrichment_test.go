@@ -37,10 +37,10 @@ func gi(pattern string) services.GlobAttr {
 func TestGenericParsingSpan_IncludeByDefault(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionInclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionInclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
@@ -61,10 +61,10 @@ func TestGenericParsingSpan_IncludeByDefault(t *testing.T) {
 func TestGenericParsingSpan_ExcludeByDefault(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
@@ -82,19 +82,19 @@ func TestGenericParsingSpan_ExcludeByDefault(t *testing.T) {
 func TestGenericParsingSpan_IncludeRule(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("X-Request-Id")},
 				},
 			},
@@ -117,19 +117,19 @@ func TestGenericParsingSpan_IncludeRule(t *testing.T) {
 func TestGenericParsingSpan_ObfuscateRule(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("Authorization")},
 				},
 			},
@@ -151,19 +151,19 @@ func TestGenericParsingSpan_ObfuscateRule(t *testing.T) {
 func TestGenericParsingSpan_ScopeRequest(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeRequest,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("X-Custom")},
 				},
 			},
@@ -183,19 +183,19 @@ func TestGenericParsingSpan_ScopeRequest(t *testing.T) {
 func TestGenericParsingSpan_ScopeResponse(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeResponse,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeResponse,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("X-Custom")},
 				},
 			},
@@ -215,19 +215,19 @@ func TestGenericParsingSpan_ScopeResponse(t *testing.T) {
 func TestGenericParsingSpan_CaseInsensitiveMatch(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("x-custom")},
 				},
 			},
@@ -247,27 +247,27 @@ func TestGenericParsingSpan_CaseInsensitiveMatch(t *testing.T) {
 func TestGenericParsingSpan_FirstMatchWins(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("Authorization")},
 				},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("*")},
 				},
 			},
@@ -288,19 +288,19 @@ func TestGenericParsingSpan_FirstMatchWins(t *testing.T) {
 func TestGenericParsingSpan_MultipleGlobsInRule(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Patterns: []services.GlobAttr{gi("Content-Type"), gi("X-Request-Id")},
 				},
 			},
@@ -323,25 +323,25 @@ func TestGenericParsingSpan_MultipleGlobsInRule(t *testing.T) {
 func TestGenericParsingSpan_RuleOrderExcludeBeforeInclude(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionExclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-Secret")}},
+				Action: config.ParsingActionExclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-Secret")}},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
 			},
 		},
 	}
@@ -361,25 +361,25 @@ func TestGenericParsingSpan_RuleOrderExcludeBeforeInclude(t *testing.T) {
 func TestGenericParsingSpan_RuleOrderIncludeBeforeExclude(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
 			},
 			{
-				Action: config.HTTPParsingActionExclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-Secret")}},
+				Action: config.ParsingActionExclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-Secret")}},
 			},
 		},
 	}
@@ -399,25 +399,25 @@ func TestGenericParsingSpan_RuleOrderIncludeBeforeExclude(t *testing.T) {
 func TestGenericParsingSpan_RuleOrderObfuscateBeforeInclude(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "[REDACTED]",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Authorization"), gi("Cookie")}},
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Authorization"), gi("Cookie")}},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
 			},
 		},
 	}
@@ -441,19 +441,19 @@ func TestGenericParsingSpan_RuleOrderObfuscateBeforeInclude(t *testing.T) {
 func TestGenericParsingSpan_ExplicitExcludeRule(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionInclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionInclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "*",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionExclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
+				Action: config.ParsingActionExclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
 			},
 		},
 	}
@@ -473,25 +473,25 @@ func TestGenericParsingSpan_ExplicitExcludeRule(t *testing.T) {
 func TestGenericParsingSpan_MixedScopeRuleOrder(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeRequest,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
 			},
 		},
 	}
@@ -513,10 +513,10 @@ func TestGenericParsingSpan_MixedScopeRuleOrder(t *testing.T) {
 func TestGenericParsingSpan_MultipleHeaderValues(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionInclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionInclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
@@ -559,19 +559,19 @@ func jp(path string) config.JSONPathExpr {
 func TestBodyExtraction_IncludeRawJSON(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -590,19 +590,19 @@ func TestBodyExtraction_IncludeRawJSON(t *testing.T) {
 func TestBodyExtraction_ObfuscateJSONPaths(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.password"), jp("$.user.ssn")},
 				},
 			},
@@ -626,10 +626,10 @@ func TestBodyExtraction_ObfuscateJSONPaths(t *testing.T) {
 func TestBodyExtraction_ExcludeByDefault(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionInclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionInclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
@@ -647,19 +647,19 @@ func TestBodyExtraction_ExcludeByDefault(t *testing.T) {
 func TestBodyExtraction_NonJSONSkipped(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -677,19 +677,19 @@ func TestBodyExtraction_NonJSONSkipped(t *testing.T) {
 func TestBodyExtraction_InvalidJSONSkipped(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -707,19 +707,19 @@ func TestBodyExtraction_InvalidJSONSkipped(t *testing.T) {
 func TestBodyExtraction_ArrayElementRedaction(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "[REDACTED]",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.users[*].email")},
 				},
 			},
@@ -743,27 +743,27 @@ func TestBodyExtraction_ArrayElementRedaction(t *testing.T) {
 func TestBodyExtraction_MergeMultipleRules(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.password")},
 				},
 			},
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.ssn")},
 					URLPathPatterns:      []services.GlobAttr{services.NewGlob("/api/users*")},
 				},
@@ -786,19 +786,19 @@ func TestBodyExtraction_MergeMultipleRules(t *testing.T) {
 func TestBodyExtraction_RouteFiltering(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					URLPathPatterns: []services.GlobAttr{services.NewGlob("/api/v1/*")},
 				},
 			},
@@ -823,19 +823,19 @@ func TestBodyExtraction_RouteFiltering(t *testing.T) {
 func TestBodyExtraction_MethodFiltering(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					Methods: []config.HTTPMethod{config.HTTPMethodPOST, config.HTTPMethodPUT},
 				},
 			},
@@ -860,19 +860,19 @@ func TestBodyExtraction_MethodFiltering(t *testing.T) {
 func TestBodyExtraction_ScopeRequestOnly(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -888,19 +888,19 @@ func TestBodyExtraction_ScopeRequestOnly(t *testing.T) {
 func TestBodyExtraction_UnmatchedPathsIgnored(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.nonexistent"), jp("$.also.missing")},
 				},
 			},
@@ -919,19 +919,19 @@ func TestBodyExtraction_UnmatchedPathsIgnored(t *testing.T) {
 func TestBodyExtraction_ExcludeRuleOnRoute(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionInclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionInclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionExclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionExclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match: config.ParsingMatch{
 					URLPathPatterns: []services.GlobAttr{services.NewGlob("/health")},
 				},
 			},
@@ -956,19 +956,19 @@ func TestBodyExtraction_ExcludeRuleOnRoute(t *testing.T) {
 func TestBodyExtraction_ContentTypeVariants(t *testing.T) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -1010,91 +1010,91 @@ func TestBodyExtraction_ContentTypeVariants(t *testing.T) {
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
 		name    string
-		rules   []config.HTTPParsingRule
+		rules   []config.ParsingRule
 		wantErr string
 	}{
 		{
 			name: "body obfuscate without json paths",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
 			}},
 			wantErr: "obfuscation_json_paths",
 		},
 		{
 			name: "body include with json paths",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.x")}},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.x")}},
 			}},
 			wantErr: "obfuscation_json_paths can only be used with action",
 		},
 		{
 			name: "header rule with json paths",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.x")}},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.x")}},
 			}},
 			wantErr: "header rules cannot use obfuscation_json_paths",
 		},
 		{
 			name: "body rule with patterns",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
 			}},
 			wantErr: "body rules cannot use patterns",
 		},
 		{
 			name: "body rule with case_sensitive",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{CaseSensitive: true},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{CaseSensitive: true},
 			}},
 			wantErr: "body rules cannot use case_sensitive",
 		},
 		{
 			name: "header rule without patterns",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
 			}},
 			wantErr: "header rules require at least one pattern",
 		},
 		{
 			name: "valid body include",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeAll,
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeAll,
 			}},
 		},
 		{
 			name: "valid body obfuscate",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match:  config.HTTPParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.pw")}},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match:  config.ParsingMatch{ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.pw")}},
 			}},
 		},
 		{
 			name: "valid header include",
-			rules: []config.HTTPParsingRule{{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
+			rules: []config.ParsingRule{{
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("X-*")}},
 			}},
 		},
 	}
@@ -1118,25 +1118,25 @@ func TestConfigValidation(t *testing.T) {
 func BenchmarkHTTPEnricher_HeadersOnly(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Authorization"), gi("Cookie")}},
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Authorization"), gi("Cookie")}},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("*")}},
 			},
 		},
 	}
@@ -1166,19 +1166,19 @@ func BenchmarkHTTPEnricher_HeadersOnly(b *testing.B) {
 func BenchmarkHTTPEnricher_BodyInclude_SmallJSON(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match:  config.HTTPParsingMatch{},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match:  config.ParsingMatch{},
 			},
 		},
 	}
@@ -1203,19 +1203,19 @@ func BenchmarkHTTPEnricher_BodyInclude_SmallJSON(b *testing.B) {
 func BenchmarkHTTPEnricher_BodyObfuscate_SmallJSON(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.password"), jp("$.ssn")},
 				},
 			},
@@ -1242,19 +1242,19 @@ func BenchmarkHTTPEnricher_BodyObfuscate_SmallJSON(b *testing.B) {
 func BenchmarkHTTPEnricher_BodyObfuscate_LargeJSON(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.users[*].email"), jp("$.users[*].ssn")},
 				},
 			},
@@ -1286,10 +1286,10 @@ func BenchmarkHTTPEnricher_BodyObfuscate_LargeJSON(b *testing.B) {
 func BenchmarkHTTPEnricher_BodyExcludedByDefault(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
@@ -1315,31 +1315,31 @@ func BenchmarkHTTPEnricher_BodyExcludedByDefault(b *testing.B) {
 func BenchmarkHTTPEnricher_HeadersAndBody(b *testing.B) {
 	cfg := config.EnrichmentConfig{
 		Enabled: true,
-		Policy: config.HTTPParsingPolicy{
-			DefaultAction: config.HTTPParsingDefaultAction{
-				Headers: config.HTTPParsingActionExclude,
-				Body:    config.HTTPParsingActionExclude,
+		Policy: config.ParsingPolicy{
+			DefaultAction: config.ParsingDefaultAction{
+				Headers: config.ParsingActionExclude,
+				Body:    config.ParsingActionExclude,
 			},
 			ObfuscationString: "***",
 		},
-		Rules: []config.HTTPParsingRule{
+		Rules: []config.ParsingRule{
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Authorization")}},
 			},
 			{
-				Action: config.HTTPParsingActionInclude,
-				Type:   config.HTTPParsingRuleTypeHeaders,
-				Scope:  config.HTTPParsingScopeAll,
-				Match:  config.HTTPParsingMatch{Patterns: []services.GlobAttr{gi("Content-Type"), gi("X-*")}},
+				Action: config.ParsingActionInclude,
+				Type:   config.ParsingRuleTypeHeaders,
+				Scope:  config.ParsingScopeAll,
+				Match:  config.ParsingMatch{Patterns: []services.GlobAttr{gi("Content-Type"), gi("X-*")}},
 			},
 			{
-				Action: config.HTTPParsingActionObfuscate,
-				Type:   config.HTTPParsingRuleTypeBody,
-				Scope:  config.HTTPParsingScopeRequest,
-				Match: config.HTTPParsingMatch{
+				Action: config.ParsingActionObfuscate,
+				Type:   config.ParsingRuleTypeBody,
+				Scope:  config.ParsingScopeRequest,
+				Match: config.ParsingMatch{
 					ObfuscationJSONPaths: []config.JSONPathExpr{jp("$.password")},
 				},
 			},

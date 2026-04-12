@@ -19,7 +19,7 @@ func grpcGlob(pattern string) services.GlobAttr {
 }
 
 //nolint:unparam
-func newGRPCEnricher(defaultAction config.HTTPParsingAction, obfuscation string, rules []config.GRPCParsingRule) *GRPCMetadataEnricher {
+func newGRPCEnricher(defaultAction config.ParsingAction, obfuscation string, rules []config.GRPCParsingRule) *GRPCMetadataEnricher {
 	return NewGRPCMetadataEnricher(config.GRPCEnrichmentConfig{
 		Policy: config.GRPCParsingPolicy{
 			DefaultAction:     config.GRPCParsingDefaultAction{Metadata: defaultAction},
@@ -30,7 +30,7 @@ func newGRPCEnricher(defaultAction config.HTTPParsingAction, obfuscation string,
 }
 
 func TestGRPCMetadataEnricher_IncludeByDefault(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionInclude, "***", nil)
+	e := newGRPCEnricher(config.ParsingActionInclude, "***", nil)
 	span := &request.Span{Path: "/pkg.Svc/Method"}
 	reqMD := map[string][]string{"x-req-id": {"123"}, "authorization": {"Bearer tok"}}
 	respMD := map[string][]string{"x-resp-id": {"456"}}
@@ -42,7 +42,7 @@ func TestGRPCMetadataEnricher_IncludeByDefault(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_ExcludeByDefault(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", nil)
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", nil)
 	span := &request.Span{Path: "/pkg.Svc/Method"}
 	reqMD := map[string][]string{"x-req-id": {"123"}}
 	respMD := map[string][]string{"x-resp-id": {"456"}}
@@ -54,10 +54,10 @@ func TestGRPCMetadataEnricher_ExcludeByDefault(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_IncludeRule(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("x-custom-*")}},
 		},
 	})
@@ -73,10 +73,10 @@ func TestGRPCMetadataEnricher_IncludeRule(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_ObfuscateRule(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionObfuscate,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionObfuscate,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("authorization")}},
 		},
 	})
@@ -89,15 +89,15 @@ func TestGRPCMetadataEnricher_ObfuscateRule(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_FirstMatchWins(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionObfuscate,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionObfuscate,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("authorization")}},
 		},
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("*")}},
 		},
 	})
@@ -116,10 +116,10 @@ func TestGRPCMetadataEnricher_FirstMatchWins(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_ScopeRequest(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeRequest,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeRequest,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("x-custom")}},
 		},
 	})
@@ -135,10 +135,10 @@ func TestGRPCMetadataEnricher_ScopeRequest(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_ScopeResponse(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeResponse,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeResponse,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("x-custom")}},
 		},
 	})
@@ -153,10 +153,10 @@ func TestGRPCMetadataEnricher_ScopeResponse(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_RPCMethodPattern(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match: config.GRPCParsingMatch{
 				Patterns:          []services.GlobAttr{grpcGlob("x-custom")},
 				RPCMethodPatterns: []services.GlobAttr{grpcGlob("/routeguide.RouteGuide/*")},
@@ -177,10 +177,10 @@ func TestGRPCMetadataEnricher_RPCMethodPattern(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_CaseInsensitive(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match: config.GRPCParsingMatch{
 				Patterns:      []services.GlobAttr{grpcGlob("x-custom-*")},
 				CaseSensitive: false,
@@ -200,10 +200,10 @@ func TestGRPCMetadataEnricher_CaseInsensitive(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_MultipleGlobsInRule(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionExclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionExclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match: config.GRPCParsingMatch{
 				Patterns: []services.GlobAttr{grpcGlob("x-req-*"), grpcGlob("x-trace-*")},
 			},
@@ -224,7 +224,7 @@ func TestGRPCMetadataEnricher_MultipleGlobsInRule(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_EmptyMetadata(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionInclude, "***", nil)
+	e := newGRPCEnricher(config.ParsingActionInclude, "***", nil)
 	span := &request.Span{Path: "/pkg.Svc/Method"}
 
 	ok := e.Enrich(span, nil, nil)
@@ -234,15 +234,15 @@ func TestGRPCMetadataEnricher_EmptyMetadata(t *testing.T) {
 }
 
 func TestGRPCMetadataEnricher_ExcludeBeforeInclude(t *testing.T) {
-	e := newGRPCEnricher(config.HTTPParsingActionInclude, "***", []config.GRPCParsingRule{
+	e := newGRPCEnricher(config.ParsingActionInclude, "***", []config.GRPCParsingRule{
 		{
-			Action: config.HTTPParsingActionExclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionExclude,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("authorization")}},
 		},
 		{
-			Action: config.HTTPParsingActionInclude,
-			Scope:  config.HTTPParsingScopeAll,
+			Action: config.ParsingActionInclude,
+			Scope:  config.ParsingScopeAll,
 			Match:  config.GRPCParsingMatch{Patterns: []services.GlobAttr{grpcGlob("*")}},
 		},
 	})

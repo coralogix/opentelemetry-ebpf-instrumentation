@@ -93,9 +93,9 @@ type EnrichmentConfig struct {
 	// Enable HTTP header and payload enrichment
 	Enabled bool `yaml:"enabled" env:"OTEL_EBPF_HTTP_ENRICHMENT_ENABLED" validate:"boolean"`
 	// Policy controls the default behavior
-	Policy HTTPParsingPolicy `yaml:"policy"`
+	Policy ParsingPolicy `yaml:"policy"`
 	// Rules is an ordered list of include/exclude/obfuscate rules.
-	Rules []HTTPParsingRule `yaml:"rules"`
+	Rules []ParsingRule `yaml:"rules"`
 }
 
 // Validate checks the enrichment config for cross-field consistency errors.
@@ -103,11 +103,11 @@ type EnrichmentConfig struct {
 func (c EnrichmentConfig) Validate() error {
 	for i, rule := range c.Rules {
 		switch rule.Type {
-		case HTTPParsingRuleTypeHeaders:
+		case ParsingRuleTypeHeaders:
 			if err := validateHeaderRule(i, rule); err != nil {
 				return err
 			}
-		case HTTPParsingRuleTypeBody:
+		case ParsingRuleTypeBody:
 			if err := validateBodyRule(i, rule); err != nil {
 				return err
 			}
@@ -116,7 +116,7 @@ func (c EnrichmentConfig) Validate() error {
 	return nil
 }
 
-func validateHeaderRule(i int, rule HTTPParsingRule) error {
+func validateHeaderRule(i int, rule ParsingRule) error {
 	if len(rule.Match.ObfuscationJSONPaths) > 0 {
 		return fmt.Errorf("rule %d: header rules cannot use obfuscation_json_paths", i)
 	}
@@ -126,80 +126,80 @@ func validateHeaderRule(i int, rule HTTPParsingRule) error {
 	return nil
 }
 
-func validateBodyRule(i int, rule HTTPParsingRule) error {
+func validateBodyRule(i int, rule ParsingRule) error {
 	if len(rule.Match.Patterns) > 0 {
 		return fmt.Errorf("rule %d: body rules cannot use patterns", i)
 	}
 	if rule.Match.CaseSensitive {
 		return fmt.Errorf("rule %d: body rules cannot use case_sensitive", i)
 	}
-	if rule.Action == HTTPParsingActionObfuscate && len(rule.Match.ObfuscationJSONPaths) == 0 {
+	if rule.Action == ParsingActionObfuscate && len(rule.Match.ObfuscationJSONPaths) == 0 {
 		return fmt.Errorf("rule %d: action \"obfuscate\" on body rule requires obfuscation_json_paths", i)
 	}
-	if rule.Action != HTTPParsingActionObfuscate && len(rule.Match.ObfuscationJSONPaths) > 0 {
+	if rule.Action != ParsingActionObfuscate && len(rule.Match.ObfuscationJSONPaths) > 0 {
 		return fmt.Errorf("rule %d: obfuscation_json_paths can only be used with action \"obfuscate\"", i)
 	}
 	return nil
 }
 
-// HTTPParsingPolicy defines the default action for http enrichment rules.
-type HTTPParsingPolicy struct {
+// ParsingPolicy defines the default action for http enrichment rules.
+type ParsingPolicy struct {
 	// DefaultAction specifies what to do when no rule matches, per type.
-	DefaultAction HTTPParsingDefaultAction `yaml:"default_action"`
+	DefaultAction ParsingDefaultAction `yaml:"default_action"`
 	// ObfuscationString is the replacement string used when a rule's action is "obfuscate"
 	ObfuscationString string `yaml:"obfuscation_string" env:"OTEL_EBPF_HTTP_ENRICHMENT_OBFUSCATION_STRING"`
 }
 
-// HTTPParsingDefaultAction specifies the default action per rule type.
-type HTTPParsingDefaultAction struct {
-	Headers HTTPParsingAction `yaml:"headers" validate:"required"`
-	Body    HTTPParsingAction `yaml:"body" validate:"required"`
+// ParsingDefaultAction specifies the default action per rule type.
+type ParsingDefaultAction struct {
+	Headers ParsingAction `yaml:"headers" validate:"required"`
+	Body    ParsingAction `yaml:"body" validate:"required"`
 }
 
-// HTTPParsingRule defines a single include/exclude/obfuscate rule for HTTP header and payload extraction.
-type HTTPParsingRule struct {
+// ParsingRule defines a single include/exclude/obfuscate rule for HTTP header and payload extraction.
+type ParsingRule struct {
 	// Action of the rule: "include", "exclude", or "obfuscate"
-	Action HTTPParsingAction `yaml:"action" validate:"required"`
+	Action ParsingAction `yaml:"action" validate:"required"`
 	// Type specifies what this rule matches against: "headers" or "body"
-	Type HTTPParsingRuleType `yaml:"type" validate:"required"`
+	Type ParsingRuleType `yaml:"type" validate:"required"`
 	// Scope of the rule: "request", "response", or "all"
-	Scope HTTPParsingScope `yaml:"scope" validate:"required"`
+	Scope ParsingScope `yaml:"scope" validate:"required"`
 	// Match defines the matching criteria for this rule
-	Match HTTPParsingMatch `yaml:"match"`
+	Match ParsingMatch `yaml:"match"`
 }
 
-// HTTPParsingRuleType specifies the target of a parsing rule.
-type HTTPParsingRuleType uint8
+// ParsingRuleType specifies the target of a parsing rule.
+type ParsingRuleType uint8
 
 const (
-	HTTPParsingRuleTypeHeaders HTTPParsingRuleType = iota + 1
-	HTTPParsingRuleTypeBody
+	ParsingRuleTypeHeaders ParsingRuleType = iota + 1
+	ParsingRuleTypeBody
 )
 
-func (t *HTTPParsingRuleType) UnmarshalText(text []byte) error {
+func (t *ParsingRuleType) UnmarshalText(text []byte) error {
 	switch strings.TrimSpace(string(text)) {
 	case "headers":
-		*t = HTTPParsingRuleTypeHeaders
+		*t = ParsingRuleTypeHeaders
 	case "body":
-		*t = HTTPParsingRuleTypeBody
+		*t = ParsingRuleTypeBody
 	default:
 		return fmt.Errorf("invalid parsing rule type: %q (valid: headers, body)", string(text))
 	}
 	return nil
 }
 
-func (t HTTPParsingRuleType) MarshalText() ([]byte, error) {
+func (t ParsingRuleType) MarshalText() ([]byte, error) {
 	switch t {
-	case HTTPParsingRuleTypeHeaders:
+	case ParsingRuleTypeHeaders:
 		return []byte("headers"), nil
-	case HTTPParsingRuleTypeBody:
+	case ParsingRuleTypeBody:
 		return []byte("body"), nil
 	default:
 		return nil, fmt.Errorf("unknown parsing rule type: %d", t)
 	}
 }
 
-func (HTTPParsingRuleType) JSONSchema() *jsonschema.Schema {
+func (ParsingRuleType) JSONSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"headers", "body"},
@@ -253,10 +253,10 @@ func (j *JSONPathExpr) String() string {
 	return j.str
 }
 
-// HTTPParsingMatch defines matching criteria for an HTTP parsing rule.
+// ParsingMatch defines matching criteria for an HTTP parsing rule.
 // Header rules use Patterns and CaseSensitive. Body rules use ObfuscationJSONPaths.
 // URLPathPatterns and Methods are shared across both types.
-type HTTPParsingMatch struct {
+type ParsingMatch struct {
 	// Patterns is a list of glob patterns to match header names against (headers only)
 	Patterns []services.GlobAttr `yaml:"patterns"`
 	// CaseSensitive controls whether header matching is case-sensitive (headers only)
@@ -271,7 +271,7 @@ type HTTPParsingMatch struct {
 
 // UnmarshalYAML deserializes the match config and compiles glob patterns
 // and JSONPath expressions from their raw string values.
-func (m *HTTPParsingMatch) UnmarshalYAML(value *yaml.Node) error {
+func (m *ParsingMatch) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
 		Patterns             []string     `yaml:"patterns"`
 		CaseSensitive        bool         `yaml:"case_sensitive"`
@@ -315,86 +315,86 @@ func (m *HTTPParsingMatch) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// HTTPParsingAction represents the action for a generic parsing rule or default policy.
-type HTTPParsingAction uint8
+// ParsingAction represents the action for a generic parsing rule or default policy.
+type ParsingAction uint8
 
 const (
-	HTTPParsingActionInclude HTTPParsingAction = iota + 1
-	HTTPParsingActionExclude
-	HTTPParsingActionObfuscate
+	ParsingActionInclude ParsingAction = iota + 1
+	ParsingActionExclude
+	ParsingActionObfuscate
 )
 
-func (a *HTTPParsingAction) UnmarshalText(text []byte) error {
+func (a *ParsingAction) UnmarshalText(text []byte) error {
 	switch strings.TrimSpace(string(text)) {
 	case "include":
-		*a = HTTPParsingActionInclude
+		*a = ParsingActionInclude
 	case "exclude":
-		*a = HTTPParsingActionExclude
+		*a = ParsingActionExclude
 	case "obfuscate":
-		*a = HTTPParsingActionObfuscate
+		*a = ParsingActionObfuscate
 	default:
 		return fmt.Errorf("invalid parsing action: %q (valid: include, exclude, obfuscate)", string(text))
 	}
 	return nil
 }
 
-func (a HTTPParsingAction) MarshalText() ([]byte, error) {
+func (a ParsingAction) MarshalText() ([]byte, error) {
 	switch a {
-	case HTTPParsingActionInclude:
+	case ParsingActionInclude:
 		return []byte("include"), nil
-	case HTTPParsingActionExclude:
+	case ParsingActionExclude:
 		return []byte("exclude"), nil
-	case HTTPParsingActionObfuscate:
+	case ParsingActionObfuscate:
 		return []byte("obfuscate"), nil
 	default:
 		return nil, fmt.Errorf("unknown parsing action: %d", a)
 	}
 }
 
-func (HTTPParsingAction) JSONSchema() *jsonschema.Schema {
+func (ParsingAction) JSONSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"include", "exclude", "obfuscate"},
 	}
 }
 
-// HTTPParsingScope represents the scope of a parsing rule.
-type HTTPParsingScope uint8
+// ParsingScope represents the scope of a parsing rule.
+type ParsingScope uint8
 
 const (
-	HTTPParsingScopeRequest HTTPParsingScope = iota + 1
-	HTTPParsingScopeResponse
-	HTTPParsingScopeAll
+	ParsingScopeRequest ParsingScope = iota + 1
+	ParsingScopeResponse
+	ParsingScopeAll
 )
 
-func (a *HTTPParsingScope) UnmarshalText(text []byte) error {
+func (a *ParsingScope) UnmarshalText(text []byte) error {
 	switch strings.TrimSpace(string(text)) {
 	case "request":
-		*a = HTTPParsingScopeRequest
+		*a = ParsingScopeRequest
 	case "response":
-		*a = HTTPParsingScopeResponse
+		*a = ParsingScopeResponse
 	case "all":
-		*a = HTTPParsingScopeAll
+		*a = ParsingScopeAll
 	default:
 		return fmt.Errorf("invalid parsing scope: %q (valid: request, response, all)", string(text))
 	}
 	return nil
 }
 
-func (a HTTPParsingScope) MarshalText() ([]byte, error) {
+func (a ParsingScope) MarshalText() ([]byte, error) {
 	switch a {
-	case HTTPParsingScopeRequest:
+	case ParsingScopeRequest:
 		return []byte("request"), nil
-	case HTTPParsingScopeResponse:
+	case ParsingScopeResponse:
 		return []byte("response"), nil
-	case HTTPParsingScopeAll:
+	case ParsingScopeAll:
 		return []byte("all"), nil
 	default:
 		return nil, fmt.Errorf("unknown parsing scope: %d", a)
 	}
 }
 
-func (HTTPParsingScope) JSONSchema() *jsonschema.Schema {
+func (ParsingScope) JSONSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"request", "response", "all"},
@@ -437,15 +437,15 @@ type GRPCParsingPolicy struct {
 
 // GRPCParsingDefaultAction specifies the default action for gRPC metadata.
 type GRPCParsingDefaultAction struct {
-	Metadata HTTPParsingAction `yaml:"metadata" validate:"required"`
+	Metadata ParsingAction `yaml:"metadata"`
 }
 
 // GRPCParsingRule defines a single include/exclude/obfuscate rule for gRPC metadata extraction.
 type GRPCParsingRule struct {
 	// Action of the rule: "include", "exclude", or "obfuscate"
-	Action HTTPParsingAction `yaml:"action" validate:"required"`
+	Action ParsingAction `yaml:"action" validate:"required"`
 	// Scope of the rule: "request", "response", or "all"
-	Scope HTTPParsingScope `yaml:"scope" validate:"required"`
+	Scope ParsingScope `yaml:"scope" validate:"required"`
 	// Match defines the matching criteria for this rule
 	Match GRPCParsingMatch `yaml:"match"`
 }

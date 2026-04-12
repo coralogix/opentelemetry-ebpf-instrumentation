@@ -171,14 +171,24 @@ discovery:
 						},
 					},
 					Enrichment: config.EnrichmentConfig{
-						Policy: config.HTTPParsingPolicy{
-							DefaultAction: config.HTTPParsingDefaultAction{
-								Headers: config.HTTPParsingActionExclude,
-								Body:    config.HTTPParsingActionExclude,
+						Policy: config.ParsingPolicy{
+							DefaultAction: config.ParsingDefaultAction{
+								Headers: config.ParsingActionExclude,
+								Body:    config.ParsingActionExclude,
 							},
 							ObfuscationString: "***",
 						},
-						Rules: []config.HTTPParsingRule{},
+						Rules: []config.ParsingRule{},
+					},
+				},
+				GRPC: config.GRPCConfig{
+					Enrichment: config.GRPCEnrichmentConfig{
+						Policy: config.GRPCParsingPolicy{
+							DefaultAction: config.GRPCParsingDefaultAction{
+								Metadata: config.ParsingActionExclude,
+							},
+							ObfuscationString: "***",
+						},
 					},
 				},
 			},
