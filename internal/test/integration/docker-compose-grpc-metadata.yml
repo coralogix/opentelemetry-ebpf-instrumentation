@@ -26,14 +26,14 @@ services:
   # eBPF auto instrumenter
   obi:
     build:
-      context: ../../../..
+      context: ../../..
       dockerfile: ./internal/test/integration/components/obi/Dockerfile
     command:
       - --config=/configs/obi-config-grpc-metadata-enrichment.yml
     volumes:
       - ./configs/:/configs
-      - ../../../../testoutput:/coverage
-      - ../../../../testoutput/run-grpc-metadata:/var/run/obi
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-grpc-metadata:/var/run/obi
     image: hatest-obi
     privileged: true
     pid: "host"
