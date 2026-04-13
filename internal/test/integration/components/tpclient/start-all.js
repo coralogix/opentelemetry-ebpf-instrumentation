@@ -3,8 +3,8 @@ const { spawn } = require('child_process');
 
 const services = [
   { route: 'c', port: 6002 }, // End of chain
-  { route: 'b', port: 6001, upstream: 'http://localhost:6002' }, // Middle - base URL only
-  { route: 'a', port: 6000, upstream: 'http://localhost:6001' }, // Start - base URL only
+  { route: 'b', port: 6001, upstream: process.env.UPSTREAM_B || 'http://localhost:6002' }, // Middle
+  { route: 'a', port: 6000, upstream: process.env.UPSTREAM_A || 'http://localhost:6001' }, // Start
 ];
 
 services.forEach(({ route, port, upstream }) => {
