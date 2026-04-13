@@ -128,6 +128,24 @@ async def root():
 
     return "GRPC"
 
+@app.get("/query_with_metadata")
+async def query_with_metadata():
+    global channel
+    global stub
+
+    metadata = [
+        ("x-custom-request-id", "test-req-123"),
+        ("x-session-token", "secret-session-abc"),
+    ]
+    feature = stub.GetFeature(
+        route_guide_pb2.Point(latitude=409146138, longitude=-746188906),
+        metadata=metadata,
+    )
+    if feature.name:
+        print("Feature with metadata: %s" % feature.name)
+
+    return "GRPC_WITH_METADATA"
+
 @app.get("/with_name")
 async def with_name():
     try:

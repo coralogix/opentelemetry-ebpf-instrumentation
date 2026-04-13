@@ -96,6 +96,10 @@ const (
 	HTTPResponseHeaderPrefix = "http.response.header."
 	HTTPRequestBodyContent   = Name("http.request.body.content")
 	HTTPResponseBodyContent  = Name("http.response.body.content")
+
+	// gRPC metadata enrichment attribute prefixes (OTel semantic convention)
+	RPCRequestMetadataPrefix  = "rpc.request.metadata."
+	RPCResponseMetadataPrefix = "rpc.response.metadata."
 )
 
 // HTTPRequestHeaderKey returns the attribute key for a request header (lowercased).
@@ -106,6 +110,16 @@ func HTTPRequestHeaderKey(name string) string {
 // HTTPResponseHeaderKey returns the attribute key for a response header (lowercased).
 func HTTPResponseHeaderKey(name string) string {
 	return HTTPResponseHeaderPrefix + strings.ToLower(name)
+}
+
+// RPCRequestMetadataKey returns the attribute key for a gRPC request metadata entry (lowercased).
+func RPCRequestMetadataKey(name string) string {
+	return RPCRequestMetadataPrefix + strings.ToLower(name)
+}
+
+// RPCResponseMetadataKey returns the attribute key for a gRPC response metadata entry (lowercased).
+func RPCResponseMetadataKey(name string) string {
+	return RPCResponseMetadataPrefix + strings.ToLower(name)
 }
 
 // OBI-specific network attributes

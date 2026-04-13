@@ -63,6 +63,9 @@ class RouteGuideServicer(route_guide_pb2_grpc.RouteGuideServicer):
         self.db = route_guide_resources.read_route_guide_database()
 
     def GetFeature(self, request, context):
+        context.set_trailing_metadata([
+            ("x-custom-response-id", "test-resp-456"),
+        ])
         feature = get_feature(self.db, request)
         if feature is None:
             return route_guide_pb2.Feature(name="", location=request)

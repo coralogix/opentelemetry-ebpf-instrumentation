@@ -305,6 +305,18 @@ var (
 	spanMetricsSkip     = attribute.Bool(string(attr.SkipSpanMetrics), true)
 )
 
+// grpcEnrichmentAttributes converts extracted gRPC metadata to OTel span attributes.
+func grpcEnrichmentAttributes(span *request.Span) []attribute.KeyValue {
+	attrs := make([]attribute.KeyValue, 0, len(span.RequestHeaders)+len(span.ResponseHeaders))
+	for name, values := range span.RequestHeaders {
+		attrs = append(attrs, attribute.StringSlice(attr.RPCRequestMetadataKey(name), values))
+	}
+	for name, values := range span.ResponseHeaders {
+		attrs = append(attrs, attribute.StringSlice(attr.RPCResponseMetadataKey(name), values))
+	}
+	return attrs
+}
+
 // httpEnrichmentAttributes converts extracted HTTP headers and body content to OTel span attributes.
 func httpEnrichmentAttributes(span *request.Span) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, len(span.RequestHeaders)+len(span.ResponseHeaders))
@@ -361,6 +373,7 @@ func TraceAttributesSelector(span *request.Span, optionalAttrs map[attr.Name]str
 			request.ServerAddr(request.SpanHost(span)),
 			request.ServerPort(span.HostPort),
 		}
+		attrs = append(attrs, grpcEnrichmentAttributes(span)...)
 	case request.EventTypeHTTPClient:
 		// SQL++ spans should only have DB attributes, not HTTP attributes
 		if span.SubType == request.HTTPSubtypeSQLPP {
@@ -542,6 +555,7 @@ func TraceAttributesSelector(span *request.Span, optionalAttrs map[attr.Name]str
 			request.PeerService(request.PeerServiceFromSpan(span)),
 			request.ServerPort(span.HostPort),
 		}
+		attrs = append(attrs, grpcEnrichmentAttributes(span)...)
 	case request.EventTypeSQLClient, request.EventTypeSQLServer:
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),

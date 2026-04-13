@@ -164,32 +164,53 @@ func knownFrameKeys(fr *http2.Framer, hf *http2.HeadersFrame) bool {
 	return knownCount > 1
 }
 
-func readMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Framer, hf *http2.HeadersFrame) (string, string, string, bool) {
+type metaFrameResult struct {
+	Method      string
+	Path        string
+	ContentType string
+	OK          bool
+	Metadata    map[string][]string
+}
+
+type retMetaFrameResult struct {
+	Status   int
+	GRPC     bool
+	OK       bool
+	Metadata map[string][]string
+}
+
+func readMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Framer, hf *http2.HeadersFrame) metaFrameResult {
 	h2c := getOrInitH2Conn(parseContext.h2c, connID)
 
-	ok := false
-	method := ""
-	path := ""
-	contentType := ""
+	var result metaFrameResult
 
 	if h2c == nil {
-		return method, path, contentType, ok
+		return result
 	}
+
+	collectMetadata := parseContext.grpcEnricher != nil
 
 	h2c.hdec.SetEmitFunc(func(hf bhpack.HeaderField) {
 		switch hf.Name {
 		case ":method":
-			method = hf.Value
-			ok = true
+			result.Method = hf.Value
+			result.OK = true
 		case ":path":
-			path = hf.Value
-			ok = true
+			result.Path = hf.Value
+			result.OK = true
 		case "content-type":
-			contentType = hf.Value
-			if contentType == "application/grpc" {
+			result.ContentType = hf.Value
+			if result.ContentType == "application/grpc" {
 				protocolIsGRPC(parseContext.h2c, connID)
 			}
-			ok = true
+			result.OK = true
+		}
+		// Collect non-pseudo headers for gRPC metadata enrichment
+		if collectMetadata && !hf.IsPseudo() {
+			if result.Metadata == nil {
+				result.Metadata = make(map[string][]string)
+			}
+			result.Metadata[hf.Name] = append(result.Metadata[hf.Name], hf.Value)
 		}
 	})
 	// Lose reference to MetaHeadersFrame:
@@ -199,7 +220,7 @@ func readMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Fram
 	frag := hf.HeaderBlockFragment()
 	for {
 		if _, err := h2c.hdec.Write(frag); err != nil {
-			return method, path, contentType, ok
+			return result
 		}
 		if hf.HeadersEnded() {
 			break
@@ -215,7 +236,7 @@ func readMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Fram
 		frag = cf.HeaderBlockFragment()
 	}
 
-	return method, path, contentType, ok
+	return result
 }
 
 func http2grpcStatus(status int) int {
@@ -229,16 +250,16 @@ func http2grpcStatus(status int) int {
 	return 2 // Unknown
 }
 
-func readRetMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Framer, hf *http2.HeadersFrame) (int, bool, bool) {
+func readRetMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.Framer, hf *http2.HeadersFrame) retMetaFrameResult {
 	h2c := getOrInitH2Conn(parseContext.h2c, connID)
 
-	ok := false
-	status := 0
-	grpc := false
+	var result retMetaFrameResult
 
 	if h2c == nil {
-		return status, grpc, ok
+		return result
 	}
+
+	collectMetadata := parseContext.grpcEnricher != nil
 
 	h2c.hdecRet.SetEmitFunc(func(hf bhpack.HeaderField) {
 		// grpc requests may have :status and grpc-status. :status will be HTTP code.
@@ -246,24 +267,31 @@ func readRetMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.F
 		// end up first in the headers list.
 		switch hf.Name {
 		case ":status":
-			if !grpc { // only set the HTTP status if we didn't find grpc status
-				status, _ = strconv.Atoi(hf.Value)
+			if !result.GRPC { // only set the HTTP status if we didn't find grpc status
+				result.Status, _ = strconv.Atoi(hf.Value)
 			}
-			ok = true
+			result.OK = true
 		case "grpc-status":
-			status, _ = strconv.Atoi(hf.Value)
+			result.Status, _ = strconv.Atoi(hf.Value)
 			protocolIsGRPC(parseContext.h2c, connID)
-			grpc = true
-			ok = true
+			result.GRPC = true
+			result.OK = true
 		case "grpc-message":
 			if hf.Value != "" {
-				if !grpc { // unset or we have the HTTP status
-					status = 2
+				if !result.GRPC { // unset or we have the HTTP status
+					result.Status = 2
 				}
 			}
 			protocolIsGRPC(parseContext.h2c, connID)
-			grpc = true
-			ok = true
+			result.GRPC = true
+			result.OK = true
+		}
+		// Collect non-pseudo headers for gRPC metadata enrichment
+		if collectMetadata && !hf.IsPseudo() {
+			if result.Metadata == nil {
+				result.Metadata = make(map[string][]string)
+			}
+			result.Metadata[hf.Name] = append(result.Metadata[hf.Name], hf.Value)
 		}
 	})
 	// Lose reference to MetaHeadersFrame:
@@ -273,18 +301,18 @@ func readRetMetaFrame(parseContext *EBPFParseContext, connID uint64, fr *http2.F
 	for {
 		frag := hf.HeaderBlockFragment()
 		if _, err := h2c.hdecRet.Write(frag); err != nil {
-			return status, grpc, ok
+			return result
 		}
 
 		if hf.HeadersEnded() {
 			break
 		}
 		if _, err := fr.ReadFrame(); err != nil {
-			return status, grpc, ok
+			return result
 		}
 	}
 
-	return status, grpc, ok
+	return result
 }
 
 func http2InfoToSpan(info *BPFHTTP2Info, method, path, fullPath, peer, host string, status int, protocol Protocol) request.Span {
@@ -400,8 +428,10 @@ func http2FromBuffers(parseContext *EBPFParseContext, event *BPFHTTP2Info) (requ
 		}
 
 		if ff, ok := f.(*http2.HeadersFrame); ok {
-			rok := false
-			method, path, contentType, ok := readMetaFrame(parseContext, connID, framer, ff)
+			reqMeta := readMetaFrame(parseContext, connID, framer, ff)
+			method := reqMeta.Method
+			path := reqMeta.Path
+			contentType := reqMeta.ContentType
 			fullPath := path
 			if pos := strings.Index(path, "?"); pos >= 0 {
 				path = path[:pos]
@@ -410,7 +440,7 @@ func http2FromBuffers(parseContext *EBPFParseContext, event *BPFHTTP2Info) (requ
 				path = "*"
 			}
 
-			grpcInStatus := false
+			var retMeta retMetaFrameResult
 
 			for {
 				retF, err := retFramer.ReadFrame()
@@ -419,20 +449,22 @@ func http2FromBuffers(parseContext *EBPFParseContext, event *BPFHTTP2Info) (requ
 				}
 
 				if ff, ok := retF.(*http2.HeadersFrame); ok {
-					status, grpcInStatus, rok = readRetMetaFrame(parseContext, connID, retFramer, ff)
+					retMeta = readRetMetaFrame(parseContext, connID, retFramer, ff)
 					break
 				}
 			}
 
 			// We read nothing of value
-			if !ok && !rok {
+			if !reqMeta.OK && !retMeta.OK {
 				return request.Span{}, true, nil
 			}
 
 			// if we don't have protocol, assume gRPC if it's not ssl. HTTP2 is almost always SSL.
-			if eventType != GRPC && (grpcInStatus || contentType == "application/grpc" || (contentType == "" && event.Ssl == 0)) {
+			if eventType != GRPC && (retMeta.GRPC || contentType == "application/grpc" || (contentType == "" && event.Ssl == 0)) {
 				eventType = GRPC
-				status = http2grpcStatus(status)
+				status = http2grpcStatus(retMeta.Status)
+			} else {
+				status = retMeta.Status
 			}
 
 			peer := ""
@@ -443,7 +475,13 @@ func http2FromBuffers(parseContext *EBPFParseContext, event *BPFHTTP2Info) (requ
 				peer = source
 			}
 
-			return http2InfoToSpan(event, method, path, fullPath, peer, host, status, eventType), false, nil
+			span := http2InfoToSpan(event, method, path, fullPath, peer, host, status, eventType)
+
+			if eventType == GRPC && parseContext.grpcEnricher != nil {
+				parseContext.grpcEnricher.Enrich(&span, reqMeta.Metadata, retMeta.Metadata)
+			}
+
+			return span, false, nil
 		}
 	}
 

@@ -22,9 +22,9 @@ import (
 // content into spans. Rules are split by type at construction time so that
 // per-request processing only iterates the relevant subset.
 type HTTPEnricher struct {
-	headerRules       []config.HTTPParsingRule
-	bodyRules         []config.HTTPParsingRule
-	policy            config.HTTPParsingPolicy
+	headerRules       []config.ParsingRule
+	bodyRules         []config.ParsingRule
+	policy            config.ParsingPolicy
 	obfuscationString string
 }
 
@@ -37,9 +37,9 @@ func NewHTTPEnricher(cfg config.EnrichmentConfig) *HTTPEnricher {
 	}
 	for _, rule := range cfg.Rules {
 		switch rule.Type {
-		case config.HTTPParsingRuleTypeHeaders:
+		case config.ParsingRuleTypeHeaders:
 			e.headerRules = append(e.headerRules, rule)
-		case config.HTTPParsingRuleTypeBody:
+		case config.ParsingRuleTypeBody:
 			e.bodyRules = append(e.bodyRules, rule)
 		}
 	}
@@ -53,11 +53,11 @@ func (e *HTTPEnricher) Enrich(
 	req *http.Request,
 	resp *http.Response,
 ) bool {
-	reqHeaders := e.processHeaders(req.Header, config.HTTPParsingScopeRequest, baseSpan)
-	respHeaders := e.processHeaders(resp.Header, config.HTTPParsingScopeResponse, baseSpan)
+	reqHeaders := e.processHeaders(req.Header, config.ParsingScopeRequest, baseSpan)
+	respHeaders := e.processHeaders(resp.Header, config.ParsingScopeResponse, baseSpan)
 
-	reqBody := e.processBody(req.Header, readRequestBody(req), config.HTTPParsingScopeRequest, baseSpan)
-	respBody := e.processBody(resp.Header, readResponseBody(resp), config.HTTPParsingScopeResponse, baseSpan)
+	reqBody := e.processBody(req.Header, readRequestBody(req), config.ParsingScopeRequest, baseSpan)
+	respBody := e.processBody(resp.Header, readResponseBody(resp), config.ParsingScopeResponse, baseSpan)
 
 	hasContent := len(reqHeaders) > 0 || len(respHeaders) > 0 || reqBody != "" || respBody != ""
 	if !hasContent {
@@ -83,13 +83,13 @@ func (e *HTTPEnricher) Enrich(
 // include or obfuscate. The map is allocated lazily.
 func (e *HTTPEnricher) processHeaders(
 	headers http.Header,
-	scope config.HTTPParsingScope,
+	scope config.ParsingScope,
 	span *request.Span,
 ) map[string][]string {
 	var result map[string][]string
 	for name, values := range headers {
 		action := e.resolveHeaderAction(name, scope, span)
-		if action == config.HTTPParsingActionExclude {
+		if action == config.ParsingActionExclude {
 			continue
 		}
 		if result == nil {
@@ -104,9 +104,9 @@ func (e *HTTPEnricher) processHeaders(
 // by evaluating header rules in order (first match wins).
 func (e *HTTPEnricher) resolveHeaderAction(
 	headerName string,
-	scope config.HTTPParsingScope,
+	scope config.ParsingScope,
 	span *request.Span,
-) config.HTTPParsingAction {
+) config.ParsingAction {
 	var lowerName string
 
 	for _, rule := range e.headerRules {
@@ -161,7 +161,7 @@ func readResponseBody(resp *http.Response) func() ([]byte, error) {
 func (e *HTTPEnricher) processBody(
 	headers http.Header,
 	readBody func() ([]byte, error),
-	scope config.HTTPParsingScope,
+	scope config.ParsingScope,
 	span *request.Span,
 ) string {
 	if !isJSONContentType(headers.Get("Content-Type")) {
@@ -181,31 +181,31 @@ func (e *HTTPEnricher) processBody(
 
 		matched = true
 		switch rule.Action {
-		case config.HTTPParsingActionExclude:
+		case config.ParsingActionExclude:
 			hasExclude = true
-		case config.HTTPParsingActionInclude:
+		case config.ParsingActionInclude:
 			hasInclude = true
-		case config.HTTPParsingActionObfuscate:
+		case config.ParsingActionObfuscate:
 			allJSONPaths = append(allJSONPaths, rule.Match.ObfuscationJSONPaths...)
 		}
 	}
 
 	// Determine effective action
-	var effectiveAction config.HTTPParsingAction
+	var effectiveAction config.ParsingAction
 	switch {
 	case !matched:
 		effectiveAction = e.policy.DefaultAction.Body
 	case hasExclude:
-		effectiveAction = config.HTTPParsingActionExclude
+		effectiveAction = config.ParsingActionExclude
 	case len(allJSONPaths) > 0:
-		effectiveAction = config.HTTPParsingActionObfuscate
+		effectiveAction = config.ParsingActionObfuscate
 	case hasInclude:
-		effectiveAction = config.HTTPParsingActionInclude
+		effectiveAction = config.ParsingActionInclude
 	default:
-		effectiveAction = config.HTTPParsingActionExclude
+		effectiveAction = config.ParsingActionExclude
 	}
 
-	if effectiveAction == config.HTTPParsingActionExclude {
+	if effectiveAction == config.ParsingActionExclude {
 		return ""
 	}
 
@@ -215,7 +215,7 @@ func (e *HTTPEnricher) processBody(
 		return ""
 	}
 
-	if effectiveAction == config.HTTPParsingActionInclude {
+	if effectiveAction == config.ParsingActionInclude {
 		if !json.Valid(bodyBytes) {
 			return ""
 		}
@@ -239,31 +239,31 @@ func (e *HTTPEnricher) processBody(
 }
 
 // ruleApplies returns true if the rule matches the given scope, path, and method.
-func ruleApplies(rule config.HTTPParsingRule, scope config.HTTPParsingScope, span *request.Span) bool {
+func ruleApplies(rule config.ParsingRule, scope config.ParsingScope, span *request.Span) bool {
 	return scopeApplies(rule.Scope, scope) &&
 		urlPathMatches(rule.Match.URLPathPatterns, span.Path) &&
 		methodMatches(rule.Match.Methods, span.Method)
 }
 
 // scopeApplies returns true if the rule scope covers the given header source.
-func scopeApplies(ruleScope config.HTTPParsingScope, headerSource config.HTTPParsingScope) bool {
-	return ruleScope == config.HTTPParsingScopeAll || ruleScope == headerSource
+func scopeApplies(ruleScope config.ParsingScope, headerSource config.ParsingScope) bool {
+	return ruleScope == config.ParsingScopeAll || ruleScope == headerSource
 }
 
 // applyHeaderAction adds the header to the map based on the resolved action.
 func applyHeaderAction(
-	action config.HTTPParsingAction,
+	action config.ParsingAction,
 	name string,
 	values []string,
 	headers map[string][]string,
 	obfuscationString string,
 ) {
 	switch action {
-	case config.HTTPParsingActionInclude:
+	case config.ParsingActionInclude:
 		headers[name] = append(headers[name], values...)
-	case config.HTTPParsingActionObfuscate:
+	case config.ParsingActionObfuscate:
 		headers[name] = []string{obfuscationString}
-	case config.HTTPParsingActionExclude:
+	case config.ParsingActionExclude:
 		// do nothing
 	}
 }

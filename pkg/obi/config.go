@@ -146,6 +146,17 @@ var DefaultConfig = Config{
 		CouchbaseDBCacheSize:                1024,
 		OverrideBPFLoopEnabled:              false,
 		PayloadExtraction: config.PayloadExtraction{
+			GRPC: config.GRPCConfig{
+				Enrichment: config.GRPCEnrichmentConfig{
+					Enabled: false,
+					Policy: config.GRPCParsingPolicy{
+						DefaultAction: config.GRPCParsingDefaultAction{
+							Metadata: config.ParsingActionExclude,
+						},
+						ObfuscationString: "***",
+					},
+				},
+			},
 			HTTP: config.HTTPConfig{
 				GraphQL: config.GraphQLConfig{
 					Enabled: false,
@@ -172,14 +183,14 @@ var DefaultConfig = Config{
 				},
 				Enrichment: config.EnrichmentConfig{
 					Enabled: false,
-					Policy: config.HTTPParsingPolicy{
-						DefaultAction: config.HTTPParsingDefaultAction{
-							Headers: config.HTTPParsingActionExclude,
-							Body:    config.HTTPParsingActionExclude,
+					Policy: config.ParsingPolicy{
+						DefaultAction: config.ParsingDefaultAction{
+							Headers: config.ParsingActionExclude,
+							Body:    config.ParsingActionExclude,
 						},
 						ObfuscationString: "***",
 					},
-					Rules: []config.HTTPParsingRule{},
+					Rules: []config.ParsingRule{},
 				},
 			},
 		},
