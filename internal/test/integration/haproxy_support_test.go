@@ -24,16 +24,24 @@ import (
 //
 //	tpclient-a --> haproxy:7001 --> tpclient-b --> haproxy:7002 --> tpclient-c
 //
-// The eBPF tpinjector runs against the tpclient processes (ports 6000/6001/6002).
-// HAProxy (2.8.5) acts as a transparent HTTP reverse proxy, preserving the
-// traceparent header across hops. The test verifies three scenarios:
-//  1. No incoming traceparent  -> eBPF generates one and propagates it through
-//     HAProxy to downstream services.
-//  2. Static traceparent       -> eBPF extracts the incoming trace ID and every
-//     span in the chain shares it, even though each hop crosses HAProxy.
-//  3. Forwarded traceparent    -> the client forwards the same traceparent
-//     unchanged (span_id == parent_id). HAProxy passes it through; eBPF must
-//     still detect the proxy-forwarding pattern and override span IDs.
+// HAProxy is also instrumented (its ports 7001/7002 are in OBI's discovery
+// scope), so the trace contains both the tpclient and haproxy spans. This
+// exercises the back_handle_st_rdy uprobe in bpf/generictracer/haproxy.c
+// which correlates HAProxy's backend dispatch to the inbound stream so the
+// outgoing client span and the inbound server span land in the same trace.
+//
+// The four sub-tests cover:
+//  1. No incoming traceparent  -> eBPF generates one and propagates through
+//     haproxy to all downstream services in a single connected trace.
+//  2. Static traceparent       -> eBPF extracts the incoming trace ID and
+//     every span (including HAProxy server+client spans at each hop)
+//     shares it.
+//  3. Forwarded traceparent    -> client forwards same traceparent unchanged
+//     (span_id == parent_id); HAProxy passes it through; eBPF must still
+//     detect the proxy-forwarding pattern and override span IDs.
+//  4. HTTP/1.1 keepalive       -> hammer the chain N times so HAProxy's
+//     idle-pool reuses backend connections; assert each request gets its
+//     own correctly-correlated trace (cold-vs-warm parity).
 func TestHAProxyContextPropagation(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-haproxy.yml", path.Join(pathOutput, "test-suite-haproxy.log"))
 	require.NoError(t, err)
@@ -43,36 +51,90 @@ func TestHAProxyContextPropagation(t *testing.T) {
 	// Wait for the tpclient chain to be reachable on the host-exposed port.
 	waitForTestComponents(t, "http://localhost:6000")
 
-	// Wait for instrumentation to be warm: a smoke request must produce a trace
-	// in Jaeger for service "tpclient-a".
-	t.Log("waiting for instrumentation to be ready")
+	// Wait for instrumentation to be FULLY warm — not just tpclient-a, but
+	// every process in the chain including HAProxy. Probe attachment to
+	// HAProxy lags tpclient probe attachment by 2-3s during OBI startup
+	// (verified via OBI debug logs); without this gate the very first
+	// /no-tp request can slip through before back_handle_st_rdy is hooked
+	// and produce an uncorrelated tpclient-c trace.
+	//
+	// Strategy: keep firing /no-tp until at least one resulting trace
+	// contains spans from all four services. That guarantees every
+	// uprobe / kprobe in the chain is attached and producing data.
+	t.Log("waiting for instrumentation to be ready (full chain warm-up)")
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		ti.DoHTTPGet(ct, "http://localhost:6000/smoke", 200)
+		ti.DoHTTPGet(ct, "http://localhost:6000/no-tp", 200)
 
-		resp, err := http.Get(jaegerQueryURL + "?service=tpclient-a&limit=1")
+		resp, err := http.Get(jaegerQueryURL + "?service=tpclient-a&operation=GET%20%2Fno-tp&limit=20")
 		if err != nil || resp == nil || resp.StatusCode != http.StatusOK {
 			return
 		}
-
 		var tq jaeger.TracesQuery
 		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
-		if len(tq.Data) == 0 {
-			return
+
+		fullChain := false
+		for _, tr := range tq.Data {
+			services := servicesInTrace(tr)
+			_, hasA := services["tpclient-a"]
+			_, hasB := services["tpclient-b"]
+			_, hasC := services["tpclient-c"]
+			_, hasHA := services["haproxy"]
+			if hasA && hasB && hasC && hasHA {
+				fullChain = true
+				break
+			}
 		}
+		require.True(ct, fullChain, "no fully-connected trace yet (HAProxy probes still attaching)")
 	}, 2*time.Minute, 1*time.Second)
-	t.Log("instrumentation ready")
+	t.Log("instrumentation ready (full chain observed)")
 
 	t.Run("without_traceparent_through_haproxy", testHAProxyWithoutTraceparent)
 	t.Run("with_traceparent_through_haproxy", testHAProxyWithTraceparent)
 	t.Run("with_forwarded_traceparent_through_haproxy", testHAProxyWithForwardedTraceparent)
+	t.Run("keepalive_warm_connection_correlation", testHAProxyKeepaliveCorrelation)
 
 	require.NoError(t, compose.Close())
 }
 
+// servicesInTrace returns the unique set of service names that appear in
+// the given trace (looked up via Jaeger's process map).
+func servicesInTrace(trace jaeger.Trace) map[string]struct{} {
+	seen := map[string]struct{}{}
+	for _, span := range trace.Spans {
+		proc, ok := trace.Processes[span.ProcessID]
+		if !ok {
+			continue
+		}
+		seen[proc.ServiceName] = struct{}{}
+	}
+	return seen
+}
+
+// requireConnectedHAProxyChain asserts the trace covers the full
+// a -> haproxy -> b -> haproxy -> c chain with all spans sharing the same
+// trace ID. This is the load-bearing assertion: if HAProxy correlation is
+// broken, tpclient-c's spans land in a different trace and this fails.
+func requireConnectedHAProxyChain(t *testing.T, trace jaeger.Trace, expectedTraceID string) {
+	t.Helper()
+	require.NotEmpty(t, trace.Spans)
+	for _, span := range trace.Spans {
+		require.Equal(t, expectedTraceID, span.TraceID,
+			"all spans in the chain must share the same trace ID — span %s belongs to trace %s",
+			span.SpanID, span.TraceID)
+	}
+	services := servicesInTrace(trace)
+	for _, want := range []string{"tpclient-a", "tpclient-b", "tpclient-c", "haproxy"} {
+		_, ok := services[want]
+		require.True(t, ok,
+			"trace %s should include spans from %q (HAProxy correlation must keep the chain connected); saw %v",
+			expectedTraceID, want, services)
+	}
+}
+
 // testHAProxyWithoutTraceparent validates that when NO traceparent is present,
 // eBPF generates one on the tpclient-a outbound call and that the generated
-// trace ID is preserved by HAProxy so tpclient-b and tpclient-c join the same
-// trace.
+// trace ID is preserved end-to-end through both HAProxy hops, with HAProxy's
+// own server/client spans correlated into the same trace.
 func testHAProxyWithoutTraceparent(t *testing.T) {
 	ti.DoHTTPGet(t, "http://localhost:6000/no-tp", 200)
 
@@ -100,16 +162,14 @@ func testHAProxyWithoutTraceparent(t *testing.T) {
 	require.NotEqual(t, staticTraceID, serviceASpan.TraceID,
 		"eBPF should generate a new trace ID, not use the static one")
 
-	// Every span (across HAProxy hops) must share the generated trace ID.
-	for _, span := range trace.Spans {
-		require.Equal(t, serviceASpan.TraceID, span.TraceID,
-			"All spans should share the same trace ID after passing through HAProxy")
-	}
+	// Strong end-to-end check: every service in the chain (including HAProxy)
+	// must appear in this trace and share the same trace ID.
+	requireConnectedHAProxyChain(t, trace, serviceASpan.TraceID)
 }
 
-// testHAProxyWithTraceparent validates that a traceparent injected at the edge
-// (by tpclient-a with STATIC_TRACEPARENT) is correctly extracted on the
-// tpclient-b and tpclient-c sides even though HAProxy sits between each hop.
+// testHAProxyWithTraceparent validates that a traceparent injected at the
+// edge propagates intact through HAProxy and is correctly correlated by
+// the back_handle_st_rdy uprobe so HAProxy's spans join the same trace.
 func testHAProxyWithTraceparent(t *testing.T) {
 	ti.DoHTTPGet(t, "http://localhost:6000/with-tp", 200)
 
@@ -126,16 +186,7 @@ func testHAProxyWithTraceparent(t *testing.T) {
 		require.NotEmpty(ct, trace.Spans)
 	}, testTimeout, 100*time.Millisecond)
 
-	// HAProxy must have forwarded the traceparent unchanged so every span in
-	// the chain ends up on the static trace ID.
-	for _, span := range trace.Spans {
-		require.Equal(t, staticTraceID, span.TraceID,
-			"HAProxy must preserve the incoming traceparent so all spans share the static trace ID")
-	}
-
-	// Chain must contain spans from all three services (a -> haproxy -> b -> haproxy -> c).
-	require.GreaterOrEqual(t, len(trace.Spans), 3,
-		"Should have spans from all services in the chain (a, b, c)")
+	requireConnectedHAProxyChain(t, trace, staticTraceID)
 }
 
 // testHAProxyWithForwardedTraceparent validates that when the client forwards
@@ -161,11 +212,7 @@ func testHAProxyWithForwardedTraceparent(t *testing.T) {
 		require.NotEmpty(ct, trace.Spans)
 	}, testTimeout, 100*time.Millisecond)
 
-	// Trace ID must still match the static one (extraction works through HAProxy).
-	for _, span := range trace.Spans {
-		require.Equal(t, staticTraceID, span.TraceID,
-			"eBPF should extract the static trace ID even when HAProxy forwards the traceparent")
-	}
+	requireConnectedHAProxyChain(t, trace, staticTraceID)
 
 	// Span IDs must not all be the forwarded span ID — eBPF must have
 	// detected the forwarding pattern and generated fresh span IDs.
@@ -178,7 +225,68 @@ func testHAProxyWithForwardedTraceparent(t *testing.T) {
 	}
 	require.False(t, allSpansHaveForwardedID,
 		"eBPF should override forwarded span IDs through HAProxy (not all spans should have %s)", forwardedSpanID)
+}
 
-	require.GreaterOrEqual(t, len(trace.Spans), 3,
-		"Should have spans from all services in the chain (a, b, c) through HAProxy")
+// testHAProxyKeepaliveCorrelation hammers the chain N times to force
+// HAProxy to reuse backend connections from its idle pool. With
+// `http-reuse always` configured (see configs/haproxy.cfg), the second
+// and subsequent requests should pick up warm connections rather than
+// opening fresh ones — exercising the warm-path branch of
+// back_handle_st_rdy. Each request must produce its own well-correlated
+// trace; if the warm-path correlation is broken, traces will collapse
+// onto a single (oldest) parent or split entirely.
+func testHAProxyKeepaliveCorrelation(t *testing.T) {
+	const iterations = 10
+	for range iterations {
+		ti.DoHTTPGet(t, "http://localhost:6000/no-tp", 200)
+	}
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := http.Get(jaegerQueryURL + "?service=tpclient-a&operation=GET%20%2Fno-tp&limit=" +
+			itoa(iterations*2)) // *2 to absorb traces from earlier sub-tests
+		require.NoError(ct, err)
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+
+		var tq jaeger.TracesQuery
+		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
+
+		// Pick out only the traces that contain our /no-tp operation
+		// (filters out smoke/warmup traces that share the operation).
+		matched := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/no-tp"})
+		require.GreaterOrEqual(ct, len(matched), iterations,
+			"expected at least %d /no-tp traces, got %d", iterations, len(matched))
+
+		// Every captured /no-tp trace must contain all four services.
+		// If the warm-connection correlation in back_handle_st_rdy is
+		// broken, tpclient-c will be missing from later traces.
+		fullChainCount := 0
+		for _, tr := range matched {
+			services := servicesInTrace(tr)
+			_, hasA := services["tpclient-a"]
+			_, hasB := services["tpclient-b"]
+			_, hasC := services["tpclient-c"]
+			_, hasHA := services["haproxy"]
+			if hasA && hasB && hasC && hasHA {
+				fullChainCount++
+			}
+		}
+		require.GreaterOrEqual(ct, fullChainCount, iterations,
+			"expected all %d /no-tp traces to be fully connected through HAProxy (cold + warm); got %d", iterations, fullChainCount)
+	}, testTimeout, 250*time.Millisecond)
+}
+
+// itoa is a tiny inline helper to avoid pulling strconv into this test
+// just for one URL parameter.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
 }

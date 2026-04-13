@@ -6,6 +6,7 @@
 #include "java_tls.c"
 #include "k_tracer.c"
 #include "libssl.c"
+#include "haproxy.c"
 #include "nginx.c"
 #include "nodejs.c"
 #include "python.c"

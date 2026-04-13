@@ -206,6 +206,17 @@ func (p *Tracer) constants() map[string]any {
 	m["g_bpf_debug"] = p.cfg.EBPF.BpfDebug
 	m["g_bpf_traceparent_enabled"] = p.cfg.EBPF.TrackRequestHeaders || p.cfg.EBPF.ContextPropagation.IsEnabled()
 
+	// HAProxy: detect a running haproxy process and select the matching
+	// per-version struct offsets. If no HAProxy is running at agent
+	// startup, fall back to defaults — see haproxy_offsets.go.
+	off, detected := detectRunningHAProxyOffsets()
+	if detected {
+		p.log.Debug("HAProxy detected; using version-specific BPF offsets", "offsets", off)
+	}
+	for k, v := range haproxyConstants(off) {
+		m[k] = v
+	}
+
 	return m
 }
 
@@ -389,6 +400,23 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			"ngx_event_connect_peer": {{
 				Required: false,
 				End:      p.bpfObjects.ObiNgxEventConnectPeerRet,
+			}},
+		},
+		"haproxy": {
+			// Hooks the unified backend dispatch path: this fires for both
+			// cold connections (just opened by tcp_connect_server) and warm
+			// connections pulled from the per-thread idle pool, so a single
+			// uprobe covers HTTP/1.1 keepalive correctly.
+			//
+			// Entry-only on purpose: the actual send() to the backend FD
+			// happens during back_handle_st_rdy / shortly after it returns,
+			// and the kernel-side find_haproxy_parent_trace lookup must
+			// already see our map entry by then. The connection is
+			// SC_ST_RDY by definition on entry, so scb -> sedesc -> conn ->
+			// handle.fd is fully populated and safe to walk.
+			"back_handle_st_rdy": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiHaproxyBackHandleStRdy,
 			}},
 		},
 		"node": {
