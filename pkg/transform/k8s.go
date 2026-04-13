@@ -163,6 +163,7 @@ func (md *metadataDecorator) nodeLoop(ctx context.Context) {
 
 func (md *metadataDecorator) do(span *request.Span) {
 	if podMeta, containerName := md.store.PodContainerByPIDNs(span.Pid.Namespace); podMeta != nil {
+		klog().Debug("Found container for PID namespace", "pidns", span.Pid.Namespace, "userPid", span.Pid.UserPID, "hostPid", span.Pid.HostPID, "span id", span.SpanID)
 		AppendKubeMetadata(md.store, &span.Service, podMeta, md.clusterName, containerName)
 	} else if span.Service.Metadata == nil {
 		// do not leave the service attributes map as nil
@@ -372,6 +373,7 @@ func AppendKubeMetadata(store *kube.Store, svc *svc.Attrs, meta *ikube.CachedObj
 	}
 	topOwner := ikube.TopOwner(meta.Meta.Pod)
 	name, namespace := store.ServiceNameNamespaceForMetadata(meta.Meta, containerName)
+	klog().Debug("Detection of service and namespace for owner", "serviceName", name, "namespace", namespace, "owner", topOwner)
 	// If the user has not defined criteria values for the reported
 	// service name and namespace, we will automatically set it from
 	// the kubernetes metadata
