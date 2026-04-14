@@ -31,6 +31,10 @@ func (s *SockFlowFetcher) FlowPacketStatsMap() *ebpf.Map {
 	panic("this is never going to be executed")
 }
 
+func (s *SockFlowFetcher) DebugEventsMap() *ebpf.Map {
+	return nil
+}
+
 func NewSockFlowFetcher(
 	_, _ int, _ flowdef.PortGuessPolicy, _ *config.EBPFTracer,
 ) (*SockFlowFetcher, error) {

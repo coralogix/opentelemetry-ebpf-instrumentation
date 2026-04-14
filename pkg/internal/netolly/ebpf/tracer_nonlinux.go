@@ -44,3 +44,7 @@ func (m *FlowFetcher) LookupAndDeleteMap() map[NetFlowId]*NetFlowMetrics {
 func (m *FlowFetcher) FlowPacketStatsMap() *ebpf.Map {
 	panic("this is never going to be executed")
 }
+
+func (m *FlowFetcher) DebugEventsMap() *ebpf.Map {
+	return nil
+}

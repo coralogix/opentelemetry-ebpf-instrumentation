@@ -32,6 +32,7 @@ import (
 
 	cebpf "github.com/cilium/ebpf"
 
+	"go.opentelemetry.io/obi/pkg/internal/ebpf/logger"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/tcmanager"
 	"go.opentelemetry.io/obi/pkg/internal/netolly/ebpf"
@@ -114,6 +115,7 @@ type ebpfFlowFetcher interface {
 	ReadRingBuf() (ringbuf.Record, error)
 
 	FlowPacketStatsMap() *cebpf.Map
+	DebugEventsMap() *cebpf.Map
 }
 
 // FlowsAgent instantiates a new agent, given a configuration.
@@ -239,6 +241,11 @@ func (f *Flows) Run(ctx context.Context) error {
 
 	f.status = StatusStarting
 	alog.Info("starting Flows agent")
+
+	if f.cfg.EBPF.BpfDebug {
+		logger.RunDebugEventsReader(ctx, f.ebpf.DebugEventsMap(),
+			slog.With("component", "netolly.BPFDebug"))
+	}
 
 	graph, err := f.buildPipeline(ctx)
 	if err != nil {
