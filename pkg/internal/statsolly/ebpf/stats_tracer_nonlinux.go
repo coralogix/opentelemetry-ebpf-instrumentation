@@ -41,3 +41,7 @@ func (m *StatsFetcher) Close() error {
 func (m *StatsFetcher) StatsEventsMap() *ciliumebpf.Map {
 	return nil
 }
+
+func (m *StatsFetcher) DebugEventsMap() *ciliumebpf.Map {
+	return nil
+}

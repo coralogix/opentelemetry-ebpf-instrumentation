@@ -26,9 +26,9 @@ type StatsTCPRtt StatsTcpRttT
 //go:generate $BPF2GO -cc $BPF_CLANG -cflags $BPF_CFLAGS -type tcp_rtt_t -target amd64,arm64 Stats ../../../../bpf/statsolly/k_tcp.c -- -I../../../../bpf
 
 type StatsFetcher struct {
-	log         *slog.Logger
-	statsEvents *ebpf.Map
-	closables   []io.Closer
+	log       *slog.Logger
+	objects   *StatsObjects
+	closables []io.Closer
 }
 
 func tlog() *slog.Logger {
@@ -66,9 +66,9 @@ func NewStatsFetcher(cfg *config.EBPFTracer) (*StatsFetcher, error) {
 
 	var closables []io.Closer
 	return &StatsFetcher{
-		log:         tlog,
-		statsEvents: objects.StatsEvents,
-		closables:   append(closables, ktc),
+		log:       tlog,
+		objects:   &objects,
+		closables: append(closables, ktc),
 	}, nil
 }
 
@@ -88,5 +88,9 @@ func (m *StatsFetcher) Close() error {
 // StatsEventsMap returns the ring buffer map for stats events.
 // The caller (ForwardRingbuf) is responsible for creating and closing the reader.
 func (m *StatsFetcher) StatsEventsMap() *ebpf.Map {
-	return m.statsEvents
+	return m.objects.StatsEvents
+}
+
+func (m *StatsFetcher) DebugEventsMap() *ebpf.Map {
+	return m.objects.DebugEvents
 }
