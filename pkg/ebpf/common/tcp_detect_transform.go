@@ -217,6 +217,13 @@ func matchCouchbase(parseCtx *EBPFParseContext, event *TCPRequestInfo, requestBu
 		}
 
 		if cbInfo != nil {
+			slog.Info("ReadTCPRequestIntoSpan: received Couchbase TCP event",
+				"pid", event.Pid.UserPid,
+				"ns", event.Pid.Ns,
+				"reqLen", event.Len,
+				"respLen", event.RespLen)
+			fmt.Printf("[>] %v\n", requestBuffer.UnsafeView())
+			fmt.Printf("[<] %v\n", responseBuffer.UnsafeView())
 			return TCPToCouchbaseToSpan(event, cbInfo), false, true, nil
 		}
 	}
