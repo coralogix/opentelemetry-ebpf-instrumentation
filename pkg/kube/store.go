@@ -421,10 +421,16 @@ func (s *Store) valueFromMetadata(om *informer.ObjectMeta, annotationName string
 		return ""
 	}
 	if val, ok := om.Annotations[annotationName]; ok {
+		s.log.Debug("valueFromMetadata matched annotation",
+			"pod", om.Name, "namespace", om.Namespace,
+			"annotation", annotationName, "value", val)
 		return val
 	}
 	for _, key := range labelNames {
 		if val, ok := om.Labels[key]; ok {
+			s.log.Debug("valueFromMetadata matched label",
+				"pod", om.Name, "namespace", om.Namespace,
+				"label", key, "value", val)
 			return val
 		}
 	}
@@ -477,10 +483,12 @@ func (s *Store) serviceNameNamespaceOwnerID(om *informer.ObjectMeta, containerNa
 	// ownerName can be the top Owner name, or om.Name in case it's a pod without owner
 	serviceName := om.Name
 	serviceNamespace := om.Namespace
+	nameSource := "pod-name"
 	// OTEL_SERVICE_NAME and OTEL_SERVICE_NAMESPACE variables take precedence over user-configured annotations
 	// and labels
 	if envName, ok := s.serviceNameFromEnv(om, containerName); ok {
 		serviceName = envName
+		nameSource = "env"
 	} else if s.serviceNameTemplate != nil {
 		// defining a serviceNameTemplate disables the resolution via annotation + label (this can be implemented in the template)
 		var serviceNameBuffer bytes.Buffer
@@ -503,22 +511,27 @@ func (s *Store) serviceNameNamespaceOwnerID(om *informer.ObjectMeta, containerNa
 				serviceName = strings.TrimSpace(parts[0])
 			}
 		}
-
+		nameSource = "template"
 	} else if nameFromMeta := s.valueFromMetadata(om,
 		ServiceNameAnnotation,
 		s.resourceLabels["service.name"],
 	); nameFromMeta != "" {
 		serviceName = nameFromMeta
+		nameSource = "annotation-or-label"
 	} else if own := kube.TopOwner(om.Pod); own != nil {
 		serviceName = own.Name
+		nameSource = "top-owner(" + own.Kind + ")"
 	}
+	nsSource := "pod-namespace"
 	if envName, ok := s.serviceNamespaceFromEnv(om, containerName); ok {
 		serviceNamespace = envName
+		nsSource = "env"
 	} else if nsFromMeta := s.valueFromMetadata(s.namespaceMeta(om),
 		ServiceNamespaceAnnotation,
 		s.resourceLabels["service.namespace"],
 	); nsFromMeta != "" {
 		serviceNamespace = nsFromMeta
+		nsSource = "annotation-or-label"
 	}
 
 	s.log.Debug("resolved service name/namespace",
@@ -528,6 +541,8 @@ func (s *Store) serviceNameNamespaceOwnerID(om *informer.ObjectMeta, containerNa
 		"container", containerName,
 		"service_name", serviceName,
 		"service_namespace", serviceNamespace,
+		"nameSource", nameSource,
+		"nsSource", nsSource,
 	)
 
 	return serviceName, serviceNamespace

@@ -4,6 +4,7 @@
 package discover // import "go.opentelemetry.io/obi/pkg/appolly/discover"
 
 import (
+	"log/slog"
 	"strings"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
@@ -56,6 +57,14 @@ func setServiceEnvVariables(service svc.Attrs, envVars map[string]string) svc.At
 	if svcNamespace := allVars[serviceNamespaceKey]; svcNamespace != "" && !strings.HasPrefix(svcNamespace, "$") {
 		service.UID.Namespace = svcNamespace
 	}
+
+	slog.Debug("setServiceEnvVariables",
+		"pid", service.ProcPID,
+		"svcName", service.UID.Name,
+		"svcNamespace", service.UID.Namespace,
+		"envServiceName", service.EnvVars[envServiceName],
+		"envResourceAttrs", service.EnvVars[envResourceAttrs],
+	)
 
 	return service
 }

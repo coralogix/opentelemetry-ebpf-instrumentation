@@ -46,6 +46,14 @@ func (ie *Instrumentable) CopyToServiceAttributes() {
 		// in later stages of the pipeline, for better automatic service name
 		ie.FileInfo.Service.SetAutoName()
 	}
+	slog.Debug("CopyToServiceAttributes",
+		"pid", ie.FileInfo.Pid,
+		"pidNs", ie.FileInfo.Ns,
+		"execName", ie.FileInfo.ExecutableName(),
+		"svcName", ie.FileInfo.Service.UID.Name,
+		"svcNamespace", ie.FileInfo.Service.UID.Namespace,
+		"autoName", ie.FileInfo.Service.AutoName(),
+	)
 
 	ie.FileInfo.Service.SDKLanguage = ie.Type
 }
