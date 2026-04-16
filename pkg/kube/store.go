@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	gomaps "maps"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -149,6 +150,8 @@ func NewStore(
 		metrics:             internalMetrics,
 	}
 	kubeMetadata.Subscribe(store)
+	http.HandleFunc("/debug/store", store.debugHTTPHandler)
+	log.Info("registered debug handler at /debug/store")
 	return store
 }
 
