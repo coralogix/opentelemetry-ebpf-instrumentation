@@ -18,21 +18,22 @@ services:
       UPSTREAM_A: "http://haproxy:7001"
       UPSTREAM_B: "http://haproxy:7002"
     depends_on:
-      haproxy:
-        condition: service_started
       otelcol:
         condition: service_started
       jaeger:
         condition: service_started
 
   haproxy:
-    image: haproxy:2.8.5-alpine
+    image: haproxy-rhel9-test
     container_name: hatest-haproxy
     volumes:
       - ./configs/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     ports:
       - "7001:7001"
       - "7002:7002"
+    depends_on:
+      tpclient:
+        condition: service_started
 
   obi:
     build:
