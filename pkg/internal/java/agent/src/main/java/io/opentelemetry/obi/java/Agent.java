@@ -48,7 +48,6 @@ public class Agent {
     public static native int gettid();
   }
 
-  // Package-private for testing
   static AgentBuilder builder(Map<String, String> opts, Instrumentation inst) {
     AgentBuilder builder =
         new AgentBuilder.Default()
