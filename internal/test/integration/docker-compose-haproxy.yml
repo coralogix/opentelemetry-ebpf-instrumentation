@@ -24,7 +24,10 @@ services:
         condition: service_started
 
   haproxy:
-    image: haproxy-rhel9-test
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/haproxy/Dockerfile
+    image: hatest-haproxy
     container_name: hatest-haproxy
     volumes:
       - ./configs/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
