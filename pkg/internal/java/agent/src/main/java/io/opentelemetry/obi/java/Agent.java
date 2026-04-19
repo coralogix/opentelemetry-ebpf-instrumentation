@@ -156,11 +156,19 @@ public class Agent {
   public static void agentmain(String args, Instrumentation inst)
       throws UnmodifiableClassException {
     premain(args, inst);
+    retransformLoadedClasses(inst);
+  }
 
-    // This reattempt to instrument is required because sometimes. Depending on the classes
-    // loaded, some classes disrupt ByteBuddy such that it cannot find the classes we said
-    // we want to instrument.
+  // Package-private for testing. Retransforms already-loaded classes that match the agent's
+  // instrumentation targets. This is required for dynamic injection because some classes are
+  // loaded before ByteBuddy's transformer is installed.
+  static void retransformLoadedClasses(Instrumentation inst) {
     for (Class<?> clazz : inst.getAllLoadedClasses()) {
+      // Skip lambda classes — on Java 8 retransforming them corrupts their constant pool
+      // linkage due to JDK-8145964, causing NoClassDefFoundError.
+      if (clazz.getName().contains("$$Lambda")) {
+        continue;
+      }
       if (SSLSocketInst.matches(clazz)
           || SSLSocketStreamInst.matchesInputStream(clazz)
           || SSLSocketStreamInst.matchesOutputStream(clazz)
@@ -183,12 +191,6 @@ public class Agent {
         }
       }
     }
-  }
-
-  // Package-private for testing. Skip lambda classes — on Java 8 retransforming them corrupts
-  // their constant pool linkage due to JDK-8145964, causing NoClassDefFoundError.
-  static boolean shouldSkipRetransform(Class<?> clazz) {
-    return clazz.getName().contains("$$Lambda");
   }
 
   // Just a test method functionality, not used in the Agent
