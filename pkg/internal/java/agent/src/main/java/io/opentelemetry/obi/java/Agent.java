@@ -6,7 +6,6 @@
 package io.opentelemetry.obi.java;
 
 import static net.bytebuddy.dynamic.loading.ClassInjector.UsingInstrumentation.Target.BOOTSTRAP;
-import static net.bytebuddy.matcher.ElementMatchers.nameContains;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 
 import io.opentelemetry.obi.java.ebpf.*;
@@ -61,7 +60,6 @@ public class Agent {
                 })
             .disableClassFormatChanges()
             .ignore(nameStartsWith("io.opentelemetry.obi"))
-            .ignore(nameContains("$$Lambda"))
             .with(
                 AgentBuilder.RedefinitionStrategy
                     .RETRANSFORMATION) // required for dynamic injection
@@ -163,11 +161,6 @@ public class Agent {
     // loaded, some classes disrupt ByteBuddy such that it cannot find the classes we said
     // we want to instrument.
     for (Class<?> clazz : inst.getAllLoadedClasses()) {
-      // Skip lambda classes — on Java 8 retransforming them corrupts their constant pool
-      // linkage due to JDK-8145964, causing NoClassDefFoundError.
-      if (clazz.getName().contains("$$Lambda")) {
-        continue;
-      }
       if (SSLSocketInst.matches(clazz)
           || SSLSocketStreamInst.matchesInputStream(clazz)
           || SSLSocketStreamInst.matchesOutputStream(clazz)
