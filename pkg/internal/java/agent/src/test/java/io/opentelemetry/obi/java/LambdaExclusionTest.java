@@ -19,22 +19,21 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that dynamic agent attachment does not break lambda classes.
  *
- * <p>On Java 8-14, lambda classes are VM anonymous classes. When ByteBuddy retransforms them during
- * dynamic attachment (agentmain), it corrupts them because they don't have class file bytes
- * accessible through a ClassLoader. This causes NoClassDefFoundError at runtime.
+ * <p>On Java 8, lambda classes are VM anonymous classes. Due to JDK-8145964, retransforming them
+ * corrupts their constant pool linkage to the host class, causing NoClassDefFoundError. The bug was
+ * fixed in Java 9 (anonymous classes became non-modifiable) and is irrelevant on Java 15+ (lambdas
+ * are hidden classes).
  *
- * <p>On Java 15+, lambdas are hidden classes that the JVM itself protects from retransformation, so
- * the test passes regardless. The $$Lambda exclusion is still needed for Java 8-14 support.
- *
- * <p>This test calls Agent.builder() directly, so the builder's ignore rules determine whether
+ * <p>This test calls Agent.builder() directly. The builder's .ignore() rules determine whether
  * lambda classes are protected. Without .ignore(nameContains("$$Lambda")) in Agent.builder(), this
  * test fails on Java 8 with NoClassDefFoundError.
  */
 class LambdaExclusionTest {
 
   /**
-   * Simulates the agent's dynamic attachment flow (agentmain) using the actual Agent.builder(), and
-   * verifies that lambda classes still work afterward.
+   * Installs the agent's ByteBuddy transformer using the actual Agent.builder() with
+   * RETRANSFORMATION strategy, which retransforms all already-loaded matching classes. Then
+   * exercises lambda classes to verify they weren't corrupted.
    *
    * <p>Without $$Lambda exclusion in Agent.builder(), this throws NoClassDefFoundError on Java 8.
    */
@@ -54,8 +53,9 @@ class LambdaExclusionTest {
     }
 
     // Phase 2: Install the agent's ByteBuddy transformer using the actual Agent.builder().
-    // If Agent.builder() doesn't ignore $$Lambda classes, ByteBuddy will attempt to
-    // retransform them when installOn triggers RETRANSFORMATION of loaded classes.
+    // The RETRANSFORMATION strategy causes ByteBuddy to retransform all already-loaded classes
+    // that match the type matchers. On Java 8 without the $$Lambda ignore rule, this includes
+    // lambda classes, which corrupts them due to JDK-8145964.
     Instrumentation inst = ByteBuddyAgent.install();
 
     java.lang.instrument.ClassFileTransformer transformer =
@@ -69,24 +69,9 @@ class LambdaExclusionTest {
             .installOn(inst);
 
     try {
-      // Phase 3: Retransform all matching classes, including lambdas.
-      // This simulates the agentmain() retransformation loop without any skip logic,
-      // so the only protection is Agent.builder()'s ignore rules.
-      for (Class<?> clazz : inst.getAllLoadedClasses()) {
-        if (JavaExecutorInst.matches(clazz)
-            || CallableInst.matches(clazz)
-            || RunnableInst.matches(clazz)) {
-          try {
-            inst.retransformClasses(clazz);
-          } catch (Throwable t) {
-            // Some classes can't be retransformed — that's expected
-          }
-        }
-      }
-
-      // Phase 4: Exercise lambdas after agent attachment.
-      // If $$Lambda classes were corrupted by retransformation, this throws:
-      //   java.lang.NoClassDefFoundError: LambdaExclusionTest$$Lambda$XX
+      // Phase 3: Exercise lambdas after agent attachment.
+      // If lambda classes were corrupted by the RETRANSFORMATION triggered in installOn(),
+      // this throws: java.lang.NoClassDefFoundError: LambdaExclusionTest$$Lambda$XX
       executor = Executors.newSingleThreadExecutor();
       try {
         Future<String> f = executor.submit(() -> "after-attach");
