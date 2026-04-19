@@ -140,16 +140,32 @@ func testHAProxyWithoutTraceparent(t *testing.T) {
 
 	var trace jaeger.Trace
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		resp, err := http.Get(jaegerQueryURL + "?service=tpclient-a&operation=GET%20%2Fno-tp")
+		// Fire an extra request each iteration so Jaeger accumulates
+		// fresh (post-warmup) traces in case earlier ones were partial.
+		ti.DoHTTPGet(ct, "http://localhost:6000/no-tp", 200)
+
+		resp, err := http.Get(jaegerQueryURL + "?service=tpclient-a&operation=GET%20%2Fno-tp&limit=50")
 		require.NoError(ct, err)
 		require.Equal(ct, http.StatusOK, resp.StatusCode)
 
 		var tq jaeger.TracesQuery
 		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
-		traces := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/no-tp"})
-		require.GreaterOrEqual(ct, len(traces), 1)
-		trace = traces[0]
-		require.NotEmpty(ct, trace.Spans)
+		matched := tq.FindBySpan(jaeger.Tag{Key: "url.path", Type: "string", Value: "/no-tp"})
+
+		// Pick the first fully-connected trace (skip partial warm-up traces).
+		found := false
+		for _, tr := range matched {
+			services := servicesInTrace(tr)
+			_, hasA := services["tpclient-a"]
+			_, hasC := services["tpclient-c"]
+			_, hasHA := services["haproxy"]
+			if hasA && hasC && hasHA {
+				trace = tr
+				found = true
+				break
+			}
+		}
+		require.True(ct, found, "no fully-connected /no-tp trace yet")
 	}, testTimeout, 100*time.Millisecond)
 
 	serviceASpans := trace.FindByOperationName("GET /no-tp", "server")
