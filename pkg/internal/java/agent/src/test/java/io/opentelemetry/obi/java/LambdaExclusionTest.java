@@ -75,11 +75,15 @@ class LambdaExclusionTest {
 
     try {
       // Phase 3: Manually retransform matching classes, as agentmain() does.
-      // This is the code path that triggers JDK-8145964 on Java 8: calling
-      // inst.retransformClasses() directly on VM anonymous lambda classes corrupts them.
-      // Scoped to testutil classes to avoid corrupting Gradle's test infrastructure.
+      // Uses Agent.shouldSkipRetransform() — the actual production code — to decide
+      // which classes to skip. On Java 8, calling retransformClasses() on $$Lambda
+      // classes corrupts them (JDK-8145964), so shouldSkipRetransform() must return
+      // true for them. Scoped to testutil to avoid corrupting Gradle's classes.
       for (Class<?> clazz : inst.getAllLoadedClasses()) {
         if (!clazz.getName().startsWith("testutil.")) {
+          continue;
+        }
+        if (Agent.shouldSkipRetransform(clazz)) {
           continue;
         }
         if (JavaExecutorInst.matches(clazz)
