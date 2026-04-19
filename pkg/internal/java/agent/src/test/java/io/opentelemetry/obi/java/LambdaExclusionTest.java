@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.concurrent.*;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import org.junit.jupiter.api.Test;
+import testutil.LambdaFactory;
 
 /**
  * Verifies that dynamic agent attachment does not break lambda classes.
@@ -27,6 +28,9 @@ import org.junit.jupiter.api.Test;
  * <p>This test calls Agent.builder() directly. The builder's .ignore() rules determine whether
  * lambda classes are protected. Without .ignore(nameContains("$$Lambda")) in Agent.builder(), this
  * test fails on Java 8 with NoClassDefFoundError.
+ *
+ * <p>Note: lambdas are created via {@link LambdaFactory} which lives outside the
+ * io.opentelemetry.obi package, because Agent.builder() already ignores that package prefix.
  */
 class LambdaExclusionTest {
 
@@ -39,13 +43,18 @@ class LambdaExclusionTest {
    */
   @Test
   void lambdasWorkAfterAgentAttachment() throws Exception {
-    // Phase 1: Create and exercise lambdas before agent attachment
-    Callable<String> callable = () -> "before";
+    // Phase 1: Create and exercise lambdas before agent attachment.
+    // Lambdas are from LambdaFactory (package testutil), not io.opentelemetry.obi,
+    // so they won't be ignored by the builder's nameStartsWith("io.opentelemetry.obi") rule.
+    Callable<String> callable = LambdaFactory.newCallable("before");
     assertEquals("before", callable.call());
+
+    Runnable runnable = LambdaFactory.newRunnable();
+    runnable.run();
 
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
-      Future<String> f = executor.submit(() -> "baseline");
+      Future<String> f = executor.submit(LambdaFactory.newCallable("baseline"));
       assertEquals("baseline", f.get());
     } finally {
       executor.shutdown();
@@ -55,7 +64,7 @@ class LambdaExclusionTest {
     // Phase 2: Install the agent's ByteBuddy transformer using the actual Agent.builder().
     // The RETRANSFORMATION strategy causes ByteBuddy to retransform all already-loaded classes
     // that match the type matchers. On Java 8 without the $$Lambda ignore rule, this includes
-    // lambda classes, which corrupts them due to JDK-8145964.
+    // the LambdaFactory lambda classes, which corrupts them due to JDK-8145964.
     Instrumentation inst = ByteBuddyAgent.install();
 
     java.lang.instrument.ClassFileTransformer transformer =
@@ -71,13 +80,13 @@ class LambdaExclusionTest {
     try {
       // Phase 3: Exercise lambdas after agent attachment.
       // If lambda classes were corrupted by the RETRANSFORMATION triggered in installOn(),
-      // this throws: java.lang.NoClassDefFoundError: LambdaExclusionTest$$Lambda$XX
+      // this throws: java.lang.NoClassDefFoundError: testutil/LambdaFactory$$Lambda$XX
       executor = Executors.newSingleThreadExecutor();
       try {
-        Future<String> f = executor.submit(() -> "after-attach");
+        Future<String> f = executor.submit(LambdaFactory.newCallable("after-attach"));
         assertEquals("after-attach", f.get());
 
-        executor.submit((Runnable) () -> {}).get();
+        executor.submit(LambdaFactory.newRunnable()).get();
       } finally {
         executor.shutdown();
         executor.awaitTermination(5, TimeUnit.SECONDS);
