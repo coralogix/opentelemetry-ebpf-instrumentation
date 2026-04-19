@@ -25,26 +25,25 @@ import testutil.LambdaFactory;
  * fixed in Java 9 (anonymous classes became non-modifiable) and is irrelevant on Java 15+ (lambdas
  * are hidden classes).
  *
- * <p>This test calls Agent.builder() directly. The builder's .ignore() rules determine whether
- * lambda classes are protected. Without .ignore(nameContains("$$Lambda")) in Agent.builder(), this
- * test fails on Java 8 with NoClassDefFoundError.
+ * <p>The corruption is triggered by the manual {@code inst.retransformClasses()} loop in {@link
+ * Agent#agentmain}, not by ByteBuddy's installOn(). This test replicates that loop, scoped to
+ * testutil classes, and verifies lambdas still work afterward.
  *
- * <p>Note: lambdas are created via {@link LambdaFactory} which lives outside the
- * io.opentelemetry.obi package, because Agent.builder() already ignores that package prefix.
+ * <p>Lambdas come from {@link LambdaFactory} (package testutil), not io.opentelemetry.obi, because
+ * Agent.builder() already ignores that package prefix.
  */
 class LambdaExclusionTest {
 
   /**
-   * Installs the agent's ByteBuddy transformer using the actual Agent.builder() with
-   * RETRANSFORMATION strategy, which retransforms all already-loaded matching classes. Then
-   * exercises lambda classes to verify they weren't corrupted.
+   * Installs the agent's ByteBuddy transformer, then manually retransforms matching classes (as
+   * agentmain does), and verifies lambda classes still work.
    *
    * <p>Without $$Lambda exclusion in Agent.builder(), this throws NoClassDefFoundError on Java 8.
    */
   @Test
   void lambdasWorkAfterAgentAttachment() throws Exception {
     // Phase 1: Create and exercise lambdas before agent attachment.
-    // Lambdas are from LambdaFactory (package testutil), not io.opentelemetry.obi,
+    // Lambdas come from testutil.LambdaFactory, outside io.opentelemetry.obi,
     // so they won't be ignored by the builder's nameStartsWith("io.opentelemetry.obi") rule.
     Callable<String> callable = LambdaFactory.newCallable("before");
     assertEquals("before", callable.call());
@@ -62,9 +61,6 @@ class LambdaExclusionTest {
     }
 
     // Phase 2: Install the agent's ByteBuddy transformer using the actual Agent.builder().
-    // The RETRANSFORMATION strategy causes ByteBuddy to retransform all already-loaded classes
-    // that match the type matchers. On Java 8 without the $$Lambda ignore rule, this includes
-    // the LambdaFactory lambda classes, which corrupts them due to JDK-8145964.
     Instrumentation inst = ByteBuddyAgent.install();
 
     java.lang.instrument.ClassFileTransformer transformer =
@@ -78,9 +74,28 @@ class LambdaExclusionTest {
             .installOn(inst);
 
     try {
-      // Phase 3: Exercise lambdas after agent attachment.
-      // If lambda classes were corrupted by the RETRANSFORMATION triggered in installOn(),
-      // this throws: java.lang.NoClassDefFoundError: testutil/LambdaFactory$$Lambda$XX
+      // Phase 3: Manually retransform matching classes, as agentmain() does.
+      // This is the code path that triggers JDK-8145964 on Java 8: calling
+      // inst.retransformClasses() directly on VM anonymous lambda classes corrupts them.
+      // Scoped to testutil classes to avoid corrupting Gradle's test infrastructure.
+      for (Class<?> clazz : inst.getAllLoadedClasses()) {
+        if (!clazz.getName().startsWith("testutil.")) {
+          continue;
+        }
+        if (JavaExecutorInst.matches(clazz)
+            || CallableInst.matches(clazz)
+            || RunnableInst.matches(clazz)) {
+          try {
+            inst.retransformClasses(clazz);
+          } catch (Throwable t) {
+            // Some classes can't be retransformed — that's expected
+          }
+        }
+      }
+
+      // Phase 4: Exercise lambdas after retransformation.
+      // If lambda classes were corrupted by retransformClasses() in Phase 3, this throws:
+      //   java.lang.NoClassDefFoundError: testutil/LambdaFactory$$Lambda$XX
       executor = Executors.newSingleThreadExecutor();
       try {
         Future<String> f = executor.submit(LambdaFactory.newCallable("after-attach"));
