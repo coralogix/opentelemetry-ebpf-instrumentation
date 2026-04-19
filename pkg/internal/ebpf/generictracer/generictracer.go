@@ -46,6 +46,7 @@ type Tracer struct {
 	instrumentedLibs ebpfcommon.InstrumentedLibsT
 	libsMux          sync.Mutex
 	iters            []*ebpfcommon.Iter
+	eventCtx         *ebpfcommon.EBPFEventContext
 }
 
 func tlog() *slog.Logger {
@@ -155,6 +156,7 @@ func (p *Tracer) SetupTailCalls() {
 		p.bpfObjects.ObiProtocolHttp2GrpcHandleStartFrame, // 6
 		p.bpfObjects.ObiProtocolHttp2GrpcHandleEndFrame,   // 7
 		p.bpfObjects.ObiHandleBufWithArgs,                 // 8
+		p.bpfObjects.ObiContinueProtocolHttpTp,            // 9
 	} {
 		p.log.Debug("loading program into tail call jump table", "index", i, "program", prog.String())
 		if err := p.bpfObjects.JumpTable.Update(uint32(i), uint32(prog.FD()), ebpf.UpdateAny); err != nil {
@@ -205,6 +207,17 @@ func (p *Tracer) constants() map[string]any {
 
 	m["g_bpf_debug"] = p.cfg.EBPF.BpfDebug
 	m["g_bpf_traceparent_enabled"] = p.cfg.EBPF.TrackRequestHeaders || p.cfg.EBPF.ContextPropagation.IsEnabled()
+
+	// HAProxy: detect a running haproxy process and select the matching
+	// per-version struct offsets. If no HAProxy is running at agent
+	// startup, fall back to defaults — see haproxy_offsets.go.
+	off, detected := detectRunningHAProxyOffsets()
+	if detected {
+		p.log.Debug("HAProxy detected; using version-specific BPF offsets", "offsets", off)
+	}
+	for k, v := range haproxyConstants(off) {
+		m[k] = v
+	}
 
 	return m
 }
@@ -389,6 +402,23 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			"ngx_event_connect_peer": {{
 				Required: false,
 				End:      p.bpfObjects.ObiNgxEventConnectPeerRet,
+			}},
+		},
+		"haproxy": {
+			// Hooks the unified backend dispatch path: this fires for both
+			// cold connections (just opened by tcp_connect_server) and warm
+			// connections pulled from the per-thread idle pool, so a single
+			// uprobe covers HTTP/1.1 keepalive correctly.
+			//
+			// Entry-only on purpose: the actual send() to the backend FD
+			// happens during back_handle_st_rdy / shortly after it returns,
+			// and the kernel-side find_haproxy_parent_trace lookup must
+			// already see our map entry by then. The connection is
+			// SC_ST_RDY by definition on entry, so scb -> sedesc -> conn ->
+			// handle.fd is fully populated and safe to walk.
+			"back_handle_st_rdy": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiHaproxyBackHandleStRdy,
 			}},
 		},
 		"node": {
@@ -649,6 +679,10 @@ func bpfConnInfoT(src ebpfcommon.BpfConnectionInfoT) (dst BpfConnectionInfoT) {
 	dst.S_port = src.S_port
 	return
 }
+
+func (p *Tracer) SetEventContext(ctx *ebpfcommon.EBPFEventContext) { p.eventCtx = ctx }
+
+func (p *Tracer) Capabilities() ebpfcommon.TracerCapability { return 0 }
 
 func (p *Tracer) Required() bool {
 	return true
