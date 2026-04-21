@@ -22,6 +22,7 @@
 #include <maps/fd_map.h>
 #include <maps/fd_to_connection.h>
 #include <maps/java_tasks.h>
+#include <maps/haproxy_upstream.h>
 #include <maps/nginx_upstream.h>
 #include <maps/nodejs_fd_map.h>
 #include <maps/puma_tasks.h>
@@ -53,6 +54,24 @@ static __always_inline tp_info_pid_t *find_nginx_parent_trace(const pid_connecti
     if (fd_info) {
         connection_info_part_t *parent = bpf_map_lookup_elem(&nginx_upstream, fd_info);
         bpf_dbg_printk("parent=%llx, fd=%d, type=%d", parent, fd_info->fd, fd_info->type);
+        if (parent) {
+            return bpf_map_lookup_elem(&server_traces_aux, parent);
+        }
+    }
+
+    return NULL;
+}
+
+static __always_inline tp_info_pid_t *find_haproxy_parent_trace(const pid_connection_info_t *p_conn,
+                                                                u16 orig_dport) {
+    connection_info_part_t client_part = {};
+    populate_ephemeral_info(&client_part, &p_conn->conn, orig_dport, p_conn->pid, FD_CLIENT);
+    fd_info_t *fd_info = fd_info_for_conn(&client_part);
+
+    bpf_dbg_printk("haproxy fd_info lookup=%llx, type=%d", fd_info, client_part.type);
+    if (fd_info) {
+        connection_info_part_t *parent = bpf_map_lookup_elem(&haproxy_upstream, fd_info);
+        bpf_dbg_printk("haproxy parent=%llx, fd=%d, type=%d", parent, fd_info->fd, fd_info->type);
         if (parent) {
             return bpf_map_lookup_elem(&server_traces_aux, parent);
         }
@@ -330,6 +349,12 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
 
     if (nginx_parent) {
         return nginx_parent;
+    }
+
+    tp_info_pid_t *haproxy_parent = find_haproxy_parent_trace(p_conn, orig_dport);
+
+    if (haproxy_parent) {
+        return haproxy_parent;
     }
 
     tp_info_pid_t *puma_parent = find_puma_parent_trace(pid_tgid);
