@@ -2,14 +2,14 @@
 
 ## Context
 
-The `statsolly` subsystem is where we capture **stat metrics**: numeric observations read directly from kernel state via eBPF hooks (kprobes, tracepoints, fentry, sockops). It is one of 3 pipelines the agent runs: statsolly, appoly, netolly.
+The `statso11y` subsystem is where we capture **stat metrics**: numeric observations read directly from the kernel via eBPF. It is one of 3 pipelines the agent runs: statso11y, appo11y, neto11y.
 
-Today, statsolly emits exactly 2 user-facing stat metrics:
+Today, statso11y emits exactly 2 user-facing stat metrics:
 
 | Current name | Instrument | Unit | Source |
 |---|---|---|---|
 | `obi.stat.tcp.rtt` | Histogram | `s` | `kprobe/tcp_close` reading `tcp_sock.srtt_us` |
-| `obi.stat.tcp.failed.connections` | Counter | - | `sock/inet_sock_set_state` |
+| `obi.stat.tcp.failed.connections` | Counter | `connection` | `sock/inet_sock_set_state` |
 
 There is no entry in OTel semantic conventions for these metrics, nor for any other TCP- or UDP-specific stat metric. The existing `system.network.*` namespace covers transport-agnostic NIC-level counters (`system.network.io`, `system.network.connection.count`, `system.network.packet.count`, `system.network.packet.dropped`, `system.network.errors`) but does not descend into protocol-specific detail.
 
@@ -33,10 +33,9 @@ This proposal therefore positions statsolly's TCP/UDP additions as extensions to
 
 ## Scope
 
-- TCP stat metrics via kprobes / tracepoints / more.
+- TCP stat metrics: TCP RTT, connection lifecycle, retransmits, resets and so on.
 - UDP stat metrics (errors, queue drops, datagram sizing). Datagram *counts* reuse `system.network.packet.count{network.transport=udp}`.
-- A small set of new attributes strictly needed to describe the above.
-- A before -> after mapping for the already implemented stat metrics.
+- New attributes required to describe the above.
 
 ## Naming principles applied
 
@@ -45,7 +44,7 @@ From the semconv general metrics spec and existing precedent:
 1. **Nest under `system.network.*`.** Existing stable semconv places network telemetry there; TCP/UDP sub-namespacing inside (`system.network.tcp.*`, `system.network.udp.*`) mirrors the `jvm.gc.*` / `jvm.memory.*` pattern of sub-namespacing within a stable root.
 2. **No `.total` suffix** in OTel names (Prometheus exporter adds it).
 3. **Units via UCUM**, not in the name: `By`, `s`, and grammatically-singular `{segment}`, `{connection}`, `{event}`, `{error}`, `{datagram}` for counts.
-4. **Attributes over separate metrics** when aggregation across the attribute values is still a meaningful number. Separate metrics when events are semantically distinct (different hooks alone is not sufficient grounds to split).
+4. **Attributes over separate metrics** when aggregation across the attribute values is still a meaningful number. Separate metrics when events are semantically distinct.
 5. **Reuse stable attributes** (`error.type`, `network.io.direction`, `network.transport`, `network.connection.state`) before inventing new ones.
 
 ## Namespace layout
@@ -58,7 +57,7 @@ system.network.*                              — existing stable root
   system.network.errors                       — existing
   system.network.connection.count             — existing
 
-  system.network.tcp.*                        — TCP-specific stat metrics (NEW)
+  system.network.tcp.*                        — TCP metrics (NEW)
     system.network.tcp.connection.successes   
     system.network.tcp.connection.failures   (now called obi.stat.tcp.failed.connections)
     system.network.tcp.connection.duration
@@ -67,13 +66,10 @@ system.network.*                              — existing stable root
     system.network.tcp.retransmits
     system.network.tcp.resets
 
-  system.network.udp.*                        — UDP-specific (NEW)
+  system.network.udp.*                        — UDP metrics (NEW)
     system.network.udp.errors
     system.network.udp.queue.drops
     system.network.udp.datagram.size
-
-  system.network.icmp.*                       — RESERVED, future proposal
-  system.network.quic.*                       — RESERVED, future proposal
 
 network.*                                     — attribute root (unchanged)
   network.transport                           — existing
@@ -102,7 +98,7 @@ Note that metric names sit under `system.network.*` while attribute names sit un
 - **Description**: TCP connection establishment attempts that did not reach `ESTABLISHED`.
 - **Attributes**:
   - `error.type` — enum `unknown | refused | reset | timed-out | host-unreachable | net-unreachable | other` (reusing the stable `error.type` attribute used elsewhere in semconv). Now called `reason`.
-  - (not added till now) `network.tcp.handshake.role` (`client|server`)
+  - (NEW) `network.tcp.handshake.role` (`client|server`)
 
 ## Proposed new metrics — TCP (in progress)
 
@@ -188,10 +184,6 @@ UDP is stateless: no connections, no retransmits, no handshake. Signals of inter
 | `network.tcp.retransmit.type` | `fast`, `tail_loss_probe`, `timeout`, `spurious` | `system.network.tcp.retransmits` |
 | `network.tcp.reset.cause` | `application`, `timeout`, `unreachable`, `refused` (optional) | `system.network.tcp.resets` |
 | `network.tcp.flow_control.event` | `zero_window`, `window_full` | `system.network.tcp.flow_control.events` |
-
-Attributes explicitly **reused** from the stable set: `error.type`, `network.io.direction`, `network.transport`, `network.connection.state`, `network.interface.name`.
-
-Related gap flagged for a separate proposal: `network.transport` does not currently include `sctp`.
 
 ## Before -> after mapping for this repo
 
