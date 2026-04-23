@@ -32,7 +32,6 @@ func TestRunStopsServerOnContextCancellation(t *testing.T) {
 		Config: &kubecache.Config{
 			Port:           port,
 			MaxConnections: 1,
-			SendTimeout:    10 * time.Millisecond,
 		},
 	}
 
@@ -81,7 +80,6 @@ func TestRunStopsServerOnContextCancellationWithActiveStream(t *testing.T) {
 		Config: &kubecache.Config{
 			Port:           port,
 			MaxConnections: 1,
-			SendTimeout:    10 * time.Millisecond,
 		},
 	}
 
