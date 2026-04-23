@@ -1,4 +1,4 @@
-# OTel Semantic Conventions Proposal — Stat Metrics (TCP/UDP)
+# OTel Semantic Conventions Proposal
 
 ## Context
 
@@ -11,7 +11,7 @@ Today, statso11y emits exactly 2 user-facing stat metrics:
 | `obi.stat.tcp.rtt` | Histogram | `s` | `kprobe/tcp_close` reading `tcp_sock.srtt_us` |
 | `obi.stat.tcp.failed.connections` | Counter | `connection` | `sock/inet_sock_set_state` |
 
-There is no entry in OTel semantic conventions for these metrics, nor for any other TCP- or UDP-specific stat metric. The existing `system.network.*` namespace covers transport-agnostic NIC-level counters (`system.network.io`, `system.network.connection.count`, `system.network.packet.count`, `system.network.packet.dropped`, `system.network.errors`) but does not descend into protocol-specific detail.
+There is no entry in OTel semantic conventions for these metrics, nor for any other TCP- or UDP-specific stat metric. The existing `system.network.*` namespace covers transport-agnostic NIC-level counters (`system.network.io`, `system.network.connection.count`, `system.network.errors` and so on) but does not descend into protocol-specific detail.
 
 We plan to expand statsolly's TCP and UDP coverage substantially. Before shipping those with new `obi.*` names we want to:
 
@@ -25,16 +25,14 @@ Add new TCP/UDP stat metrics to semconv by placing them under `system.network.*`
 
 ## Stat metrics vs OTel system metrics
 
-Stat metrics (as this project uses the term) and OTel's `system.*` metrics describe the same class of signal such as kernel/OS-observed telemetry, typically counters of events or histograms of observed quantities. The only difference is the collection mechanism: semconv's `system.*` was historically defined against procfs/sysfs polling (node_exporter shape); statsolly observes the same phenomena via eBPF.
+What this project calls **stat metrics** and what OTel's semconv calls `system.*` metrics are the same kind of signal: kernel/OS-observed telemetry, typically counters of events or histograms of observed quantities (RTTs, byte counts, drops, error categories). In other words, OBI's "stat metrics" slot naturally into OTel's `system.*` namespace.
 
-Semantics, not the mechanism, define the namespace.
-
-This proposal therefore positions statsolly's TCP/UDP additions as extensions to the existing `system.network.*` namespace, not as a parallel vendor space.
+This proposal therefore positions statsolly's network-focused stat metrics as extensions to the existing `system.network.*` namespace, not as a parallel vendor space.
 
 ## Scope
 
 - TCP stat metrics: TCP RTT, connection lifecycle, retransmits, resets and so on.
-- UDP stat metrics (errors, queue drops, datagram sizing). Datagram *counts* reuse `system.network.packet.count{network.transport=udp}`.
+- UDP stat metrics (errors, queue drops, message payload size). Datagram *counts* reuse `system.network.packet.count{network.transport=udp}`.
 - New attributes required to describe the above.
 
 ## Naming principles applied
@@ -62,20 +60,20 @@ system.network.*                              — existing stable root
     system.network.tcp.connection.failures   (now called obi.stat.tcp.failed.connections)
     system.network.tcp.connection.duration
     system.network.tcp.handshake.duration
-    system.network.tcp.rtt                   (now called obi.stat.tcp.rtt)
+    system.network.tcp.rtt.duration          (now called obi.stat.tcp.rtt)
     system.network.tcp.retransmits
     system.network.tcp.resets
 
   system.network.udp.*                        — UDP metrics (NEW)
     system.network.udp.errors
     system.network.udp.queue.drops
-    system.network.udp.datagram.size
+    system.network.udp.message.size
 
 network.*                                     — attribute root (unchanged)
   network.transport                           — existing
   network.io.direction                        — existing
   network.connection.state                    — existing
-  network.tcp.handshake.role                  — NEW (client|server) or (local|remote)
+  network.tcp.handshake.role                  — NEW (client|server)
   network.tcp.retransmit.type                 — NEW (fast|tail_loss_probe|timeout|spurious)
   network.tcp.reset.cause                     — NEW, optional (application|timeout|unreachable|refused)
 ```
@@ -84,7 +82,7 @@ Note that metric names sit under `system.network.*` while attribute names sit un
 
 ## Proposed new metrics — TCP (implemented)
 
-### `system.network.tcp.rtt`
+### `system.network.tcp.rtt.duration`
 
 - **Instrument**: Histogram
 - **Unit**: `s`
@@ -169,11 +167,11 @@ UDP is stateless: no connections, no retransmits, no handshake. Signals of inter
 - **Description**: Datagrams dropped due to socket queue exhaustion (distinct from interface-level drops covered by `system.network.packet.dropped`).
 - **Attributes**: `network.io.direction`.
 
-### `system.network.udp.datagram.size`
+### `system.network.udp.message.size`
 
 - **Instrument**: Histogram
 - **Unit**: `By`
-- **Description**: Datagram payload size distribution.
+- **Description**: Size distribution of UDP message payload.
 - **Attributes**: `network.io.direction`.
 
 ## Proposed new attributes
@@ -185,11 +183,13 @@ UDP is stateless: no connections, no retransmits, no handshake. Signals of inter
 | `network.tcp.reset.cause` | `application`, `timeout`, `unreachable`, `refused` (optional) | `system.network.tcp.resets` |
 | `network.tcp.flow_control.event` | `zero_window`, `window_full` | `system.network.tcp.flow_control.events` |
 
-## Before -> after mapping for this repo
+## OBI rollout (repo-internal, not part of the semconv proposal)
+
+### Before -> after mapping for this repo
 
 | Current name | Proposed name | Disposition |
 |---|---|---|
-| `obi.stat.tcp.rtt` | `system.network.tcp.rtt` | Direct rename once accepted. Existing `Float64Histogram` instrument keeps working; only the name string changes. |
+| `obi.stat.tcp.rtt` | `system.network.tcp.rtt.duration` | Direct rename once accepted. Existing `Float64Histogram` instrument keeps working; only the name string changes. |
 | `obi.stat.tcp.failed.connections` | `system.network.tcp.connection.failures` | Direct rename. The existing `reason` attribute is replaced by the stable `error.type` attribute; value set is preserved (`unknown \| refused \| reset \| timed-out \| host-unreachable \| net-unreachable \| other`). `Int64Counter` instrument is unchanged. Addition of `network.tcp.handshake.role` is deferred (see "in progress" section). |
 
 All other TCP/UDP stat metrics proposed above are greenfield for this repo. Mapping against the earlier PR roadmap:
@@ -198,3 +198,13 @@ All other TCP/UDP stat metrics proposed above are greenfield for this repo. Mapp
 - active connections -> reuse existing `system.network.connection.count`
 - success rate -> `rate(system.network.tcp.connection.failures) / (rate(system.network.tcp.connection.successes) + rate(system.network.tcp.connection.failures))`
 - handshake latency -> `system.network.tcp.handshake.duration`
+
+### Migration strategy (to be decided)
+
+The two existing metrics (`obi.stat.tcp.rtt`, `obi.stat.tcp.failed.connections`) have downstream consumers, so the rename is a breaking change. Options, in rough order of user friction:
+
+- **Hard cut**. Remove `obi.stat.*` and emit `system.network.*` in the same release. Simple; relies on pre-1.0 stability signal and a CHANGELOG note to carry the load.
+- **Dual-emit for a deprecation window**. Emit both old and new names for N releases, then drop the old. No user action needed mid-window, at the cost of double cardinality on the two metrics while the window is open.
+- **Opt-in flag (semconv pattern)**. Mirror upstream `OTEL_SEMCONV_STABILITY_OPT_IN`: old names by default, stat/dup emits both, stat emits new-only; flip the default in a later release and eventually remove the old. Three stages, but it's the pattern OTel users already recognise. (Described here <https://opentelemetry.io/blog/2023/http-conventions-declared-stable/#migration-plan>).
+
+Note: `metrics.features` config values (`stats_tcp_failed_connections`, `stats_tcp_rtt`) are unchanged in all three options. They're internal toggles, not part of the user-facing metric surface.
