@@ -68,6 +68,9 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 		return nil, fmt.Errorf("loading BPF data: %w", err)
 	}
 
+	// pino test, delete one fixes probe
+	delete(spec.Programs, "obi_tracepoint_inet_sock_set_state") // drop failed-conn
+
 	ebpfconvenience.SetupMapSizes(spec, cfg.MapsConfig.GlobalScaleFactor)
 
 	sharedMaps := map[string]*ebpf.Map{}
