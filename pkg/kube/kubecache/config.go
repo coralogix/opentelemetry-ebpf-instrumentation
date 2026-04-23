@@ -27,18 +27,18 @@ const (
 
 // Config options of the Kubernetes Cache service. Check the "DefaultConfig" variable for a view of the default values.
 type Config struct {
-	// LogLevel can be one of: debug, info, warn, error
 	LogLevel LogLevel `yaml:"log_level" env:"OTEL_EBPF_K8S_CACHE_LOG_LEVEL"`
-	// Port where the service is going to listen to
+	// Port grpc port k8s-cache is listening to
 	Port int `yaml:"port" env:"OTEL_EBPF_K8S_CACHE_PORT" validate:"gte=0"`
-	// MaxConnection is the maximum number of concurrent clients that the service can handle at the same time
+	// MaxConnections maximum number of concurrent streams per HTTP/2 transport
 	MaxConnections int `yaml:"max_connections" env:"OTEL_EBPF_K8S_CACHE_MAX_CONNECTIONS" validate:"gte=0"`
-	// ProfilePort is the port where the pprof server is going to listen to. 0 (default) means disabled
+	// ProfilePort port where the pprof server is going to listen to. 0 means disabled
 	ProfilePort int `yaml:"profile_port" env:"OTEL_EBPF_K8S_CACHE_PROFILE_PORT" validate:"gte=0"`
-	// InformerResyncPeriod is the time interval between complete resyncs of the informers
+	// InformerResyncPeriod time interval between complete resyncs of the informers
 	InformerResyncPeriod time.Duration `yaml:"informer_resync_period" env:"OTEL_EBPF_K8S_CACHE_INFORMER_RESYNC_PERIOD" validate:"gte=0"`
-	// SendTimeout is the maximum duration to wait to receive an event before dropping the connection.
-	SendTimeout time.Duration `yaml:"informer_send_timeout" env:"OTEL_EBPF_K8S_CACHE_INFORMER_SEND_TIMEOUT" validate:"gte=0"`
+	// TODO return SendTimeout option and enforce it
+	//SendTimeout is the maximum duration to wait to receive an event before dropping the connection.
+	//SendTimeout time.Duration `yaml:"informer_send_timeout" env:"OTEL_EBPF_K8S_CACHE_INFORMER_SEND_TIMEOUT" validate:"gte=0"`
 
 	InternalMetrics instrument.InternalMetricsConfig `yaml:"internal_metrics"`
 }
@@ -48,8 +48,11 @@ var DefaultConfig = Config{
 	Port:                 50055,
 	MaxConnections:       150,
 	InformerResyncPeriod: 30 * time.Minute,
-	SendTimeout:          10 * time.Second,
 	ProfilePort:          0,
+	InternalMetrics: instrument.InternalMetricsConfig{
+		Port: 0,
+		Path: instrument.DefaultMetricsPath,
+	},
 }
 
 // LoadConfig overrides configuration in the following order (from less to most priority)

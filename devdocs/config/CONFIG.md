@@ -92,20 +92,10 @@ InstanceIDConfig configures how OBI will get the Instance ID of the traces/metri
 | `attributes.kubernetes.kubeconfig_path` | `string` | `KUBECONFIG` |  |  |  | Specifies the path to the kubeconfig file. If unset, it will look in the usual location. |
 | `attributes.kubernetes.meta_cache_address` | `string` | `OTEL_EBPF_KUBE_META_CACHE_ADDRESS` |  |  |  | Specifies the host:port address of the obi-k8s-cache service instance |
 | `attributes.kubernetes.meta_restrict_local_node` | `boolean` | `OTEL_EBPF_KUBE_META_RESTRICT_LOCAL_NODE` | `false` |  |  | Will download only the metadata from the Pods that are located in the same node as the OBI instance. It will also restrict the Node information to the local node. |
+| `attributes.kubernetes.meta_source_labels` | [`MetaSourceLabels`](#metasourcelabels) |  |  |  | Yes | Allows OBI overriding the service name and namespace of an application from the given labels.  kept for backwards-compatibility with Beyla 1.9 |
 | `attributes.kubernetes.reconnect_initial_interval` | `duration` | `OTEL_EBPF_KUBE_RECONNECT_INITIAL_INTERVAL` | `5s` | `30s`, `5m`, `1ms`, etc |  | Specifies the time to wait before reconnecting to the Kubernetes API after a connection loss. |
 | `attributes.kubernetes.resource_labels` | `map[string]string[]` |  |  |  |  | Allows OBI overriding the OTEL Resource attributes from a map of user-defined labels. |
 | `attributes.kubernetes.service_name_template` | `string` | `OTEL_EBPF_SERVICE_NAME_TEMPLATE` |  |  |  | Allows to override the service.name with a custom value. Uses the go template language. |
-
-#### `attributes.kubernetes.meta_source_labels`
-
-MetaSourceLabels allow overriding some metadata from kubernetes labels, Left for backwards-compatibility.
-
-**Deprecated.**
-
-| YAML Path | Type | Env Var | Default | Values | Deprecated | Description |
-|---|---|---|---|---|---|---|
-| `attributes.kubernetes.meta_source_labels.service_name` | `string` | `OTEL_SERVICE_NAME` |  |  |  |  |
-| `attributes.kubernetes.meta_source_labels.service_namespace` | `string` | `OTEL_EBPF_SERVICE_NAMESPACE` |  |  |  |  |
 
 ### `attributes.metadata_retry`
 
@@ -634,6 +624,15 @@ IntEnum defines an enumeration of integers (e.g. ports or PIDs). It allows a set
 | Field | Type | Values | Description |
 |---|---|---|---|
 | `service` | [`GlobAttributes`](#globattributes)[] |  | Should also be contained in 'services' in the Discovery section |
+
+### MetaSourceLabels
+
+MetaSourceLabels allow overriding some metadata from kubernetes labels, Left for backwards-compatibility.
+
+| Field | Type | Values | Description |
+|---|---|---|---|
+| `service_name` | `string` |  |  |
+| `service_namespace` | `string` |  |  |
 
 ### RegexSelector
 

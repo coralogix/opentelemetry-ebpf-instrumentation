@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://go.opentelemetry.io/obi/pkg/kube/kubecache/config",
+  "$defs": {
+    "InternalMetricsConfig": {
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path to expose Prometheus metrics on",
+          "default": "/metrics",
+          "x-env-var": "OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PATH"
+        },
+        "port": {
+          "type": "integer",
+          "description": "The port to run the http metric server on, 0 means disabled",
+          "default": 0,
+          "x-env-var": "OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PORT"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "informer_resync_period": {
+      "type": "string",
+      "pattern": "^[0-9]+(ms|s|m)$",
+      "description": "Time interval between complete resyncs of the informers",
+      "default": "30m",
+      "examples": [
+        "30s",
+        "5m",
+        "1ms"
+      ],
+      "x-env-var": "OTEL_EBPF_K8S_CACHE_INFORMER_RESYNC_PERIOD"
+    },
+    "internal_metrics": {
+      "$ref": "#/$defs/InternalMetricsConfig"
+    },
+    "log_level": {
+      "type": "string",
+      "enum": [
+        "debug",
+        "error",
+        "info",
+        "warn"
+      ],
+      "default": "info",
+      "x-env-var": "OTEL_EBPF_K8S_CACHE_LOG_LEVEL"
+    },
+    "max_connections": {
+      "type": "integer",
+      "description": "Maximum number of concurrent streams per HTTP/2 transport",
+      "default": 150,
+      "x-env-var": "OTEL_EBPF_K8S_CACHE_MAX_CONNECTIONS"
+    },
+    "port": {
+      "type": "integer",
+      "description": "Grpc port k8s-cache is listening to",
+      "default": 50055,
+      "x-env-var": "OTEL_EBPF_K8S_CACHE_PORT"
+    },
+    "profile_port": {
+      "type": "integer",
+      "description": "Port where the pprof server is going to listen to. 0 means disabled",
+      "default": 0,
+      "x-env-var": "OTEL_EBPF_K8S_CACHE_PROFILE_PORT"
+    }
+  },
+  "type": "object",
+  "title": "k8s-cache Configuration Schema",
+  "description": "JSON Schema for the OpenTelemetry eBPF Instrumentation k8s-cache service"
+}

@@ -989,8 +989,7 @@
             "type": "integer"
           },
           "type": "array",
-          "description": "Allows selecting processes by PID (static from config). When non-empty, the process PID must be in this list.",
-          "x-env-var": "OTEL_EBPF_TARGET_PID"
+          "description": "Allows selecting processes by PID (static from config). When non-empty, the process PID must be in this list."
         }
       },
       "type": "object"
@@ -1543,12 +1542,10 @@
     "MetaSourceLabels": {
       "properties": {
         "service_name": {
-          "type": "string",
-          "x-env-var": "OTEL_SERVICE_NAME"
+          "type": "string"
         },
         "service_namespace": {
-          "type": "string",
-          "x-env-var": "OTEL_EBPF_SERVICE_NAMESPACE"
+          "type": "string"
         }
       },
       "type": "object",
@@ -2162,8 +2159,7 @@
             "type": "integer"
           },
           "type": "array",
-          "description": "Allows selecting processes by PID. When non-empty, the process PID must be in this list (in addition to any path/port criteria).",
-          "x-env-var": "OTEL_EBPF_TARGET_PID"
+          "description": "Allows selecting processes by PID. When non-empty, the process PID must be in this list (in addition to any path/port criteria)."
         }
       },
       "type": "object",

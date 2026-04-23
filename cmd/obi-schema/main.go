@@ -6,6 +6,7 @@
 //
 //	go run ./cmd/obi-schema > config-schema.json
 //	go run ./cmd/obi-schema -output schema.json
+//	go run ./cmd/obi-schema -target k8s-cache -output schema.json
 package main
 
 import (
@@ -27,8 +28,62 @@ import (
 
 	"github.com/invopop/jsonschema"
 
+	"go.opentelemetry.io/obi/pkg/kube/kubecache"
 	"go.opentelemetry.io/obi/pkg/obi"
 )
+
+// target describes one schema-generation target (OBI or the k8s-cache service).
+type target struct {
+	packages    []string
+	rootValue   any
+	rootType    reflect.Type
+	defaults    reflect.Value
+	title       string
+	description string
+}
+
+func obiTarget() *target {
+	return &target{
+		packages: []string{
+			"pkg/obi",
+			"pkg/config",
+			"pkg/export",
+			"pkg/export/debug",
+			"pkg/export/imetrics",
+			"pkg/export/instrumentations",
+			"pkg/export/otel/otelcfg",
+			"pkg/export/otel",
+			"pkg/export/otel/perapp",
+			"pkg/export/prom",
+			"pkg/kube/kubeflags",
+			"pkg/transform",
+			"pkg/filter",
+			"pkg/appolly/services",
+			"pkg/appolly/meta",
+			"pkg/internal/pipe/geoip",
+			"pkg/internal/pipe/rdns",
+		},
+		rootValue:   &obi.Config{},
+		rootType:    reflect.TypeFor[obi.Config](),
+		defaults:    reflect.ValueOf(obi.DefaultConfig),
+		title:       "OBI Configuration Schema",
+		description: "JSON Schema for OpenTelemetry eBPF Instrumentation (OBI) configuration",
+	}
+}
+
+func k8sCacheTarget() *target {
+	return &target{
+		packages: []string{
+			"pkg/kube/kubecache",
+			"pkg/kube/kubecache/instrument",
+		},
+		rootValue:   &kubecache.Config{},
+		rootType:    reflect.TypeFor[kubecache.Config](),
+		defaults:    reflect.ValueOf(kubecache.DefaultConfig),
+		title:       "k8s-cache Configuration Schema",
+		description: "JSON Schema for the OpenTelemetry eBPF Instrumentation k8s-cache service",
+	}
+}
 
 // SchemaGenerator holds the state for schema generation.
 type SchemaGenerator struct {
@@ -56,29 +111,8 @@ func NewSchemaGenerator() *SchemaGenerator {
 	}
 }
 
-// packagesToScan lists packages that contain types used in the config
-var packagesToScan = []string{
-	"pkg/obi",
-	"pkg/config",
-	"pkg/export",
-	"pkg/export/debug",
-	"pkg/export/imetrics",
-	"pkg/export/instrumentations",
-	"pkg/export/otel/otelcfg",
-	"pkg/export/otel",
-	"pkg/export/otel/perapp",
-	"pkg/export/prom",
-	"pkg/kube/kubeflags",
-	"pkg/transform",
-	"pkg/filter",
-	"pkg/appolly/services",
-	"pkg/appolly/meta",
-	"pkg/internal/pipe/geoip",
-	"pkg/internal/pipe/rdns",
-}
-
-// scanSourceFiles scans all Go source files in packagesToScan and extracts metadata.
-func (g *SchemaGenerator) scanSourceFiles() {
+// scanSourceFiles scans the given Go packages and extracts metadata.
+func (g *SchemaGenerator) scanSourceFiles(packages []string) {
 	moduleRoot := findModuleRoot(filepath.Dir("../.."))
 	if moduleRoot == "" {
 		fmt.Fprintln(os.Stderr, "Warning: could not find module root")
@@ -86,7 +120,7 @@ func (g *SchemaGenerator) scanSourceFiles() {
 	}
 
 	fset := token.NewFileSet()
-	for _, pkg := range packagesToScan {
+	for _, pkg := range packages {
 		pkgPath := filepath.Join(moduleRoot, pkg)
 		entries, err := os.ReadDir(pkgPath)
 		if err != nil {
@@ -322,12 +356,24 @@ func extractConstValueAndType(expr ast.Expr, inheritedType string) (typeName str
 
 func main() {
 	outputFile := flag.String("output", "", "Output file path (default: stdout)")
+	targetName := flag.String("target", "obi", "Which config to reflect on: obi or k8s-cache")
 	flag.Parse()
+
+	var tgt *target
+	switch *targetName {
+	case "obi":
+		tgt = obiTarget()
+	case "k8s-cache":
+		tgt = k8sCacheTarget()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown -target %q (expected obi or k8s-cache)\n", *targetName)
+		os.Exit(1)
+	}
 
 	g := NewSchemaGenerator()
 
 	// Scan source files to populate registries
-	g.scanSourceFiles()
+	g.scanSourceFiles(tgt.packages)
 
 	reflector := &jsonschema.Reflector{
 		RequiredFromJSONSchemaTags: true,
@@ -340,12 +386,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: could not add Go comments: %v\n", err)
 	}
 
-	schema := reflector.Reflect(&obi.Config{})
-	schema.Title = "OBI Configuration Schema"
-	schema.Description = "JSON Schema for OpenTelemetry eBPF Instrumentation (OBI) configuration"
+	schema := reflector.Reflect(tgt.rootValue)
+	schema.Title = tgt.title
+	schema.Description = tgt.description
 
 	// Process inline fields first (merge properties from inline types)
-	g.processInlineFields(schema)
+	g.processInlineFields(schema, tgt.rootType)
 
 	// Process deprecated annotations from comments
 	processDeprecated(schema)
@@ -360,7 +406,7 @@ func main() {
 	g.processFieldAnnotations(schema)
 
 	// Add default values from DefaultConfig
-	addDefaults(schema)
+	addDefaults(schema, tgt.defaults)
 
 	// Sort properties for deterministic output
 	sortSchemaProperties(schema)
@@ -501,13 +547,13 @@ func callJSONSchemaMethod(t reflect.Type) *jsonschema.Schema {
 }
 
 // processInlineFields merges properties from inline field types into their parent schemas.
-func (g *SchemaGenerator) processInlineFields(schema *jsonschema.Schema) {
+func (g *SchemaGenerator) processInlineFields(schema *jsonschema.Schema, rootType reflect.Type) {
 	if schema == nil {
 		return
 	}
 
 	// Build inline type schemas dynamically using reflection
-	inlineTypeSchemas := buildInlineTypeSchemas(reflect.TypeFor[obi.Config]())
+	inlineTypeSchemas := buildInlineTypeSchemas(rootType)
 
 	// Process each definition that has inline fields
 	for typeName, inlineTypes := range g.inlineFields {
@@ -550,18 +596,29 @@ func (g *SchemaGenerator) processEnvVars(schema *jsonschema.Schema) {
 		return
 	}
 
-	// Process definitions - these are named types
+	// Apply root-schema (Config) env vars only to the actual root — not to
+	// every recursion target, which would incorrectly overwrite env vars on
+	// nested definitions that happen to share a yaml key with the root.
+	if envVars, ok := g.envVars["Config"]; ok {
+		addEnvVarsToProperties(schema, envVars)
+	}
+
+	g.processDefinitionEnvVars(schema)
+}
+
+// processDefinitionEnvVars applies per-type env vars to named definitions,
+// recursing into any nested definitions. It deliberately never touches the
+// root-level Config env vars — those are applied once, at the root, by
+// processEnvVars.
+func (g *SchemaGenerator) processDefinitionEnvVars(schema *jsonschema.Schema) {
+	if schema == nil {
+		return
+	}
 	for typeName, defSchema := range schema.Definitions {
 		if envVars, ok := g.envVars[typeName]; ok {
 			addEnvVarsToProperties(defSchema, envVars)
 		}
-		// Recursively process nested schemas
-		g.processEnvVars(defSchema)
-	}
-
-	// Process root schema properties (for Config type)
-	if envVars, ok := g.envVars["Config"]; ok {
-		addEnvVarsToProperties(schema, envVars)
+		g.processDefinitionEnvVars(defSchema)
 	}
 }
 
@@ -817,10 +874,10 @@ func (g *SchemaGenerator) customMapper() func(reflect.Type) *jsonschema.Schema {
 	}
 }
 
-// addDefaults extracts default values from obi.DefaultConfig and sets
+// addDefaults extracts default values from the given defaults struct and sets
 // them on matching schema properties via the standard "default" keyword.
-func addDefaults(schema *jsonschema.Schema) {
-	defaults := structToMap(reflect.ValueOf(obi.DefaultConfig), "yaml")
+func addDefaults(schema *jsonschema.Schema, defaultsValue reflect.Value) {
+	defaults := structToMap(defaultsValue, "yaml")
 	applyDefaults(schema, defaults, schema)
 }
 

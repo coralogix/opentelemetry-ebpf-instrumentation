@@ -90,11 +90,23 @@ type DocGenerator struct {
 	// tables but not rendered as their own config sections. These get
 	// documented in a "Type Definitions" appendix.
 	referencedTypes map[string]bool
+	// title is the H1 heading of the generated document.
+	title string
+	// intro is the paragraph shown below the title.
+	intro string
 }
+
+const (
+	defaultTitle = "OBI Configuration Reference"
+	defaultIntro = "Complete configuration reference for OpenTelemetry eBPF Instrumentation (OBI).\n" +
+		"Configuration is provided via YAML file and/or environment variables."
+)
 
 func main() {
 	schemaFile := flag.String("schema", "devdocs/config/config-schema.json", "Path to the JSON schema file")
 	outputFile := flag.String("output", "", "Output file path (default: stdout)")
+	title := flag.String("title", defaultTitle, "Title used as the H1 heading of the generated document")
+	intro := flag.String("intro", defaultIntro, "Introduction paragraph shown below the title")
 	flag.Parse()
 
 	data, err := os.ReadFile(*schemaFile)
@@ -109,7 +121,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	gen := &DocGenerator{root: &schema, referencedTypes: make(map[string]bool)}
+	gen := &DocGenerator{
+		root:            &schema,
+		referencedTypes: make(map[string]bool),
+		title:           *title,
+		intro:           *intro,
+	}
 
 	schemaLink := *schemaFile
 	if *outputFile != "" {
@@ -135,9 +152,16 @@ func main() {
 func (g *DocGenerator) Generate(schemaLink string) string {
 	var b strings.Builder
 
-	b.WriteString("# OBI Configuration Reference\n\n")
-	b.WriteString("Complete configuration reference for OpenTelemetry eBPF Instrumentation (OBI).\n")
-	b.WriteString("Configuration is provided via YAML file and/or environment variables.\n\n")
+	title := g.title
+	if title == "" {
+		title = defaultTitle
+	}
+	intro := g.intro
+	if intro == "" {
+		intro = defaultIntro
+	}
+	fmt.Fprintf(&b, "# %s\n\n", title)
+	b.WriteString(intro + "\n\n")
 	fmt.Fprintf(&b, "Generated from [`%s`](%s).\n\n", schemaLink, schemaLink)
 	b.WriteString("---\n\n")
 

@@ -9,10 +9,12 @@ import (
 	"go.opentelemetry.io/obi/pkg/export/connector"
 )
 
-const defaultMetricsPath = "/metrics"
+const DefaultMetricsPath = "/metrics"
 
 type InternalMetricsConfig struct {
-	Port int    `yaml:"port,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PORT"`
+	// Port the port to run the http metric server on, 0 means disabled
+	Port int `yaml:"port,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PORT" validate:"gte=0"`
+	// Path the path to expose Prometheus metrics on
 	Path string `yaml:"path,omitempty" env:"OTEL_EBPF_K8S_CACHE_INTERNAL_METRICS_PROMETHEUS_PATH"`
 }
 
@@ -25,7 +27,7 @@ func Start(ctx context.Context, cfg *InternalMetricsConfig) context.Context {
 		return ctx
 	}
 	if cfg.Path == "" {
-		cfg.Path = defaultMetricsPath
+		cfg.Path = DefaultMetricsPath
 	}
 	promMgr := connector.PrometheusManager{}
 	metrics := prometheusInternalMetrics(cfg, &promMgr)

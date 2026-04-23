@@ -832,18 +832,33 @@ regenerate-port-lookup:
 
 CONFIG_SCHEMA_FILE ?= devdocs/config/config-schema.json
 CONFIG_DOCS_FILE ?= devdocs/config/CONFIG.md
+K8S_CACHE_CONFIG_SCHEMA_FILE ?= devdocs/config/k8s-cache/config-schema.json
+K8S_CACHE_CONFIG_DOCS_FILE ?= devdocs/config/k8s-cache/CONFIG.md
 
 .PHONY: generate-config-schema
-generate-config-schema:
+generate-config-schema: generate-obi-config-schema generate-k8s-cache-config-schema
+
+.PHONY: generate-obi-config-schema
+generate-obi-config-schema:
 	@echo "### Generating JSON schema for OBI configuration"
 	@mkdir -p $(dir $(CONFIG_SCHEMA_FILE))
 	go run ./cmd/obi-schema -output $(CONFIG_SCHEMA_FILE)
 	@echo "### Generating configuration reference docs"
 	go run ./cmd/config-docs -schema $(CONFIG_SCHEMA_FILE) -output $(CONFIG_DOCS_FILE)
 
+.PHONY: generate-k8s-cache-config-schema
+generate-k8s-cache-config-schema:
+	@echo "### Generating JSON schema for k8s-cache configuration"
+	@mkdir -p $(dir $(K8S_CACHE_CONFIG_SCHEMA_FILE))
+	go run ./cmd/obi-schema -target k8s-cache -output $(K8S_CACHE_CONFIG_SCHEMA_FILE)
+	@echo "### Generating k8s-cache configuration reference docs"
+	go run ./cmd/config-docs -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE) \
+		-title "k8s-cache Configuration Reference" \
+		-intro "Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service. Configuration is provided via YAML file and/or environment variables."
+
 .PHONY: check-config-schema
 check-config-schema:
-	@echo "### Checking if JSON schema is up-to-date"
+	@echo "### Checking if OBI JSON schema is up-to-date"
 	@mkdir -p $(dir $(CONFIG_SCHEMA_FILE))
 	@go run ./cmd/obi-schema -output $(CONFIG_SCHEMA_FILE).tmp
 	@if ! diff -q $(CONFIG_SCHEMA_FILE) $(CONFIG_SCHEMA_FILE).tmp > /dev/null 2>&1; then \
@@ -854,8 +869,8 @@ check-config-schema:
 		exit 1; \
 	fi
 	@rm -f $(CONFIG_SCHEMA_FILE).tmp
-	@echo "JSON schema is up-to-date"
-	@echo "### Checking if configuration docs are up-to-date"
+	@echo "OBI JSON schema is up-to-date"
+	@echo "### Checking if OBI configuration docs are up-to-date"
 	@go run ./cmd/config-docs -schema $(CONFIG_SCHEMA_FILE) -output $(CONFIG_DOCS_FILE).tmp
 	@if ! diff -q $(CONFIG_DOCS_FILE) $(CONFIG_DOCS_FILE).tmp > /dev/null 2>&1; then \
 		echo "Configuration docs are out of date. Run 'make generate-config-schema' to update."; \
@@ -865,4 +880,29 @@ check-config-schema:
 		exit 1; \
 	fi
 	@rm -f $(CONFIG_DOCS_FILE).tmp
-	@echo "Configuration docs are up-to-date"
+	@echo "OBI configuration docs are up-to-date"
+	@echo "### Checking if k8s-cache JSON schema is up-to-date"
+	@mkdir -p $(dir $(K8S_CACHE_CONFIG_SCHEMA_FILE))
+	@go run ./cmd/obi-schema -target k8s-cache -output $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp
+	@if ! diff -q $(K8S_CACHE_CONFIG_SCHEMA_FILE) $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp > /dev/null 2>&1; then \
+		echo "k8s-cache JSON schema is out of date. Run 'make generate-config-schema' to update it."; \
+		echo "Diff:"; \
+		diff $(K8S_CACHE_CONFIG_SCHEMA_FILE) $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp || true; \
+		rm -f $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp; \
+		exit 1; \
+	fi
+	@rm -f $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp
+	@echo "k8s-cache JSON schema is up-to-date"
+	@echo "### Checking if k8s-cache configuration docs are up-to-date"
+	@go run ./cmd/config-docs -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE).tmp \
+		-title "k8s-cache Configuration Reference" \
+		-intro "Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service. Configuration is provided via YAML file and/or environment variables."
+	@if ! diff -q $(K8S_CACHE_CONFIG_DOCS_FILE) $(K8S_CACHE_CONFIG_DOCS_FILE).tmp > /dev/null 2>&1; then \
+		echo "k8s-cache configuration docs are out of date. Run 'make generate-config-schema' to update."; \
+		echo "Diff:"; \
+		diff $(K8S_CACHE_CONFIG_DOCS_FILE) $(K8S_CACHE_CONFIG_DOCS_FILE).tmp || true; \
+		rm -f $(K8S_CACHE_CONFIG_DOCS_FILE).tmp; \
+		exit 1; \
+	fi
+	@rm -f $(K8S_CACHE_CONFIG_DOCS_FILE).tmp
+	@echo "k8s-cache configuration docs are up-to-date"

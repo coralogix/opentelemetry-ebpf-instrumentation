@@ -85,13 +85,12 @@ func (ic *InformersCache) Subscribe(msg *informer.SubscribeMessage, server infor
 	}
 	ic.metrics.ClientConnect()
 	o := &connection{
-		log:         ic.log.With("clientID", p.Addr.String()),
-		id:          p.Addr.String(),
-		server:      server,
-		sendTimeout: ic.Config.SendTimeout,
-		metrics:     ic.metrics,
-		fromEpoch:   msg.GetFromTimestampEpoch(),
-		messages:    sync.NewQueue[*informer.Event](),
+		log:       ic.log.With("clientID", p.Addr.String()),
+		id:        p.Addr.String(),
+		server:    server,
+		metrics:   ic.metrics,
+		fromEpoch: msg.GetFromTimestampEpoch(),
+		messages:  sync.NewQueue[*informer.Event](),
 	}
 	ic.log.Info("client subscribed", "id", o.ID(),
 		"fromEpoch", o.fromEpoch,
@@ -116,8 +115,6 @@ type connection struct {
 
 	id     string
 	server grpc.ServerStreamingServer[informer.Event]
-
-	sendTimeout time.Duration
 
 	metrics instrument.InternalMetrics
 	// fromEpoch filters events whose timestamp is lower than its value

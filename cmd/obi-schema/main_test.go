@@ -478,7 +478,7 @@ func TestProcessInlineFields(t *testing.T) {
 	// Add a property to parent that should not be overwritten
 	schema.Definitions["ParentType"].Properties.Set("parent_field", &jsonschema.Schema{Type: "string"})
 
-	g.processInlineFields(schema)
+	g.processInlineFields(schema, reflect.TypeFor[obi.Config]())
 
 	// Check that inline_field was merged into ParentType
 	parentSchema := schema.Definitions["ParentType"]
