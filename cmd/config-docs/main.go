@@ -96,18 +96,37 @@ type DocGenerator struct {
 	intro string
 }
 
-const (
-	defaultTitle = "OBI Configuration Reference"
-	defaultIntro = "Complete configuration reference for OpenTelemetry eBPF Instrumentation (OBI).\n" +
-		"Configuration is provided via YAML file and/or environment variables."
-)
+// componentDoc bundles the title and intro used in the generated markdown
+// for a given component.
+type componentDoc struct {
+	title string
+	intro string
+}
+
+var componentDocs = map[string]componentDoc{
+	"obi": {
+		title: "OBI Configuration Reference",
+		intro: "Complete configuration reference for OpenTelemetry eBPF Instrumentation (OBI).\n" +
+			"Configuration is provided via YAML file and/or environment variables.",
+	},
+	"k8s-cache": {
+		title: "k8s-cache Configuration Reference",
+		intro: "Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service.\n" +
+			"Configuration is provided via YAML file and/or environment variables.",
+	},
+}
 
 func main() {
 	schemaFile := flag.String("schema", "devdocs/config/config-schema.json", "Path to the JSON schema file")
 	outputFile := flag.String("output", "", "Output file path (default: stdout)")
-	title := flag.String("title", defaultTitle, "Title used as the H1 heading of the generated document")
-	intro := flag.String("intro", defaultIntro, "Introduction paragraph shown below the title")
+	componentName := flag.String("component", "obi", "Component whose docs are being generated: obi or k8s-cache")
 	flag.Parse()
+
+	comp, ok := componentDocs[*componentName]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Unknown -component %q (expected one of: obi, k8s-cache)\n", *componentName)
+		os.Exit(1)
+	}
 
 	data, err := os.ReadFile(*schemaFile)
 	if err != nil {
@@ -124,8 +143,8 @@ func main() {
 	gen := &DocGenerator{
 		root:            &schema,
 		referencedTypes: make(map[string]bool),
-		title:           *title,
-		intro:           *intro,
+		title:           comp.title,
+		intro:           comp.intro,
 	}
 
 	schemaLink := *schemaFile
@@ -152,16 +171,8 @@ func main() {
 func (g *DocGenerator) Generate(schemaLink string) string {
 	var b strings.Builder
 
-	title := g.title
-	if title == "" {
-		title = defaultTitle
-	}
-	intro := g.intro
-	if intro == "" {
-		intro = defaultIntro
-	}
-	fmt.Fprintf(&b, "# %s\n\n", title)
-	b.WriteString(intro + "\n\n")
+	fmt.Fprintf(&b, "# %s\n\n", g.title)
+	b.WriteString(g.intro + "\n\n")
 	fmt.Fprintf(&b, "Generated from [`%s`](%s).\n\n", schemaLink, schemaLink)
 	b.WriteString("---\n\n")
 

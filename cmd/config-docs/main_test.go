@@ -258,7 +258,12 @@ func TestGenerate(t *testing.T) {
 		},
 	}
 
-	gen := &DocGenerator{root: schema, referencedTypes: make(map[string]bool)}
+	gen := &DocGenerator{
+		root:            schema,
+		referencedTypes: make(map[string]bool),
+		title:           componentDocs["obi"].title,
+		intro:           componentDocs["obi"].intro,
+	}
 	output := gen.Generate("config-schema.json")
 
 	assert.Contains(t, output, "# OBI Configuration Reference")
@@ -280,7 +285,12 @@ func TestGenerateFromRealSchema(t *testing.T) {
 	var schema Schema
 	require.NoError(t, json.Unmarshal(data, &schema))
 
-	gen := &DocGenerator{root: &schema, referencedTypes: make(map[string]bool)}
+	gen := &DocGenerator{
+		root:            &schema,
+		referencedTypes: make(map[string]bool),
+		title:           componentDocs["obi"].title,
+		intro:           componentDocs["obi"].intro,
+	}
 	output := gen.Generate("config-schema.json")
 
 	// Basic structural checks

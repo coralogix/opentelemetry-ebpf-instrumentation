@@ -1,6 +1,7 @@
 # k8s-cache Configuration Reference
 
-Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service. Configuration is provided via YAML file and/or environment variables.
+Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service.
+Configuration is provided via YAML file and/or environment variables.
 
 Generated from [`config-schema.json`](config-schema.json).
 

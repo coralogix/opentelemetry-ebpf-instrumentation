@@ -852,9 +852,7 @@ generate-k8s-cache-config-schema:
 	@mkdir -p $(dir $(K8S_CACHE_CONFIG_SCHEMA_FILE))
 	go run ./cmd/obi-schema -target k8s-cache -output $(K8S_CACHE_CONFIG_SCHEMA_FILE)
 	@echo "### Generating k8s-cache configuration reference docs"
-	go run ./cmd/config-docs -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE) \
-		-title "k8s-cache Configuration Reference" \
-		-intro "Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service. Configuration is provided via YAML file and/or environment variables."
+	go run ./cmd/config-docs -component k8s-cache -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE)
 
 .PHONY: check-config-schema
 check-config-schema:
@@ -894,9 +892,7 @@ check-config-schema:
 	@rm -f $(K8S_CACHE_CONFIG_SCHEMA_FILE).tmp
 	@echo "k8s-cache JSON schema is up-to-date"
 	@echo "### Checking if k8s-cache configuration docs are up-to-date"
-	@go run ./cmd/config-docs -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE).tmp \
-		-title "k8s-cache Configuration Reference" \
-		-intro "Configuration reference for the OpenTelemetry eBPF Instrumentation k8s-cache service. Configuration is provided via YAML file and/or environment variables."
+	@go run ./cmd/config-docs -component k8s-cache -schema $(K8S_CACHE_CONFIG_SCHEMA_FILE) -output $(K8S_CACHE_CONFIG_DOCS_FILE).tmp
 	@if ! diff -q $(K8S_CACHE_CONFIG_DOCS_FILE) $(K8S_CACHE_CONFIG_DOCS_FILE).tmp > /dev/null 2>&1; then \
 		echo "k8s-cache configuration docs are out of date. Run 'make generate-config-schema' to update."; \
 		echo "Diff:"; \
