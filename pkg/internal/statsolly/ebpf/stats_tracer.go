@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
@@ -68,8 +69,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 		return nil, fmt.Errorf("loading BPF data: %w", err)
 	}
 
-	// pino test, delete one fixes probe
-	delete(spec.Programs, "obi_tracepoint_inet_sock_set_state") // drop failed-conn
+	fixupSpec(spec, features)
 
 	ebpfconvenience.SetupMapSizes(spec, cfg.MapsConfig.GlobalScaleFactor)
 
@@ -164,4 +164,29 @@ func (m *StatsFetcher) StatsEventsMap() *ebpf.Map {
 
 func (m *StatsFetcher) DebugEventsMap() *ebpf.Map {
 	return m.objects.DebugEvents
+}
+
+func fixupSpec(spec *ebpf.CollectionSpec, features *export.Features) {
+	if !features.StatsTCPFailedConnections() {
+		spec.Programs["obi_tracepoint_inet_sock_set_state"] = &ebpf.ProgramSpec{
+			Name: "obi_dummy_statsolly_tp",
+			Type: ebpf.TracePoint,
+			Instructions: asm.Instructions{
+				asm.Mov.Imm(asm.R0, 0),
+				asm.Return(),
+			},
+			License: "Dual MIT/GPL",
+		}
+	}
+	if !features.StatsTCPRtt() {
+		spec.Programs["obi_kprobe_tcp_close_srtt"] = &ebpf.ProgramSpec{
+			Name: "obi_dummy_statsolly_kp",
+			Type: ebpf.Kprobe,
+			Instructions: asm.Instructions{
+				asm.Mov.Imm(asm.R0, 0),
+				asm.Return(),
+			},
+			License: "Dual MIT/GPL",
+		}
+	}
 }
