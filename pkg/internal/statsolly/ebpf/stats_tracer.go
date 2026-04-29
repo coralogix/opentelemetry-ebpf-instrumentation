@@ -14,7 +14,6 @@ import (
 	"sync"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/rlimit"
 
@@ -29,9 +28,10 @@ type (
 )
 
 type probe struct {
-	name    string
-	program *ebpf.Program
-	enabled bool
+	progName string
+	hookName string
+	enabled  bool
+	out      **ebpf.Program
 }
 
 // Hook point names, grouped by attach type.
@@ -41,6 +41,18 @@ const (
 
 	// Tracepoints: group/name.
 	TracepointInetSockSetState = "sock/inet_sock_set_state"
+)
+
+// Probe names
+const (
+	ObiKprobeTcpCloseSrtt         = "obi_kprobe_tcp_close_srtt"
+	ObiTracepointInetSockSetState = "obi_tracepoint_inet_sock_set_state"
+)
+
+// Map names
+const (
+	StatsEvents = "stats_events"
+	DebugEvents = "debug_events"
 )
 
 // $BPF_CLANG and $BPF_CFLAGS are set by the Makefile.
@@ -63,74 +75,121 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 			"error", err)
 	}
 
-	objects := StatsObjects{}
 	spec, err := LoadStats()
 	if err != nil {
 		return nil, fmt.Errorf("loading BPF data: %w", err)
 	}
 
-	fixupSpec(spec, features)
+	objects := &StatsObjects{}
+
+	// Probe metadata, grouped by attach type. Each slice drives both spec
+	// deletion (so disabled probes never enter the kernel) and the per-type
+	// attach loop below.
+	//
+	// Do not use LoadSpec from the convenience pkg because we need
+	// NewCollectionWithOptions instead of LoadAndAssign for this use case.
+	kprobes := []probe{
+		{
+			progName: ObiKprobeTcpCloseSrtt,
+			hookName: KprobeTCPClose,
+			enabled:  features.StatsTCPRtt(),
+			out:      &objects.ObiKprobeTcpCloseSrtt,
+		},
+	}
+	tracepoints := []probe{
+		{
+			progName: ObiTracepointInetSockSetState,
+			hookName: TracepointInetSockSetState,
+			enabled:  features.StatsTCPFailedConnections(),
+			out:      &objects.ObiTracepointInetSockSetState,
+		},
+	}
+
+	// Drop programs the user disabled so NewCollectionWithOptions won't load them.
+	for _, p := range kprobes {
+		if !p.enabled {
+			delete(spec.Programs, p.progName)
+		}
+	}
+	for _, p := range tracepoints {
+		if !p.enabled {
+			delete(spec.Programs, p.progName)
+		}
+	}
+
+	if err := ebpfconvenience.RewriteConstants(spec, map[string]any{
+		"g_bpf_debug": cfg.BpfDebug,
+	}); err != nil {
+		return nil, fmt.Errorf("rewriting BPF constants: %w", err)
+	}
 
 	ebpfconvenience.SetupMapSizes(spec, cfg.MapsConfig.GlobalScaleFactor)
 
 	sharedMaps := map[string]*ebpf.Map{}
 	var mu sync.Mutex
-	if err := ebpfconvenience.LoadSpec(spec, &objects, map[string]any{
-		"g_bpf_debug": cfg.BpfDebug,
-	}, sharedMaps, &mu, ""); err != nil {
-		return nil, fmt.Errorf("loading stats eBPF spec: %w", err)
+	collOpts, err := ebpfconvenience.ResolveMaps(spec, sharedMaps, &mu)
+	if err != nil {
+		return nil, fmt.Errorf("resolving maps: %w", err)
+	}
+	collOpts.Programs = ebpf.ProgramOptions{LogSizeStart: 640 * 1024}
+	// collOpts.Maps.PinPath stays zero; statsolly passes "" today.
+
+	coll, err := ebpf.NewCollectionWithOptions(spec, *collOpts)
+	if err != nil {
+		return nil, fmt.Errorf("loading stats eBPF collection: %w", err)
 	}
 
-	var closables []io.Closer
+	objects.StatsEvents = coll.DetachMap(StatsEvents)
+	objects.DebugEvents = coll.DetachMap(DebugEvents)
+
+	closables := []io.Closer{objects}
 
 	// kprobes
-	for _, k := range []probe{
-		{
-			name:    KprobeTCPClose,
-			program: objects.ObiKprobeTcpCloseSrtt,
-			enabled: features.StatsTCPRtt(),
-		},
-	} {
-		if !k.enabled {
+	for _, k := range kprobes {
+		prog := coll.DetachProgram(k.progName)
+		if prog == nil {
 			continue
 		}
+		*k.out = prog
 
-		l, err := link.Kprobe(k.name, k.program, nil)
+		l, err := link.Kprobe(k.hookName, prog, nil)
 		if err != nil {
 			closeAll(closables)
-			return nil, fmt.Errorf("failed kprobe attachment %s: %w", k.name, err)
+			coll.Close()
+			return nil, fmt.Errorf("failed kprobe attachment %s: %w", k.hookName, err)
 		}
 		closables = append(closables, l)
 	}
 
 	// tracepoints
-	for _, t := range []probe{
-		{
-			name:    TracepointInetSockSetState,
-			program: objects.ObiTracepointInetSockSetState,
-			enabled: features.StatsTCPFailedConnections(),
-		},
-	} {
-		if !t.enabled {
+	for _, t := range tracepoints {
+		prog := coll.DetachProgram(t.progName)
+		if prog == nil {
 			continue
 		}
+		*t.out = prog
 
-		parts := strings.SplitN(t.name, "/", 2)
-		if len(parts) != 2 {
+		group, tp, ok := strings.Cut(t.hookName, "/")
+		if !ok {
 			closeAll(closables)
-			return nil, fmt.Errorf("invalid tracepoint %q: must be group/name", t.name)
+			coll.Close()
+			return nil, fmt.Errorf("invalid tracepoint %q: must be group/name", t.hookName)
 		}
-		l, err := link.Tracepoint(parts[0], parts[1], t.program, nil)
+		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
 			closeAll(closables)
-			return nil, fmt.Errorf("failed tracepoint attachment %s: %w", t.name, err)
+			coll.Close()
+			return nil, fmt.Errorf("failed tracepoint attachment %s: %w", t.hookName, err)
 		}
 		closables = append(closables, l)
 	}
 
+	// detached entries are no-ops; frees anything we didn't claim.
+	coll.Close()
+
 	return &StatsFetcher{
 		log:       tlog,
-		objects:   &objects,
+		objects:   objects,
 		closables: closables,
 	}, nil
 }
@@ -164,29 +223,4 @@ func (m *StatsFetcher) StatsEventsMap() *ebpf.Map {
 
 func (m *StatsFetcher) DebugEventsMap() *ebpf.Map {
 	return m.objects.DebugEvents
-}
-
-func fixupSpec(spec *ebpf.CollectionSpec, features *export.Features) {
-	if !features.StatsTCPFailedConnections() {
-		spec.Programs["obi_tracepoint_inet_sock_set_state"] = &ebpf.ProgramSpec{
-			Name: "obi_dummy_statsolly_tp",
-			Type: ebpf.TracePoint,
-			Instructions: asm.Instructions{
-				asm.Mov.Imm(asm.R0, 0),
-				asm.Return(),
-			},
-			License: "Dual MIT/GPL",
-		}
-	}
-	if !features.StatsTCPRtt() {
-		spec.Programs["obi_kprobe_tcp_close_srtt"] = &ebpf.ProgramSpec{
-			Name: "obi_dummy_statsolly_kp",
-			Type: ebpf.Kprobe,
-			Instructions: asm.Instructions{
-				asm.Mov.Imm(asm.R0, 0),
-				asm.Return(),
-			},
-			License: "Dual MIT/GPL",
-		}
-	}
 }
