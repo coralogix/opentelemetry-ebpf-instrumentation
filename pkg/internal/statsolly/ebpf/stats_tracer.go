@@ -43,7 +43,7 @@ const (
 	TracepointInetSockSetState = "sock/inet_sock_set_state"
 )
 
-// program names
+// Program names
 const (
 	progObiKprobeTcpCloseSrtt         = "obi_kprobe_tcp_close_srtt"
 	progObiTracepointInetSockSetState = "obi_tracepoint_inet_sock_set_state"
@@ -82,12 +82,9 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 
 	objects := &StatsObjects{}
 
-	// Probe metadata, grouped by attach type. Each slice drives both spec
-	// deletion (so disabled probes never enter the kernel) and the per-type
-	// attach loop below.
-	//
-	// Do not use LoadSpec from the convenience pkg because we need
-	// NewCollectionWithOptions instead of LoadAndAssign for this use case.
+	// Probe metadata, grouped by attach type. Each slice drives both the
+	// enabled-program list passed to LoadPartial and the per-type attach
+	// loop below.
 	kprobes := []probe{
 		{
 			progName: progObiKprobeTcpCloseSrtt,
@@ -105,28 +102,19 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 		},
 	}
 
-	// Drop programs the user disabled so NewCollectionWithOptions won't load them.
-	dropDisabledPrograms(spec, kprobes, tracepoints)
-
-	if err := ebpfconvenience.RewriteConstants(spec, map[string]any{
-		"g_bpf_debug": cfg.BpfDebug,
-	}); err != nil {
-		return nil, fmt.Errorf("rewriting BPF constants: %w", err)
-	}
-
 	ebpfconvenience.SetupMapSizes(spec, cfg.MapsConfig.GlobalScaleFactor)
 
-	// statsolly intentionally doesn't share maps with other specs
+	// statsolly intentionally doesn't share maps with other specs.
 	sharedMaps := map[string]*ebpf.Map{}
 	var mu sync.Mutex
-	collOpts, err := ebpfconvenience.ResolveMaps(spec, sharedMaps, &mu)
-	if err != nil {
-		return nil, fmt.Errorf("resolving maps: %w", err)
-	}
-	collOpts.Programs = ebpf.ProgramOptions{LogSizeStart: 640 * 1024}
-	// collOpts.Maps.PinPath stays zero; statsolly passes "" today.
-
-	coll, err := ebpf.NewCollectionWithOptions(spec, *collOpts)
+	coll, err := ebpfconvenience.LoadPartial(
+		spec,
+		enabledProgramNames(kprobes, tracepoints),
+		map[string]any{"g_bpf_debug": cfg.BpfDebug},
+		sharedMaps,
+		&mu,
+		"",
+	)
 	if err != nil {
 		return nil, fmt.Errorf("loading stats eBPF collection: %w", err)
 	}
@@ -135,10 +123,12 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 
 	objects.StatsEvents = coll.DetachMap(mapStatsEvents)
 	if objects.StatsEvents == nil {
+		objects.Close()
 		return nil, fmt.Errorf("map %q not found in collection", mapStatsEvents)
 	}
 	objects.DebugEvents = coll.DetachMap(mapDebugEvents)
 	if objects.DebugEvents == nil {
+		objects.Close()
 		return nil, fmt.Errorf("map %q not found in collection", mapDebugEvents)
 	}
 
@@ -196,16 +186,19 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 	}, nil
 }
 
-// dropDisabledPrograms removes from spec.Programs any probe whose enabled flag
-// is false, so NewCollectionWithOptions does not load it into the kernel.
-func dropDisabledPrograms(spec *ebpf.CollectionSpec, probeGroups ...[]probe) {
+// enabledProgramNames returns the program names of all enabled probes across
+// the given groups. Used to tell LoadPartial which programs should reach the
+// kernel; disabled probes are stripped from the spec before load.
+func enabledProgramNames(probeGroups ...[]probe) []string {
+	var names []string
 	for _, group := range probeGroups {
 		for _, p := range group {
-			if !p.enabled {
-				delete(spec.Programs, p.progName)
+			if p.enabled {
+				names = append(names, p.progName)
 			}
 		}
 	}
+	return names
 }
 
 func closeAll(closables []io.Closer) {
@@ -216,7 +209,6 @@ func closeAll(closables []io.Closer) {
 	}
 }
 
-// Close any resources that are taken
 func (m *StatsFetcher) Close() error {
 	m.log.Debug("unregistering eBPF objects")
 

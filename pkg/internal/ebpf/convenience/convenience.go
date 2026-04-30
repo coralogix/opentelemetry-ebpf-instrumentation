@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -99,6 +100,58 @@ func LoadSpec(spec *ebpf.CollectionSpec, objects any, constants map[string]any, 
 	}
 
 	return nil
+}
+
+// pruneToEnabled removes from spec.Programs any program whose name is not in
+// the enabled set. To keep every program in the spec, callers must pass the
+// full list of program names — there is no special-cased "keep all" value, so
+// an empty slice unambiguously drops everything.
+func pruneToEnabled(spec *ebpf.CollectionSpec, enabled []string) {
+	for name := range spec.Programs {
+		if !slices.Contains(enabled, name) {
+			delete(spec.Programs, name)
+		}
+	}
+}
+
+// LoadPartial behaves like LoadSpec but loads via NewCollectionWithOptions
+// instead of LoadAndAssign, returning the *ebpf.Collection so the caller can
+// pick programs and maps off it by name (typical use: per-probe attach loops
+// where only a subset of programs is enabled at runtime).
+//
+// Programs whose name is not in enabledPrograms are removed from spec.Programs
+// before load and never enter the kernel. To keep every program, pass the full
+// list of program names; an empty slice drops everything.
+//
+// The caller owns the returned *ebpf.Collection: detach the maps/programs it
+// needs, then Close() to free the rest.
+//
+// Notes about other parameters match LoadSpec:
+// - constants: optional map of BPF constants to rewrite (may be nil)
+// - sharedMaps: map store for PinInternal maps, shared across specs within the same agent
+// - pinPath: bpffs pin path for PinByName maps (empty string to skip)
+func LoadPartial(spec *ebpf.CollectionSpec, enabledPrograms []string, constants map[string]any, sharedMaps map[string]*ebpf.Map, mu *sync.Mutex, pinPath string) (*ebpf.Collection, error) {
+	pruneToEnabled(spec, enabledPrograms)
+
+	if constants != nil {
+		if err := RewriteConstants(spec, constants); err != nil {
+			return nil, fmt.Errorf("rewriting BPF constants: %w", err)
+		}
+	}
+
+	collOpts, err := ResolveMaps(spec, sharedMaps, mu)
+	if err != nil {
+		return nil, fmt.Errorf("resolving maps: %w", err)
+	}
+
+	collOpts.Programs = ebpf.ProgramOptions{LogSizeStart: 640 * 1024}
+	collOpts.Maps = ebpf.MapOptions{PinPath: pinPath}
+
+	coll, err := ebpf.NewCollectionWithOptions(spec, *collOpts)
+	if err != nil {
+		return nil, fmt.Errorf("loading BPF collection: %w", err)
+	}
+	return coll, nil
 }
 
 const (
