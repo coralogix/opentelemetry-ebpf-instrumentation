@@ -40,6 +40,44 @@ func makeSpec(maps map[string]*ebpf.MapSpec) *ebpf.CollectionSpec {
 	return &ebpf.CollectionSpec{Maps: maps}
 }
 
+func TestPruneToEnabled(t *testing.T) {
+	makeProgs := func() map[string]*ebpf.ProgramSpec {
+		return map[string]*ebpf.ProgramSpec{
+			"prog_a": {Name: "prog_a"},
+			"prog_b": {Name: "prog_b"},
+			"prog_c": {Name: "prog_c"},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		enabled []string
+		want    []string // remaining program names
+	}{
+		{name: "full list keeps all", enabled: []string{"prog_a", "prog_b", "prog_c"}, want: []string{"prog_a", "prog_b", "prog_c"}},
+		{name: "nil drops all", enabled: nil, want: nil},
+		{name: "empty drops all", enabled: []string{}, want: nil},
+		{name: "subset", enabled: []string{"prog_a", "prog_c"}, want: []string{"prog_a", "prog_c"}},
+		{name: "unknown name ignored", enabled: []string{"prog_a", "missing"}, want: []string{"prog_a"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &ebpf.CollectionSpec{Programs: makeProgs()}
+			pruneToEnabled(spec, tc.enabled)
+
+			if len(spec.Programs) != len(tc.want) {
+				t.Fatalf("got %d programs, want %d (%v)", len(spec.Programs), len(tc.want), tc.want)
+			}
+			for _, name := range tc.want {
+				if _, ok := spec.Programs[name]; !ok {
+					t.Errorf("expected program %q to remain", name)
+				}
+			}
+		})
+	}
+}
+
 func TestSetupMapSizes_ScaleUp(t *testing.T) {
 	spec := makeSpec(map[string]*ebpf.MapSpec{
 		"my_hash": {Type: ebpf.Hash, MaxEntries: 1024},

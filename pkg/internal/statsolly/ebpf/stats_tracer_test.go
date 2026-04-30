@@ -6,68 +6,48 @@
 package ebpf
 
 import (
+	"sort"
 	"testing"
-
-	"github.com/cilium/ebpf"
 )
 
-func TestDropDisabledPrograms(t *testing.T) {
-	makeSpec := func() *ebpf.CollectionSpec {
-		return &ebpf.CollectionSpec{
-			Programs: map[string]*ebpf.ProgramSpec{
-				progObiKprobeTcpCloseSrtt:         {Name: progObiKprobeTcpCloseSrtt},
-				progObiTracepointInetSockSetState: {Name: progObiTracepointInetSockSetState},
-			},
-		}
-	}
-
+func TestEnabledProgramNames(t *testing.T) {
 	tests := []struct {
-		name         string
-		rttEnabled   bool
+		name          string
+		rttEnabled    bool
 		failedEnabled bool
-		want         map[string]bool // progName -> should remain in spec
+		want          []string
 	}{
 		{
 			name:          "both enabled",
 			rttEnabled:    true,
 			failedEnabled: true,
-			want: map[string]bool{
-				progObiKprobeTcpCloseSrtt:         true,
-				progObiTracepointInetSockSetState: true,
+			want: []string{
+				progObiKprobeTcpCloseSrtt,
+				progObiTracepointInetSockSetState,
 			},
 		},
 		{
 			name:          "rtt only",
 			rttEnabled:    true,
 			failedEnabled: false,
-			want: map[string]bool{
-				progObiKprobeTcpCloseSrtt:         true,
-				progObiTracepointInetSockSetState: false,
-			},
+			want:          []string{progObiKprobeTcpCloseSrtt},
 		},
 		{
 			name:          "failed-conn only",
 			rttEnabled:    false,
 			failedEnabled: true,
-			want: map[string]bool{
-				progObiKprobeTcpCloseSrtt:         false,
-				progObiTracepointInetSockSetState: true,
-			},
+			want:          []string{progObiTracepointInetSockSetState},
 		},
 		{
 			name:          "both disabled",
 			rttEnabled:    false,
 			failedEnabled: false,
-			want: map[string]bool{
-				progObiKprobeTcpCloseSrtt:         false,
-				progObiTracepointInetSockSetState: false,
-			},
+			want:          nil,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := makeSpec()
 			kprobes := []probe{{
 				progName: progObiKprobeTcpCloseSrtt,
 				hookName: KprobeTCPClose,
@@ -79,12 +59,17 @@ func TestDropDisabledPrograms(t *testing.T) {
 				enabled:  tc.failedEnabled,
 			}}
 
-			dropDisabledPrograms(spec, kprobes, tracepoints)
+			got := enabledProgramNames(kprobes, tracepoints)
+			sort.Strings(got)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
 
-			for name, shouldRemain := range tc.want {
-				_, present := spec.Programs[name]
-				if present != shouldRemain {
-					t.Errorf("program %q: present=%v, want %v", name, present, shouldRemain)
+			if len(got) != len(want) {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+			for i := range got {
+				if got[i] != want[i] {
+					t.Errorf("index %d: got %q, want %q", i, got[i], want[i])
 				}
 			}
 		})
