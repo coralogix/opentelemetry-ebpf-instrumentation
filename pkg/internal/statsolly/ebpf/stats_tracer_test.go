@@ -7,8 +7,20 @@ package ebpf
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
+
+func TestTracepointConstantFormat(t *testing.T) {
+	hooks := []string{
+		TracepointInetSockSetState,
+	}
+	for _, hook := range hooks {
+		if _, _, ok := strings.Cut(hook, "/"); !ok {
+			t.Errorf("tracepoint constant %q is not in group/name format", hook)
+		}
+	}
+}
 
 func TestEnabledProgramNames(t *testing.T) {
 	tests := []struct {
