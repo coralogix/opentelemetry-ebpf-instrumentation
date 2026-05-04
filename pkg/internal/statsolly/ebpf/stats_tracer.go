@@ -31,7 +31,7 @@ type probe struct {
 	progName string
 	hookName string
 	enabled  bool
-	out      **ebpf.Program
+	out      func(*ebpf.Program)
 }
 
 // Hook point names, grouped by attach type.
@@ -90,7 +90,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 			progName: progObiKprobeTcpCloseSrtt,
 			hookName: KprobeTCPClose,
 			enabled:  features.StatsTCPRtt(),
-			out:      &objects.ObiKprobeTcpCloseSrtt,
+			out:      func(p *ebpf.Program) { objects.ObiKprobeTcpCloseSrtt = p },
 		},
 	}
 	tracepoints := []probe{
@@ -98,7 +98,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 			progName: progObiTracepointInetSockSetState,
 			hookName: TracepointInetSockSetState,
 			enabled:  features.StatsTCPFailedConnections(),
-			out:      &objects.ObiTracepointInetSockSetState,
+			out:      func(p *ebpf.Program) { objects.ObiTracepointInetSockSetState = p },
 		},
 	}
 
@@ -144,7 +144,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 			closeAll(closables)
 			return nil, fmt.Errorf("enabled kprobe program %q not found in collection", k.progName)
 		}
-		*k.out = prog
+		k.out(prog)
 
 		l, err := link.Kprobe(k.hookName, prog, nil)
 		if err != nil {
@@ -164,7 +164,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 			closeAll(closables)
 			return nil, fmt.Errorf("enabled tracepoint program %q not found in collection", t.progName)
 		}
-		*t.out = prog
+		t.out(prog)
 
 		group, tp, ok := strings.Cut(t.hookName, "/")
 		if !ok {
