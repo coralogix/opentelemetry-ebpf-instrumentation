@@ -166,11 +166,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 		}
 		t.out(prog)
 
-		group, tp, ok := strings.Cut(t.hookName, "/")
-		if !ok {
-			closeAll(closables)
-			return nil, fmt.Errorf("invalid tracepoint %q: must be group/name", t.hookName)
-		}
+		group, tp, _ := strings.Cut(t.hookName, "/")
 		l, err := link.Tracepoint(group, tp, prog, nil)
 		if err != nil {
 			closeAll(closables)
