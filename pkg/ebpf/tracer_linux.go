@@ -43,14 +43,13 @@ type instrumenter struct {
 }
 
 func loadSpec(eventContext *common.EBPFEventContext, bundle *common.SpecBundle, otelBPFFSPath string, idx int) error {
-	if err := ebpfconvenience.LoadSpec(
-		bundle.Spec,
-		bundle.Objects,
-		bundle.Constants,
-		eventContext.EBPFMaps,
-		&eventContext.MapsLock,
-		otelBPFFSPath,
-	); err != nil {
+	if _, err := ebpfconvenience.LoadSpec(bundle.Spec, ebpfconvenience.LoadSpecOptions{
+		Objects:    bundle.Objects,
+		Constants:  bundle.Constants,
+		SharedMaps: eventContext.EBPFMaps,
+		Mu:         &eventContext.MapsLock,
+		PinPath:    otelBPFFSPath,
+	}); err != nil {
 		return fmt.Errorf("loading spec %d: %w", idx, err)
 	}
 

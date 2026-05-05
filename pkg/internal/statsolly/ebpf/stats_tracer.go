@@ -83,7 +83,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 	objects := &StatsObjects{}
 
 	// Probe metadata, grouped by attach type. Each slice drives both the
-	// enabled-program list passed to LoadPartial and the per-type attach
+	// enabled-program list passed to LoadSpec and the per-type attach
 	// loop below.
 	kprobes := []probe{
 		{
@@ -107,14 +107,12 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 	// statsolly intentionally doesn't share maps with other specs.
 	sharedMaps := map[string]*ebpf.Map{}
 	var mu sync.Mutex
-	coll, err := ebpfconvenience.LoadPartial(
-		spec,
-		enabledProgramNames(kprobes, tracepoints),
-		map[string]any{"g_bpf_debug": cfg.BpfDebug},
-		sharedMaps,
-		&mu,
-		"",
-	)
+	coll, err := ebpfconvenience.LoadSpec(spec, ebpfconvenience.LoadSpecOptions{
+		EnabledPrograms: enabledProgramNames(kprobes, tracepoints),
+		Constants:       map[string]any{"g_bpf_debug": cfg.BpfDebug},
+		SharedMaps:      sharedMaps,
+		Mu:              &mu,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("loading stats eBPF collection: %w", err)
 	}
@@ -183,7 +181,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 }
 
 // enabledProgramNames returns the program names of all enabled probes across
-// the given groups. Used to tell LoadPartial which programs should reach the
+// the given groups. Used to tell LoadSpec which programs should reach the
 // kernel; disabled probes are stripped from the spec before load.
 func enabledProgramNames(probeGroups ...[]probe) []string {
 	var names []string

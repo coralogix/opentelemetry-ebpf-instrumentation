@@ -115,12 +115,17 @@ func NewFlowFetcher(
 	}
 	sharedMaps := map[string]*ebpf.Map{}
 	var mu sync.Mutex
-	if err := convenience.LoadSpec(spec, &objects, map[string]any{
-		constSampling:      uint32(sampling),
-		constTraceMessages: uint8(traceMsgs),
-		constPortGuessing:  portGuessing,
-		gBpfDebug:          cfg.BpfDebug,
-	}, sharedMaps, &mu, ""); err != nil {
+	if _, err := convenience.LoadSpec(spec, convenience.LoadSpecOptions{
+		Objects: &objects,
+		Constants: map[string]any{
+			constSampling:      uint32(sampling),
+			constTraceMessages: uint8(traceMsgs),
+			constPortGuessing:  portGuessing,
+			gBpfDebug:          cfg.BpfDebug,
+		},
+		SharedMaps: sharedMaps,
+		Mu:         &mu,
+	}); err != nil {
 		return nil, fmt.Errorf("loading netolly eBPF spec: %w", err)
 	}
 

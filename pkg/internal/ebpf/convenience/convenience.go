@@ -74,78 +74,71 @@ func ResolveMaps(spec *ebpf.CollectionSpec, sharedMaps map[string]*ebpf.Map, mu 
 	return &collOpts, nil
 }
 
-// LoadSpec loads a BPF collection spec into the provided objects, handling
-// constant rewriting, PinInternal map resolution, and bpffs pin path setup.
-// Notes about some parameters:
-// - constants: optional map of BPF constants to rewrite (may be nil)
-// - sharedMaps: map store for PinInternal maps, shared across specs within the same agent
-// - pinPath: bpffs pin path for PinByName maps (empty string to skip)
-func LoadSpec(spec *ebpf.CollectionSpec, objects any, constants map[string]any, sharedMaps map[string]*ebpf.Map, mu *sync.Mutex, pinPath string) error {
-	if constants != nil {
-		if err := RewriteConstants(spec, constants); err != nil {
-			return fmt.Errorf("rewriting BPF constants: %w", err)
+// LoadSpecOptions configures how LoadSpec loads a BPF collection.
+type LoadSpecOptions struct {
+	// Objects, if non-nil, receives all programs and maps via LoadAndAssign;
+	// the returned collection is nil in this case.
+	// Mutually exclusive with EnabledPrograms.
+	Objects any
+
+	// EnabledPrograms, if non-nil, prunes all other programs from the spec
+	// before load so they never enter the kernel. An empty slice drops every
+	// program. Only used when Objects is nil.
+	EnabledPrograms []string
+
+	// Constants is an optional map of BPF volatile constants to rewrite.
+	Constants map[string]any
+
+	// SharedMaps is a store for PinInternal maps shared across specs within
+	// the same agent. May be empty; must not be nil.
+	SharedMaps map[string]*ebpf.Map
+
+	// Mu guards SharedMaps.
+	Mu *sync.Mutex
+
+	// PinPath is the bpffs pin path for PinByName maps; empty skips pinning.
+	PinPath string
+}
+
+// LoadSpec loads a BPF collection spec, handling constant rewriting,
+// PinInternal map resolution, and optional program pruning.
+//
+// When opts.Objects is non-nil, all programs and maps are assigned to the
+// struct via LoadAndAssign and the returned collection is nil.
+//
+// When opts.Objects is nil, only programs listed in opts.EnabledPrograms are
+// loaded; the raw *ebpf.Collection is returned so the caller can pick programs
+// and maps by name (DetachProgram/DetachMap). The caller owns the returned
+// collection and must Close() it.
+func LoadSpec(spec *ebpf.CollectionSpec, opts LoadSpecOptions) (*ebpf.Collection, error) {
+	if opts.EnabledPrograms != nil {
+		for name := range spec.Programs {
+			if !slices.Contains(opts.EnabledPrograms, name) {
+				delete(spec.Programs, name)
+			}
 		}
 	}
 
-	collOpts, err := ResolveMaps(spec, sharedMaps, mu)
-	if err != nil {
-		return fmt.Errorf("resolving maps: %w", err)
-	}
-
-	collOpts.Programs = ebpf.ProgramOptions{LogSizeStart: 640 * 1024}
-	collOpts.Maps = ebpf.MapOptions{PinPath: pinPath}
-
-	if err := spec.LoadAndAssign(objects, collOpts); err != nil {
-		return fmt.Errorf("loading and assigning BPF objects: %w", err)
-	}
-
-	return nil
-}
-
-// pruneToEnabled removes from spec.Programs any program whose name is not in
-// the enabled set. To keep every program in the spec, callers must pass the
-// full list of program names — there is no special-cased "keep all" value, so
-// an empty slice unambiguously drops everything.
-func pruneToEnabled(spec *ebpf.CollectionSpec, enabled []string) {
-	for name := range spec.Programs {
-		if !slices.Contains(enabled, name) {
-			delete(spec.Programs, name)
-		}
-	}
-}
-
-// LoadPartial behaves like LoadSpec but loads via NewCollectionWithOptions
-// instead of LoadAndAssign, returning the *ebpf.Collection so the caller can
-// pick programs and maps off it by name (typical use: per-probe attach loops
-// where only a subset of programs is enabled at runtime).
-//
-// Programs whose name is not in enabledPrograms are removed from spec.Programs
-// before load and never enter the kernel. To keep every program, pass the full
-// list of program names; an empty slice drops everything.
-//
-// The caller owns the returned *ebpf.Collection: detach the maps/programs it
-// needs, then Close() to free the rest.
-//
-// Notes about other parameters match LoadSpec:
-// - constants: optional map of BPF constants to rewrite (may be nil)
-// - sharedMaps: map store for PinInternal maps, shared across specs within the same agent
-// - pinPath: bpffs pin path for PinByName maps (empty string to skip)
-func LoadPartial(spec *ebpf.CollectionSpec, enabledPrograms []string, constants map[string]any, sharedMaps map[string]*ebpf.Map, mu *sync.Mutex, pinPath string) (*ebpf.Collection, error) {
-	pruneToEnabled(spec, enabledPrograms)
-
-	if constants != nil {
-		if err := RewriteConstants(spec, constants); err != nil {
+	if opts.Constants != nil {
+		if err := RewriteConstants(spec, opts.Constants); err != nil {
 			return nil, fmt.Errorf("rewriting BPF constants: %w", err)
 		}
 	}
 
-	collOpts, err := ResolveMaps(spec, sharedMaps, mu)
+	collOpts, err := ResolveMaps(spec, opts.SharedMaps, opts.Mu)
 	if err != nil {
 		return nil, fmt.Errorf("resolving maps: %w", err)
 	}
 
 	collOpts.Programs = ebpf.ProgramOptions{LogSizeStart: 640 * 1024}
-	collOpts.Maps = ebpf.MapOptions{PinPath: pinPath}
+	collOpts.Maps = ebpf.MapOptions{PinPath: opts.PinPath}
+
+	if opts.Objects != nil {
+		if err := spec.LoadAndAssign(opts.Objects, collOpts); err != nil {
+			return nil, fmt.Errorf("loading and assigning BPF objects: %w", err)
+		}
+		return nil, nil
+	}
 
 	coll, err := ebpf.NewCollectionWithOptions(spec, *collOpts)
 	if err != nil {
