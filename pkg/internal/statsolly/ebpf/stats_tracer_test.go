@@ -34,7 +34,7 @@ func TestEnabledProgramNames(t *testing.T) {
 			rttEnabled:    true,
 			failedEnabled: true,
 			want: []string{
-				progObiKprobeTcpCloseSrtt,
+				progObiKprobeTCPCloseSrtt,
 				progObiTracepointInetSockSetState,
 			},
 		},
@@ -42,7 +42,7 @@ func TestEnabledProgramNames(t *testing.T) {
 			name:          "rtt only",
 			rttEnabled:    true,
 			failedEnabled: false,
-			want:          []string{progObiKprobeTcpCloseSrtt},
+			want:          []string{progObiKprobeTCPCloseSrtt},
 		},
 		{
 			name:          "failed-conn only",
@@ -61,7 +61,7 @@ func TestEnabledProgramNames(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			kprobes := []probe{{
-				progName: progObiKprobeTcpCloseSrtt,
+				progName: progObiKprobeTCPCloseSrtt,
 				hookName: KprobeTCPClose,
 				enabled:  tc.rttEnabled,
 			}}

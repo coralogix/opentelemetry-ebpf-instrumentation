@@ -45,7 +45,7 @@ const (
 
 // Program names
 const (
-	progObiKprobeTcpCloseSrtt         = "obi_kprobe_tcp_close_srtt"
+	progObiKprobeTCPCloseSrtt         = "obi_kprobe_tcp_close_srtt"
 	progObiTracepointInetSockSetState = "obi_tracepoint_inet_sock_set_state"
 )
 
@@ -87,7 +87,7 @@ func NewStatsFetcher(cfg *config.EBPFTracer, features *export.Features) (*StatsF
 	// loop below.
 	kprobes := []probe{
 		{
-			progName: progObiKprobeTcpCloseSrtt,
+			progName: progObiKprobeTCPCloseSrtt,
 			hookName: KprobeTCPClose,
 			enabled:  features.StatsTCPRtt(),
 			out:      func(p *ebpf.Program) { objects.ObiKprobeTcpCloseSrtt = p },
