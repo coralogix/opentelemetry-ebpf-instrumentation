@@ -38,6 +38,12 @@ int BPF_KPROBE(obi_kprobe_tcp_close_srtt, struct sock *sk) {
         return 0;
     }
 
+    // Guard against a zero source port. This can occur when the kernel
+    // has already released the port binding before tcp_close() fires.
+    if (conn.s_port == 0) {
+        return 0;
+    }
+
     if (is_tcp_socket_never_connected(sk)) {
         return 0;
     }
