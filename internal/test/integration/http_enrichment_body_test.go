@@ -185,6 +185,8 @@ func TestSuiteBodyExtraction(t *testing.T) {
 	require.NoError(t, err)
 
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-http-enrichment-body")
+
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	compose.Env = append(compose.Env, "OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=true")
 	require.NoError(t, compose.Up())
 
@@ -201,8 +203,5 @@ func TestSuiteBodyExtraction(t *testing.T) {
 	t.Run("Body with Content-Type header", func(t *testing.T) {
 		testBodyExtractionContentTypeHeader(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

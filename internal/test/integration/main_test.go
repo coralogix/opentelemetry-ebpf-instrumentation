@@ -42,7 +42,33 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// One weaver per shard, shared by every weaver-wired test. See
+	// `shared_weaver_test.go` for the lifecycle rationale; the report is
+	// parsed and validated in `finalizeSharedWeaver` after `m.Run()` below.
+	if err = startSharedWeaver(ctx); err != nil {
+		fmt.Printf("failed to start shared weaver: %v\n", err)
+		os.Exit(1)
+	}
+
 	code := m.Run()
+
+	// Flush weaver, parse its consolidated report, and let the binary fail
+	// the shard if any actionable violations crossed all tests combined.
+	violations, weaverErr := finalizeSharedWeaver(ctx, os.Stdout)
+	if weaverErr != nil {
+		fmt.Printf("shared weaver finalization failed: %v\n", weaverErr)
+		if code == 0 {
+			code = 1
+		}
+	}
+	if violations > 0 {
+		fmt.Printf("WEAVER FAIL: %d actionable semantic-convention violation(s)\n", violations)
+		if code == 0 {
+			code = 1
+		}
+	}
+
+	cleanupSharedWeaverNetwork(ctx)
 
 	if err = dockerPool.Close(ctx); err != nil {
 		fmt.Printf("could not close Docker pool: %v\n", err)

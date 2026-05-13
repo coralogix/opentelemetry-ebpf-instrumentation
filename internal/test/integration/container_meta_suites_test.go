@@ -33,9 +33,6 @@ func TestSuite_DockerMetadata(t *testing.T) {
 		testContainerMetaMetrics(t, "prometheus")
 	})
 	t.Run("traces are decorated with container metadata", testContainerMetaTraces)
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }
 

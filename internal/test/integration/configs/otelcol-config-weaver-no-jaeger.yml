@@ -10,6 +10,15 @@ receivers:
           allowed_origins:
             - "http://*"
             - "https://*"
+processors:
+  # Tags every signal forwarded to weaver with the originating test's name
+  # (set on this otelcol's TEST_NAME env by the integration test harness).
+  # Applied only to the weaver pipelines below.
+  resource/test:
+    attributes:
+      - key: obi.test.name
+        value: ${env:TEST_NAME}
+        action: upsert
 exporters:
   prometheus:
     endpoint: "otelcol:9464"
@@ -41,7 +50,9 @@ service:
     # weaver-only and naturally has nothing to back-pressure.
     metrics/weaver:
       receivers: [otlp]
+      processors: [resource/test]
       exporters: [otlp/weaver]
     traces:
       receivers: [otlp]
+      processors: [resource/test]
       exporters: [otlp/weaver]

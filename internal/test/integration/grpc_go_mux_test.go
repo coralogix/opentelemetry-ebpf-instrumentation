@@ -45,13 +45,12 @@ func TestGRPCMux(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8080`, `TARGET_PORTS=8080:8080`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Go RED metrics: grpc-http2 mux service", func(t *testing.T) {
 		testREDMetricsForGRPCMuxLibrary(t, "/grpc.health.v1.Health/Check", "grpc-http2-go", "8080")
 	})
-
-	runWeaverValidation(t)
 	require.NoError(t, compose.Close())
 }
 
@@ -61,12 +60,11 @@ func TestGRPCMuxTLS(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8383`, `TARGET_PORTS=8383:8383`, `TEST_SUFFIX=_tls`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Go RED metrics: grpc-http2 mux service TLS", func(t *testing.T) {
 		testREDMetricsForGRPCMuxLibrary(t, "/grpc.health.v1.Health/Check", "grpc-http2-go", "8383")
 	})
-
-	runWeaverValidation(t)
 	require.NoError(t, compose.Close())
 }

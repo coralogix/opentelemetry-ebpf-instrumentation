@@ -27,6 +27,7 @@ func TestMultiProcess(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Go RED metrics: usual service", func(t *testing.T) {
@@ -110,9 +111,6 @@ func TestMultiProcess(t *testing.T) {
 	t.Run("Instrumented processes metric", func(t *testing.T) {
 		checkInstrumentedProcessesMetric(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }
 
@@ -122,12 +120,12 @@ func TestMultiProcessAppCP(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=all`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Nested traces with kprobes: rust -> java -> node -> go -> go jsonrpc -> python -> rails", func(t *testing.T) {
 		testNestedHTTPTracesKProbes(t)
 	})
-	runWeaverValidation(t)
 	require.NoError(t, compose.Close())
 }
 
@@ -138,14 +136,12 @@ func TestMultiProcessAppCPHeadersOnly(t *testing.T) {
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=headers`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
 
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Nested traces with kprobes: rust -> java -> node -> go -> go jsonrpc -> python -> rails", func(t *testing.T) {
 		testNestedHTTPTracesKProbes(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }
 
@@ -157,14 +153,12 @@ func TestMultiProcessAppCPTCPOnly(t *testing.T) {
 	// Explicitly disable request header tracking since we're not injecting HTTP headers
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=tcp`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=false`)
 
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Nested traces with TCP-only propagation", func(t *testing.T) {
 		testNestedHTTPTracesKProbes(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }
 
@@ -319,6 +313,7 @@ func TestLanguageSelectors(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file, choose the lang config file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `MULTI_TEST_MODE=-lang`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	// We are testing with instrumenting only Ruby and Rust services, so from our call chain we should only see
@@ -326,8 +321,5 @@ func TestLanguageSelectors(t *testing.T) {
 	t.Run("Partial traces: rust (OK) -> java (NO) -> node (NO) -> go (NO) -> python (NO) -> rails (OK)", func(t *testing.T) {
 		testPartialLanguageHTTPProbes(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

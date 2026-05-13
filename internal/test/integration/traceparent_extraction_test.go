@@ -31,6 +31,7 @@ func TestTraceparentExtraction(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-tpclient.yml", path.Join(pathOutput, "test-suite-traceparent.log"))
 	require.NoError(t, err)
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	// Wait for service to be ready
@@ -57,9 +58,6 @@ func TestTraceparentExtraction(t *testing.T) {
 	t.Run("without_traceparent", testWithoutTraceparent)
 	t.Run("with_traceparent", testWithTraceparent)
 	t.Run("with_forwarded_traceparent", testWithForwardedTraceparent)
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }
 

@@ -56,6 +56,11 @@ services:
   # OpenTelemetry Collector — fans OBI's OTLP push out to jaeger (production
   # path used by the test's trace assertions) and to weaver (semconv tap).
   otelcol:
+    networks:
+      default: {}
+      weaver-shared: {}
+    environment:
+      TEST_NAME: "${TEST_NAME}"
     image: otel/opentelemetry-collector-contrib:0.151.0@sha256:d57bfe8eee2378f31cb1193239fbcac521d54a5a071fca2bfc106916a32b892d
     container_name: otel-col
     deploy:
@@ -76,15 +81,7 @@ services:
         condition: service_started
       prometheus:
         condition: service_started
-      weaver:
-        condition: service_healthy
 
-  weaver:
-    extends:
-      file: components/weaver/service.yml
-      service: weaver
-    volumes:
-      - ../../../schemas/obi:/obi-registry:ro
 
   # Prometheus
   prometheus:
@@ -110,3 +107,9 @@ services:
       - LOG_LEVEL=debug
 # curl http://localhost:16686/api/services
 # curl http://localhost:16686/api/traces?service=testserver
+
+networks:
+  default:
+    driver: bridge
+  weaver-shared:
+    external: true

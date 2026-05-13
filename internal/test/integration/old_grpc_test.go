@@ -130,6 +130,7 @@ func TestSuiteOtherGRPCGo(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `PROM_CONFIG_SUFFIX=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {
@@ -145,8 +146,5 @@ func TestSuiteOtherGRPCGo(t *testing.T) {
 	t.Run("Go RED metrics and traces: grpc client fails to connect", func(t *testing.T) {
 		testGRPCGoClientFailsToConnect(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

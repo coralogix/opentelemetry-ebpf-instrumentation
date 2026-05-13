@@ -214,6 +214,8 @@ func TestSuiteGenericHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-http-enrichment-headers")
+
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	compose.Env = append(compose.Env, "OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=true")
 	require.NoError(t, compose.Up())
 
@@ -227,8 +229,5 @@ func TestSuiteGenericHeaders(t *testing.T) {
 	t.Run("Enrichment header multiple values", func(t *testing.T) {
 		testGenericHeaderMultipleValues(t)
 	})
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

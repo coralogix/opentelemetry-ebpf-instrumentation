@@ -10,6 +10,17 @@ receivers:
           allowed_origins:
             - "http://*"
             - "https://*"
+processors:
+  # Tags every signal forwarded to weaver with the originating test's name
+  # (set on this otelcol's TEST_NAME env by the integration test harness).
+  # Applied only to the weaver pipelines below, so production prom/jaeger
+  # views stay unchanged. The shared shard-wide weaver groups its findings
+  # by this resource attribute when emitting the failure summary.
+  resource/test:
+    attributes:
+      - key: obi.test.name
+        value: ${env:TEST_NAME}
+        action: upsert
 exporters:
   prometheus:
     endpoint: "otelcol:9464"
@@ -51,7 +62,9 @@ service:
     # queue; a slow weaver tap cannot stall the production exporters above.
     metrics/weaver:
       receivers: [otlp]
+      processors: [resource/test]
       exporters: [otlp/weaver]
     traces/weaver:
       receivers: [otlp]
+      processors: [resource/test]
       exporters: [otlp/weaver]

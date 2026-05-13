@@ -101,11 +101,9 @@ func TestDiscoverySection(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	t.Run("Selective exports", testSelectiveExports)
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

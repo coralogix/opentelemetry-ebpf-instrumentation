@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,7 +157,12 @@ func setupContainerJaeger(t *testing.T, net dockertest.Network) {
 	t.Log("Jaeger container started")
 }
 
-// setupContainerCollector starts an OpenTelemetry Collector container.
+// setupContainerCollector starts an OpenTelemetry Collector container on the
+// per-test network AND attaches it to the shard-wide `weaver-shared` network
+// so its OTLP traffic reaches the shared weaver. The container's `TEST_NAME`
+// env is set to `t.Name()` so the resource processor in
+// `otelcol-config-weaver*.yml` can tag every forwarded signal with
+// `obi.test.name` for shard-end per-test grouping.
 func setupContainerCollector(t *testing.T, net dockertest.Network, configFile string) {
 	t.Helper()
 
@@ -165,6 +171,7 @@ func setupContainerCollector(t *testing.T, net dockertest.Network, configFile st
 		dockertest.WithTag(versionCollector),
 		dockertest.WithName(fmt.Sprintf("otelcol-otel-test-%d", time.Now().UnixNano())),
 		dockertest.WithCmd([]string{"--config=/etc/otelcol-config/" + configFile}),
+		dockertest.WithEnv([]string{"TEST_NAME=" + t.Name()}),
 		dockertest.WithMounts([]string{
 			filepath.Join(pathRoot, "internal/test/integration/configs") + ":/etc/otelcol-config",
 		}),
@@ -183,55 +190,19 @@ func setupContainerCollector(t *testing.T, net dockertest.Network, configFile st
 		EndpointConfig: endpointAliases("otelcol"),
 	})
 	require.NoError(t, err, "could not connect OpenTelemetry Collector container to network")
+
+	// Attach to the shard-wide weaver-shared network so this otelcol can
+	// reach `weaver:4317`. Weaver itself lives once per shard (see
+	// `shared_weaver_test.go`); only join it when a weaver config is in use.
+	if sharedWeaverNetID != "" && strings.Contains(configFile, "weaver") {
+		if _, err := dockerPool.Client().NetworkConnect(t.Context(), sharedWeaverNetID, client.NetworkConnectOptions{
+			Container: otelcol.ID(),
+		}); err != nil {
+			require.NoError(t, err, "could not connect otelcol to weaver-shared network")
+		}
+	}
+
 	t.Log("OpenTelemetry Collector container started")
-}
-
-// setupContainerWeaver starts the weaver semantic-convention validator
-// alongside the otelcol container. Mirrors the shared compose snippet at
-// `components/weaver/service.yml`: same image digest.
-// The container is named exactly "weaver" — matching `weaverContainer` in
-// `weaver.go` — because `runWeaverValidation` `docker wait` / `docker cp`
-// by name.
-func setupContainerWeaver(t *testing.T, net dockertest.Network) {
-	t.Helper()
-
-	t.Log("Starting weaver container...")
-	w, err := dockerPool.Run(t.Context(), "otel/weaver",
-		dockertest.WithTag(versionWeaver),
-		dockertest.WithName(weaverContainer),
-		dockertest.WithCmd([]string{
-			"registry", "live-check",
-			"--registry", "/obi-registry",
-			"--include-unreferenced",
-			"--inactivity-timeout", "300",
-			"--admin-port", "4320",
-			"--format", "json",
-			"--diagnostic-format", "json",
-			"--output", "/tmp",
-		}),
-		dockertest.WithMounts([]string{
-			filepath.Join(pathRoot, "schemas/obi") + ":/obi-registry:ro",
-		}),
-		dockertest.WithPortBindings(portBindings("4320/tcp", "4320")),
-		dockertest.WithContainerConfig(func(config *container.Config) {
-			config.WorkingDir = "/obi-registry"
-			config.ExposedPorts = exposedPorts("4317/tcp", "4320/tcp")
-		}),
-		dockertest.WithoutReuse(),
-	)
-	require.NoError(t, err, "could not start weaver container")
-	t.Cleanup(func() {
-		// Best-effort: `runWeaverValidation` may have already removed it via
-		// `docker wait` + `docker rm -f`; ignore the error in that case.
-		_ = w.Close(context.Background())
-	})
-
-	_, err = dockerPool.Client().NetworkConnect(t.Context(), net.ID(), client.NetworkConnectOptions{
-		Container:      w.ID(),
-		EndpointConfig: endpointAliases("weaver"),
-	})
-	require.NoError(t, err, "could not connect weaver container to network")
-	t.Log("Weaver container started")
 }
 
 // buildOBIImage builds the OBI image. When SKIP_DOCKER_BUILD is set, the image

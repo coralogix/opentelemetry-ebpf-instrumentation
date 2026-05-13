@@ -24,7 +24,6 @@ func TestCloudResourceMetadata_GCP(t *testing.T) {
 
 	setupContainerPrometheus(t, network, "prometheus-config-perapp.yml")
 	setupContainerJaeger(t, network)
-	setupContainerWeaver(t, network)
 	setupContainerCollector(t, network, "otelcol-config-weaver.yml")
 	setupGoOTelTestServer(t, network, nil)
 
@@ -66,8 +65,6 @@ func TestCloudResourceMetadata_GCP(t *testing.T) {
 	t.Run("OTEL traces", func(t *testing.T) {
 		testGCPTraces(t)
 	})
-
-	runWeaverValidation(t)
 }
 
 func testGCPMetrics(t *testing.T, pq promtest.Client, serviceName, exporter string) {

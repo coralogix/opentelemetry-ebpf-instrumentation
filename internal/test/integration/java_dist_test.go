@@ -50,6 +50,7 @@ func TestJavaNestedTraces(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	require.NoError(t, compose.Up())
 
 	waitForTestComponentsRoute(t, "http://localhost:8081", "/api/health")
@@ -59,8 +60,5 @@ func TestJavaNestedTraces(t *testing.T) {
 			testJavaNestedTraces(t, slug)
 		})
 	}
-
-	runWeaverValidation(t)
-
 	require.NoError(t, compose.Close())
 }

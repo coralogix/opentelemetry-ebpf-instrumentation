@@ -184,7 +184,6 @@ func TestHTTPGoOTelInstrumentedApp(t *testing.T) {
 	network := setupDockerNetwork(t)
 	setupContainerPrometheus(t, network, "prometheus-config.yml")
 	setupContainerJaeger(t, network)
-	setupContainerWeaver(t, network)
 	setupContainerCollector(t, network, "otelcol-config-weaver.yml")
 	setupGoOTelTestServer(t, network, nil)
 
@@ -207,8 +206,6 @@ func TestHTTPGoOTelInstrumentedApp(t *testing.T) {
 		waitForTestComponents(t, "http://localhost:8080")
 		testForHTTPGoOTelLibrary(t, "/rolldice", "integration-test")
 	})
-
-	runWeaverValidation(t)
 }
 
 func otelWaitForTestComponents(t *testing.T, url, subpath string) {
@@ -238,7 +235,6 @@ func TestHTTPGoOTelAvoidsInstrumentedApp(t *testing.T) {
 	network := setupDockerNetwork(t)
 	setupContainerPrometheus(t, network, "prometheus-config.yml")
 	setupContainerJaeger(t, network)
-	setupContainerWeaver(t, network)
 	setupContainerCollector(t, network, "otelcol-config-weaver.yml")
 	setupGoOTelTestServer(t, network, []string{
 		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otelcol:4318",
@@ -265,15 +261,12 @@ func TestHTTPGoOTelAvoidsInstrumentedApp(t *testing.T) {
 		time.Sleep(15 * time.Second) // ensure we see some calls to /v1/metrics /v1/traces
 		testInstrumentationMissing(t, "/rolldice", "integration-test")
 	})
-
-	runWeaverValidation(t)
 }
 
 func TestHTTPGoOTelDisabledOptInstrumentedApp(t *testing.T) {
 	network := setupDockerNetwork(t)
 	setupContainerPrometheus(t, network, "prometheus-config.yml")
 	setupContainerJaeger(t, network)
-	setupContainerWeaver(t, network)
 	setupContainerCollector(t, network, "otelcol-config-weaver.yml")
 	setupGoOTelTestServer(t, network, []string{
 		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otelcol:4318",
@@ -301,8 +294,6 @@ func TestHTTPGoOTelDisabledOptInstrumentedApp(t *testing.T) {
 		time.Sleep(15 * time.Second) // ensure we see some calls to /v1/metrics /v1/traces
 		testForHTTPGoOTelLibrary(t, "/rolldice", "integration-test")
 	})
-
-	runWeaverValidation(t)
 }
 
 func TestHTTPGoOTelInstrumentedAppGRPC(t *testing.T) {
@@ -311,6 +302,7 @@ func TestHTTPGoOTelInstrumentedAppGRPC(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=8080`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {
@@ -355,6 +347,7 @@ func TestHTTPGoOTelAvoidsInstrumentedAppGRPC(t *testing.T) {
 
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=8080`, `APP_OTEL_METRICS_ENDPOINT=http://otelcol:4317`, `APP_OTEL_TRACES_ENDPOINT=http://jaeger:4317`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {

@@ -118,6 +118,7 @@ func TestHTTP2Go(t *testing.T) {
 func testHTTP2GO(t *testing.T, compose *docker.Compose, useHTTPProtocols bool) {
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `TEST_NAME=`+t.Name())
 	if useHTTPProtocols {
 		compose.Env = append(compose.Env, `TEST_HTTP2_PROTOCOLS=1`)
 	}
@@ -140,8 +141,6 @@ func testHTTP2GO(t *testing.T, compose *docker.Compose, useHTTPProtocols bool) {
 			testNestedHTTP2Traces(t, "pingdo")
 		})
 	}
-
-	runWeaverValidation(t)
 	require.NoError(t, compose.Close())
 }
 
