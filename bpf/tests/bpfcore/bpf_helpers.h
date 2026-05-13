@@ -15,7 +15,7 @@
 #define NULL ((void *)0)
 #endif
 
-#define __uint(name, val) int(*name)[val]
+#define __uint(name, val) int (*name)[val]
 #define __type(name, val) typeof(val) *name
 #define __array(name, val) typeof(val) *name[]
 
@@ -39,6 +39,9 @@ static inline long bpf_map_delete_elem(void *map, const void *key) {
     return 0;
 }
 static inline long bpf_probe_read(void *dst, unsigned int size, const void *src) {
+    return 0;
+}
+static inline long bpf_probe_read_user(void *dst, unsigned int size, const void *src) {
     return 0;
 }
 static inline long bpf_probe_read_kernel(void *dst, unsigned int size, const void *src) {

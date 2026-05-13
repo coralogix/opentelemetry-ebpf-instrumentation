@@ -62,7 +62,7 @@ Attributes configures the decoration of some extra attributes that will be added
 | `attributes.rename_unresolved_hosts` | `string` | `OTEL_EBPF_RENAME_UNRESOLVED_HOSTS` | `unresolved` |  |  | Will replace HostName and PeerName attributes when they are empty or contain unresolved IP addresses to reduce cardinality. Set this value to the empty string to disable this feature. |
 | `attributes.rename_unresolved_hosts_incoming` | `string` | `OTEL_EBPF_RENAME_UNRESOLVED_HOSTS_INCOMING` | `incoming` |  |  |  |
 | `attributes.rename_unresolved_hosts_outgoing` | `string` | `OTEL_EBPF_RENAME_UNRESOLVED_HOSTS_OUTGOING` | `outgoing` |  |  |  |
-| `attributes.select` | `map[string]object` |  |  |  |  | Selection specifies which attributes are allowed for each metric. The key is the metric name (either in Prometheus or OpenTelemetry format) The value is the enumeration of included/excluded attribute globs |
+| `attributes.select` | `map[string]object` |  |  |  |  | Selection specifies which attributes are allowed for each signal. The key is usually the metric name (either in Prometheus or OpenTelemetry format); the key "traces" selects optional attributes for exported OTLP traces. The value is the enumeration of included/excluded attribute globs |
 
 ### `attributes.host_id`
 
@@ -289,6 +289,12 @@ HTTPParsingPolicy defines the default action for http enrichment rules.
 | YAML Path | Type | Env Var | Default | Values | Deprecated | Description |
 |---|---|---|---|---|---|---|
 | `ebpf.payload_extraction.http.genai.rerank.enabled` | `boolean` | `OTEL_EBPF_HTTP_RERANK_ENABLED` | `false` |  |  | Enable Rerank (Cohere, Jina AI, Voyage AI, etc.) payload extraction and parsing |
+
+#### `ebpf.payload_extraction.http.genai.retrieval`
+
+| YAML Path | Type | Env Var | Default | Values | Deprecated | Description |
+|---|---|---|---|---|---|---|
+| `ebpf.payload_extraction.http.genai.retrieval.enabled` | `boolean` | `OTEL_EBPF_HTTP_RETRIEVAL_ENABLED` | `false` |  |  | Enable vector retrieval (Pinecone, Qdrant, Milvus, Chroma, Weaviate, etc.) payload extraction and parsing |
 
 #### `ebpf.payload_extraction.http.graphql`
 
