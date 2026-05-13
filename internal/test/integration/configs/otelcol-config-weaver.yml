@@ -19,7 +19,7 @@ processors:
   resource/test:
     attributes:
       - key: obi.test.name
-        value: ${env:TEST_NAME}
+        value: ${env:TEST_NAME:-unknown}
         action: upsert
 exporters:
   prometheus:

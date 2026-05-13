@@ -202,6 +202,7 @@ func TestPHPFMUnixSockNginxSupportFloor(t *testing.T) {
 
 	compose.Env = append(
 		compose.Env,
+		`TEST_NAME=`+t.Name(),
 		`OTEL_EBPF_EXECUTABLE_PATH=`,
 		`OTEL_EBPF_OPEN_PORT=`,
 		`NGINX_BASE_IMAGE=`+nginxServerTracingSupportFloorImage,

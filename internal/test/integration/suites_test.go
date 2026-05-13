@@ -374,6 +374,7 @@ func TestSuite_RailsNginxSupportFloor(t *testing.T) {
 
 	compose.Env = append(
 		compose.Env,
+		`TEST_NAME=`+t.Name(),
 		`OTEL_EBPF_OPEN_PORT=3040,443`,
 		`OTEL_EBPF_EXECUTABLE_PATH=`,
 		`TEST_SERVICE_PORTS=3041:3040`,
@@ -460,6 +461,7 @@ func TestSuite_Python(t *testing.T) {
 
 	compose.Env = append(
 		compose.Env,
+		`TEST_NAME=`+t.Name(),
 		`OTEL_EBPF_OPEN_PORT=8380`,
 		`OTEL_EBPF_EXECUTABLE_PATH=`,
 		`TEST_SERVICE_PORTS=8381:8380`,
@@ -478,6 +480,7 @@ func TestSuite_PythonProm(t *testing.T) {
 
 	compose.Env = append(
 		compose.Env,
+		`TEST_NAME=`+t.Name(),
 		`OTEL_EBPF_OPEN_PORT=8380`,
 		`OTEL_EBPF_EXECUTABLE_PATH=`,
 		`TEST_SERVICE_PORTS=8381:8380`,
@@ -674,6 +677,7 @@ func TestSuite_PythonTLS(t *testing.T) {
 
 	compose.Env = append(
 		compose.Env,
+		`TEST_NAME=`+t.Name(),
 		`OTEL_EBPF_OPEN_PORT=8380`,
 		`OTEL_EBPF_EXECUTABLE_PATH=`,
 		`TEST_SERVICE_PORTS=8381:8380`,
