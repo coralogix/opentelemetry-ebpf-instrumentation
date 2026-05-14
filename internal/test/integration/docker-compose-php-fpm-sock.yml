@@ -132,4 +132,6 @@ volumes:
   php-socket:
 
 networks:
+  weaver-shared:
+    external: true
   test-network:

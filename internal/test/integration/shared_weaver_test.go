@@ -124,7 +124,7 @@ func finalizeSharedWeaver(ctx context.Context, out io.Writer) (int, error) {
 	reportPath := filepath.Join(pathOutput, "weaver-report-shard.json")
 	if cpOut, err := exec.CommandContext(stopCtx, "docker", "cp",
 		weaverContainer+":/tmp/live_check.json", reportPath).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("docker cp shared weaver report: %v; %s", err, cpOut)
+		return 0, fmt.Errorf("docker cp shared weaver report: %w; %s", err, cpOut)
 	}
 
 	rawReport, err := os.ReadFile(reportPath)

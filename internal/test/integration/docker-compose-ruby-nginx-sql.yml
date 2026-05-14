@@ -159,4 +159,6 @@ volumes:
   nginx_certs:
 
 networks:
+  weaver-shared:
+    external: true
   app_network:
