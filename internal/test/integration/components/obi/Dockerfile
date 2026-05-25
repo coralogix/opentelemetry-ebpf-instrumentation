@@ -1,6 +1,7 @@
 # Development version of the beyla Dockerfile that compiles for coverage
 # and allows retrieving coverage files.
 # The production-ready minimal image is in the project root's dockerfile.
+# cache-bust: 2026-05-26b
 FROM golang:1.26.3@sha256:efaccb5b497e90df3ebe5216cc25cd9f98e73874e2d638b56e38d4a3f098c41c AS builder
 
 ARG TARGETARCH

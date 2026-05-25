@@ -51,19 +51,15 @@ kernels:
     pr_integration: false
     pr_verifier: true
 
-  # TODO: fix bpf program loading on rhel8.x (kernel 4.18) because
-  # obi_packet_extender_find_existing_h2_tp exhausts the verifier
-  # complexity limit (>1M insns) — older verifier explores more states
-  # than 5.14+.
   - id: "rhel8.9"
     lvh_tag: "rhel8.9-20260504.013701"
     pr_integration: false
-    pr_verifier: false
+    pr_verifier: true
 
   - id: "rhel8.10"
     lvh_tag: "rhel8.10-20260504.013701"
     pr_integration: false
-    pr_verifier: false
+    pr_verifier: true
 
   - id: "rhel9.6"
     lvh_tag: "rhel9.6-20260504.013701"
