@@ -348,6 +348,23 @@ jobs:
       - name: Build source-generated release artifacts
         run: make release-source
 
+      # Build the Go module proxy assets from the SAME fully generated working
+      # tree produced by `make release-source` above (bpf2go outputs + embedded
+      # Java agent JAR). release-module deliberately does not re-run
+      # docker-generate, so it must run after release-source in this job.
+      - name: Build Go module release assets
+        env:
+          RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
+        run: make release-module RELEASE_VERSION="${RELEASE_VERSION}"
+
+      # Release gate: lay out a file:// GOPROXY from the module assets and verify
+      # a consumer can resolve and cross-compile the module. Fails the release if
+      # the published module zip would not compile.
+      - name: Verify Go module zip is consumable
+        env:
+          RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
+        run: ./scripts/verify-module-zip.sh --release-version "${RELEASE_VERSION}"
+
       - name: Generate Java agent SBOM
         run: make java-docker-sbom
 
@@ -478,5 +495,8 @@ jobs:
             --draft \
             dist/obi-*-linux-*.tar.gz \
             dist/obi-*-source-generated.tar.gz \
+            dist/obi-*.module.zip \
+            dist/obi-*.module.mod \
+            dist/obi-*.module.info \
             dist/*.cyclonedx.json \
             dist/SHA256SUMS
