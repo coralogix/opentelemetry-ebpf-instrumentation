@@ -101,9 +101,9 @@ var DefaultRedactQueryParams = []string{
 type SelectorConfig struct {
 	SelectionCfg            Selection
 	ExtraGroupAttributesCfg map[string][]attr.Name
-	// RedactQueryParams lists query-parameter keys whose values are replaced
-	// with REDACTED in url.full and url.query. Nil means use DefaultRedactQueryParams.
-	// Set to []string{} to disable all redaction.
+	// RedactQueryParams is the list of extra (user-supplied) query-parameter keys whose
+	// values are replaced with REDACTED in url.full and url.query, beyond the built-in
+	// DefaultRedactQueryParams which are always applied.
 	RedactQueryParams []string
 }
 
