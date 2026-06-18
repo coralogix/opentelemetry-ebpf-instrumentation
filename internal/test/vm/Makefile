@@ -66,8 +66,8 @@ $(ROOT_IMG): Dockerfile
 	qemu-img convert $(ROOT_IMAGE_RAW) -O qcow2 $(ROOT_IMG) && rm $(ROOT_IMAGE_RAW)
 
 write-test-env: $(TEST_OUTPUT)
-	@printf 'target=%s\ntest_pattern=%s\nrun_number=%s\n' \
-		"$(TARGET_TEST)" "$(TEST_PATTERN)" "$(RUN_NUMBER)" \
+	@printf 'target=%s\ntest_pattern=%s\nrun_number=%s\ncgroup_mode=%s\n' \
+		"$(TARGET_TEST)" "$(TEST_PATTERN)" "$(RUN_NUMBER)" "$(CGROUP_MODE)" \
 		> $(TEST_OUTPUT)/test-env
 
 launchvm: check_qemu $(ROOT_IMG) $(TEST_OUTPUT) write-test-env

@@ -289,8 +289,9 @@ jobs:
           KERNEL_ID: ${{ matrix.kernel.id }}
           KERNEL: ${{ steps.kernel.outputs.kernel }}
           MODULES_DIR: ${{ steps.kernel.outputs.modules-dir }}
+          CGROUP_MODE: ${{ matrix.kernel.cgroup_mode }}
         run: |
-          echo "VM Partition for kernel ${KERNEL_ID}"
+          echo "VM Partition for kernel ${KERNEL_ID} cgroup_mode=${CGROUP_MODE:-hybrid}"
           echo "${MATRIX_JSON}"
 
           if [ -z "${MATRIX_TEST_PATTERN}" ]; then
@@ -305,6 +306,7 @@ jobs:
             ARCH=amd64 \
             TEST_PATTERN="${MATRIX_TEST_PATTERN}" \
             RUN_NUMBER="${RUN_NUMBER}" \
+            CGROUP_MODE="${CGROUP_MODE}" \
             PRECOMPILED_TESTS_DIR="$(pwd)/compiled-tests" \
             && [ -f testoutput/success ]
 

@@ -219,14 +219,35 @@ echo "=================================="
 target=""
 test_pattern=""
 run_number=""
+cgroup_mode=""
 if [ -r /build/testoutput/test-env ]; then
     while IFS='=' read -r k v; do
         case "$k" in
             target) target="$v" ;;
             test_pattern) test_pattern="$v" ;;
             run_number) run_number="$v" ;;
+            cgroup_mode) cgroup_mode="$v" ;;
         esac
     done < /build/testoutput/test-env
+fi
+
+# Force cgroupv1-only by unmounting hybrid cgroup2 (issue #603).
+if [ "$cgroup_mode" = "legacy" ]; then
+    echo "=== Forcing cgroupv1-only (cgroup_mode=legacy) ==="
+    n=0
+    while [ $n -lt 10 ]; do
+        mp=$(mount -t cgroup2 | awk '{print $3}' | head -1)
+        [ -z "$mp" ] && break
+        umount -l "$mp" || true
+        n=$((n+1))
+    done
+    remaining=$(mount -t cgroup2 | wc -l)
+    if [ "$remaining" -ne 0 ]; then
+        echo "ERROR: cgroup_mode=legacy requested but $remaining cgroup2 mount(s) still present:" >&2
+        mount -t cgroup2 >&2
+    fi
+    echo "--- post-unmount cgroup state ---"
+    mount | grep -E "cgroup|sys/fs" || true
 fi
 
 if [ -n "$target" ]; then
