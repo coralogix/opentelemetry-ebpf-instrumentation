@@ -13,10 +13,13 @@ KERNEL ?=
 # explicitly in the workflow; local devs can pass either KERNEL_ID alone or
 # the full pair.
 
-TARBALL ?= /tmp/rootfs.tar
+CGROUP_MODE ?=
+# rootfs filename varies by cgroup mode so we can cache/upload both variants.
+ROOT_SUFFIX := $(if $(CGROUP_MODE),-$(CGROUP_MODE),)
+TARBALL ?= /tmp/rootfs$(ROOT_SUFFIX).tar
 # do NOT put ROOT_IMG on a tmpfs backed fs
-ROOT_IMG ?= $(WORKDIR)/rootfs.qcow2
-ROOT_IMAGE_RAW ?= $(WORKDIR)/rootfs.raw
+ROOT_IMG ?= $(WORKDIR)/rootfs$(ROOT_SUFFIX).qcow2
+ROOT_IMAGE_RAW ?= $(WORKDIR)/rootfs$(ROOT_SUFFIX).raw
 REPO_ROOT ?= ../../..
 TARGET_TEST ?= run-integration-test-vm
 TEST_PATTERN ?= TestMultiProcess
@@ -53,6 +56,7 @@ $(TEST_OUTPUT):
 
 $(ROOT_IMG): Dockerfile
 	DOCKER_BUILDKIT=1 docker build --quiet -f Dockerfile \
+		--build-arg CGROUP_MODE=$(CGROUP_MODE) \
 		--output "type=tar,dest=$(TARBALL)" .
 	# Create a raw image, format it, and extract the tarball
 	fallocate -l $(IMG_SIZE) $(ROOT_IMAGE_RAW)
@@ -66,8 +70,8 @@ $(ROOT_IMG): Dockerfile
 	qemu-img convert $(ROOT_IMAGE_RAW) -O qcow2 $(ROOT_IMG) && rm $(ROOT_IMAGE_RAW)
 
 write-test-env: $(TEST_OUTPUT)
-	@printf 'target=%s\ntest_pattern=%s\nrun_number=%s\ncgroup_mode=%s\n' \
-		"$(TARGET_TEST)" "$(TEST_PATTERN)" "$(RUN_NUMBER)" "$(CGROUP_MODE)" \
+	@printf 'target=%s\ntest_pattern=%s\nrun_number=%s\n' \
+		"$(TARGET_TEST)" "$(TEST_PATTERN)" "$(RUN_NUMBER)" \
 		> $(TEST_OUTPUT)/test-env
 
 launchvm: check_qemu $(ROOT_IMG) $(TEST_OUTPUT) write-test-env

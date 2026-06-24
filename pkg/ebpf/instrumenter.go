@@ -725,7 +725,7 @@ func (i *instrumenter) sockmsgs(p Tracer) error {
 
 func (i *instrumenter) sockops(p Tracer) error {
 	for _, sockops := range p.SockOps() {
-		cgroupPath, err := getCgroupPath()
+		cgroupPath, err := CgroupV2Path()
 		if err != nil {
 			if i.metrics != nil {
 				i.metrics.InstrumentationError(i.processName, imetrics.InstrumentationErrorCgroupNotFound)
@@ -864,10 +864,6 @@ func htons(a uint16) uint16 {
 
 func processMaps(pid app.PID) ([]*procfs.ProcMap, error) {
 	return procs.FindLibMaps(pid)
-}
-
-func getCgroupPath() (string, error) {
-	return CgroupV2Path()
 }
 
 func symbolNames(m map[string][]*ebpfcommon.ProbeDesc, matcher ebpfcommon.SymbolMatcher) []string {

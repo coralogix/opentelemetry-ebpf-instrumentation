@@ -16,17 +16,17 @@ import (
 )
 
 const (
-	// SelfMountPath is where OBI mounts its own cgroupv2 hierarchy when
-	// the host has no unified or hybrid mount available (issue #603).
-	SelfMountPath = "/run/obi-cgroupv2"
+	// selfMountPath is where OBI mounts its own cgroupv2 hierarchy when
+	// the host has no unified or hybrid mount available.
+	selfMountPath = "/run/obi-cgroupv2"
+	selfMountPerm = 0o700
 
-	cgroupFSRoot     = "/sys/fs/cgroup"
-	cgroupV2Hybrid   = "/sys/fs/cgroup/unified"
-	cgroup2Magic     = 0x63677270
-	selfMountPerm    = 0o700
+	cgroupFSRoot   = "/sys/fs/cgroup"
+	cgroupV2Hybrid = "/sys/fs/cgroup/unified"
+	cgroup2Magic   = 0x63677270
 )
 
-var errNoCgroupV2 = errors.New("no cgroupv2 hierarchy found; sockops cannot be attached")
+var errNoCgroupV2 = errors.New("no cgroupv2 hierarchy found")
 
 type cgroupV2Result struct {
 	path string
@@ -44,23 +44,23 @@ var cgroupV2Once = sync.OnceValue(func() cgroupV2Result {
 	if p, err := selfMountCgroupV2(log); err == nil {
 		return cgroupV2Result{path: p}
 	} else {
-		log.Warn("could not self-mount cgroupv2", "path", SelfMountPath, "error", err)
+		log.Warn("could not self-mount cgroupv2", "path", selfMountPath, "error", err)
 	}
 	return cgroupV2Result{err: errNoCgroupV2}
 })
 
 func selfMountCgroupV2(log *slog.Logger) (string, error) {
-	if isCgroup2Mount(SelfMountPath) {
-		return SelfMountPath, nil
+	if isCgroup2Mount(selfMountPath) {
+		return selfMountPath, nil
 	}
-	if err := os.MkdirAll(SelfMountPath, selfMountPerm); err != nil {
+	if err := os.MkdirAll(selfMountPath, selfMountPerm); err != nil {
 		return "", err
 	}
-	if err := unix.Mount("none", SelfMountPath, "cgroup2", 0, ""); err != nil {
+	if err := unix.Mount("none", selfMountPath, "cgroup2", 0, ""); err != nil {
 		return "", err
 	}
-	log.Info("self-mounted cgroup2 hierarchy for sockops attach", "path", SelfMountPath)
-	return SelfMountPath, nil
+	log.Info("self-mounted cgroup2 hierarchy", "path", selfMountPath)
+	return selfMountPath, nil
 }
 
 func isCgroup2Mount(path string) bool {

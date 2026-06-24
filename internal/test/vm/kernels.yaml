@@ -25,7 +25,7 @@ kernels:
     pr_integration: false
     pr_verifier: true
 
-  # Same 5.10 kernel; boots cgroupv1-only to exercise self-mount (issue #603).
+  # Same 5.10 kernel; boots cgroupv1-only to exercise self-mount.
   - id: "5.10-lts-cgv1"
     lvh_tag: "5.10-20260608.014906"
     digest: "sha256:1cee8207c09aa51b22f981325d7d62ae71cc7b171d164e90dfdb3e079c37668b"
