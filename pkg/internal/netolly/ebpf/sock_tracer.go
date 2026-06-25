@@ -100,7 +100,7 @@ func NewSockFlowFetcher(
 		gBpfDebug:          cfg.BpfDebug,
 	}, sharedMaps, &mu, ""); err != nil {
 		printVerifierErrorInfo(err)
-		return nil, err
+		return nil, annotateVerifierError(err)
 	}
 
 	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW, int(htons(unix.ETH_P_ALL)))
