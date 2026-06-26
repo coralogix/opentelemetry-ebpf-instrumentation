@@ -5,12 +5,27 @@
 
 #include <bpfcore/vmlinux.h>
 
-enum { k_obi_usdt_max_args = 12, k_obi_usdt_max_spec_cnt = 256, k_obi_usdt_max_ip_cnt = 1024 };
+enum {
+    k_obi_usdt_max_args = 12,
+    k_obi_usdt_max_spec_cnt = 256,
+    k_obi_usdt_max_ip_cnt = 1024,
+    k_obi_usdt_match_name_len = 64,
+};
+
+enum obi_usdt_pair_kind {
+    k_obi_usdt_pair_arg0 = 0, // legacy: pair on arg_int[0] value
+    k_obi_usdt_pair_tid = 1,  // function-pair: pair on pid_tgid
+};
 
 enum obi_usdt_arg_type {
     k_obi_usdt_arg_const = 0,
     k_obi_usdt_arg_reg = 1,
     k_obi_usdt_arg_reg_deref = 2,
+    // reg value is a user-space pointer; read NUL-terminated string from it.
+    k_obi_usdt_arg_reg_deref_str = 3,
+    // Go-style string: ptr in pt_regs[reg_off], len in pt_regs[reg_off+8].
+    // val_off caps the read length.
+    k_obi_usdt_arg_go_string = 4,
 };
 
 enum obi_usdt_arg_error {
@@ -34,7 +49,11 @@ struct obi_usdt_spec {
     struct obi_usdt_arg_spec args[k_obi_usdt_max_args];
     u64 cookie;
     u16 arg_cnt;
-    u8 _pad[6];
+    u8 pair_kind;     // see enum obi_usdt_pair_kind
+    u8 match_arg_idx; // index into e->arg_str compared against match_name
+    u8 match_enabled; // 1 when match filter active; distinguishes "" from "no filter"
+    u8 _pad[3];
+    u8 match_name[k_obi_usdt_match_name_len];
 };
 
 struct obi_usdt_ip_key {

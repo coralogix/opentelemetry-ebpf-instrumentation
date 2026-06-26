@@ -7,10 +7,12 @@ package generictracer // import "go.opentelemetry.io/obi/pkg/internal/ebpf/gener
 
 import (
 	"context"
+	"debug/elf"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -24,6 +26,7 @@ import (
 	jvmruntime "go.opentelemetry.io/obi/pkg/appolly/app/runtime"
 	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
 	"go.opentelemetry.io/obi/pkg/config"
+	obiebpf "go.opentelemetry.io/obi/pkg/ebpf"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/ebpf/ringbuf"
 	"go.opentelemetry.io/obi/pkg/ebpf/timing"
@@ -52,6 +55,35 @@ type Tracer struct {
 	iters            []*ebpfcommon.Iter
 	eventCtx         *ebpfcommon.EBPFEventContext
 	jvmUSDTManager   ebpfcommon.USDTSpecManager
+	customSpan       *customSpanRuntime
+}
+
+// customSpanSpecMgr returns the spec manager that hands out IDs into the
+// shared obi_usdt_specs map. The manager lives on the EBPFEventContext so
+// every generictracer instance (e.g. one for non-Go binaries plus a
+// piggy-backed one for Go binaries) hands out distinct IDs.
+func (p *Tracer) customSpanSpecMgr() *ebpfcommon.USDTSpecManager {
+	if p.eventCtx == nil {
+		// Fall back to a per-tracer manager when the event context isn't
+		// wired yet (e.g. early init paths in tests). The integration
+		// path always sets eventCtx before any attach happens.
+		return &ebpfcommon.USDTSpecManager{}
+	}
+	return &p.eventCtx.CustomSpanSpecMgr
+}
+
+// customSpanRuntime is the per-tracer userspace state for custom_span spans.
+// Cookies are stable across rediscovery so spans defined once stay valid.
+type customSpanRuntime struct {
+	spans    []customSpanBinding
+	registry *CustomSpanRegistry
+	pairer   *CustomSpanPairer
+	builder  *CustomSpanBuilder
+}
+
+type customSpanBinding struct {
+	cookie uint64
+	span   config.CustomSpanSpec
 }
 
 func tlog() *slog.Logger {
@@ -150,7 +182,50 @@ func (p *Tracer) LoadSpecs() ([]*ebpfcommon.SpecBundle, error) {
 	return []*ebpfcommon.SpecBundle{{Spec: spec, Objects: &p.bpfObjects, Constants: p.constants()}}, nil
 }
 
+// initCustomSpan builds per-tracer state for custom_span spans. Idempotent
+// across calls — cookies are derived from the span index.
+func (p *Tracer) initCustomSpan() {
+	if p.customSpan != nil {
+		return
+	}
+	if p.cfg == nil || !p.cfg.EBPF.CustomSpans.Enabled() {
+		return
+	}
+	spans := p.cfg.EBPF.CustomSpans.Spans
+	if len(spans) == 0 {
+		return
+	}
+
+	ttl := p.cfg.EBPF.CustomSpans.TTL
+	if ttl <= 0 {
+		ttl = config.CustomSpanDefaultTTL
+	}
+
+	registry := NewCustomSpanRegistry()
+	pairer := NewCustomSpanPairer(ttl)
+	rt := &customSpanRuntime{
+		registry: registry,
+		pairer:   pairer,
+		builder:  NewCustomSpanBuilder(registry, pairer),
+		spans:    make([]customSpanBinding, 0, len(spans)),
+	}
+
+	for idx := range spans {
+		cookie := uint64(idx) + 1
+		spanCopy := spans[idx]
+		rt.spans = append(rt.spans, customSpanBinding{cookie: cookie, span: spanCopy})
+		registry.Register(NewCustomSpanDef(&spanCopy, obiebpf.CompiledCustomSpanSpec{Cookie: cookie}))
+	}
+
+	p.customSpan = rt
+	p.log.Info("custom_span enabled",
+		"spans", len(spans),
+		"ttl", ttl,
+	)
+}
+
 func (p *Tracer) SetupTailCalls() {
+	p.initCustomSpan()
 	// Order must match the k_tail_* enum in bpf/generictracer/k_tracer_tailcall.h
 	for i, prog := range []*ebpf.Program{
 		// HTTP/1
@@ -231,6 +306,10 @@ func (p *Tracer) constants() map[string]any {
 	m["jvm_sampling_interval_ns"] = uint64(0)
 	if p.cfg.JVMRuntimeMetrics.Enabled {
 		m["jvm_sampling_interval_ns"] = uint64(p.cfg.JVMRuntimeMetrics.SamplingInterval.Nanoseconds())
+	}
+	m["has_attach_cookie"] = uint32(0)
+	if ebpfcommon.HasAttachCookie() {
+		m["has_attach_cookie"] = uint32(1)
 	}
 
 	return m
@@ -495,11 +574,12 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 }
 
 func (p *Tracer) USDTProbes() map[string][]*ebpfcommon.USDTProbeDesc {
-	if p.cfg == nil || !p.cfg.JVMRuntimeMetrics.Enabled {
+	if p.cfg == nil {
 		return nil
 	}
-	return map[string][]*ebpfcommon.USDTProbeDesc{
-		"libjvm.so": {
+	out := map[string][]*ebpfcommon.USDTProbeDesc{}
+	if p.cfg.JVMRuntimeMetrics.Enabled {
+		out["libjvm.so"] = []*ebpfcommon.USDTProbeDesc{
 			{
 				Provider:    "hotspot",
 				Name:        "mem__pool__gc__begin",
@@ -516,7 +596,161 @@ func (p *Tracer) USDTProbes() map[string][]*ebpfcommon.USDTProbeDesc {
 				IPMap:       p.bpfObjects.ObiUsdtIpToSpecId,
 				SpecManager: &p.jvmUSDTManager,
 			},
-		},
+		}
+	}
+	if p.customSpan != nil {
+		for _, lib := range p.customSpanProbeLibs() {
+			out[lib] = append(out[lib], p.customSpanProbesForLib(lib)...)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// customSpanProbeLibs uses the auto-discover marker so probes attach wherever
+// they live — static stapsdt in the exe or libstapsdt-backed runtime .so.
+func (p *Tracer) customSpanProbeLibs() []string {
+	return []string{ebpfcommon.USDTAutoDiscoverLib}
+}
+
+// customSpanProbesForLib expands each span into its USDTProbeDesc(s).
+//   - paired USDT span → 2 descs (start+end) sharing a cookie
+//   - single-shot USDT → 1 desc
+//   - function-mode (Function:) → 1 desc, symbol-based uprobe at entry
+func (p *Tracer) customSpanProbesForLib(_ string) []*ebpfcommon.USDTProbeDesc {
+	if p.customSpan == nil {
+		return nil
+	}
+	descs := make([]*ebpfcommon.USDTProbeDesc, 0, 2*len(p.customSpan.spans))
+	for _, binding := range p.customSpan.spans {
+		span := binding.span
+		cookie := binding.cookie
+
+		if span.IsAnyFunction() {
+			spanCopy := span
+			cookieCopy := cookie
+			isPaired := span.IsFunctionSpan()
+			entryProg := p.bpfObjects.ObiCustomSpanEvent
+			var retProg *ebpf.Program
+			if isPaired {
+				entryProg = p.bpfObjects.ObiCustomSpanStart
+				retProg = p.bpfObjects.ObiCustomSpanFuncRet
+			}
+			builder := func(elfFile any) (any, error) {
+				ef, _ := elfFile.(*elf.File)
+				lang := obiebpf.FunctionLangC
+				if ef != nil {
+					lang = obiebpf.DetectFunctionLang(ef)
+				}
+				compiled, err := obiebpf.BuildGoABISpec(&spanCopy, cookieCopy, runtime.GOARCH, lang)
+				if err != nil {
+					return nil, err
+				}
+				if isPaired {
+					compiled.Spec.PairKind = obiebpf.ObiUSDTPairTid()
+				}
+				return compiled.Spec, nil
+			}
+			descs = append(descs, &ebpfcommon.USDTProbeDesc{
+				Function:          span.FunctionSymbol(),
+				BuildFunctionSpec: builder,
+				Program:           entryProg,
+				ReturnProgram:     retProg,
+				SpecsMap:          p.bpfObjects.ObiUsdtSpecs,
+				IPMap:             p.bpfObjects.ObiUsdtIpToSpecId,
+				SpecManager:       p.customSpanSpecMgr(),
+				Cookie:            cookie,
+			})
+			continue
+		}
+
+		rewrite := obiebpf.MakeCustomSpanSpecRewriteWithMatch(&span, cookie)
+		switch {
+		case span.IsUSDTSpan():
+			descs = append(descs,
+				p.makeCustomSpanProbe(span.USDTStartProbe(), p.bpfObjects.ObiCustomSpanStart, cookie, rewrite),
+				p.makeCustomSpanProbe(span.USDTEndProbe(), p.bpfObjects.ObiCustomSpanEnd, cookie, rewrite),
+			)
+		case span.IsUSDTNoRet():
+			descs = append(descs,
+				p.makeCustomSpanProbe(span.USDTNoRetProbe(), p.bpfObjects.ObiCustomSpanEvent, cookie, rewrite),
+			)
+		}
+	}
+	return descs
+}
+
+func (p *Tracer) makeCustomSpanProbe(probeIdent string, program *ebpf.Program, cookie uint64, rewrite ebpfcommon.USDTSpecRewriter) *ebpfcommon.USDTProbeDesc {
+	provider, name, _ := splitProbeIdent(probeIdent)
+	return &ebpfcommon.USDTProbeDesc{
+		Provider:    provider,
+		Name:        name,
+		Program:     program,
+		SpecsMap:    p.bpfObjects.ObiUsdtSpecs,
+		IPMap:       p.bpfObjects.ObiUsdtIpToSpecId,
+		SpecManager: p.customSpanSpecMgr(),
+		Cookie:      cookie,
+		RewriteSpec: rewrite,
+	}
+}
+
+// splitProbeIdent splits a "provider:name" identifier as validated by the
+// config layer.
+func splitProbeIdent(probe string) (string, string, bool) {
+	for i := 0; i < len(probe); i++ {
+		if probe[i] == ':' {
+			return probe[:i], probe[i+1:], true
+		}
+	}
+	return probe, "", false
+}
+
+// handleCustomSpanRecord dispatches an EVENT_CUSTOM_SPAN ringbuf record. Returns
+// (span, ready, handled, err): handled=true means the record was a custom_span
+// event; ready=true means span is the completed result to emit.
+func (p *Tracer) handleCustomSpanRecord(record *ringbuf.Record) (request.Span, bool, bool, error) {
+	if p.customSpan == nil || record == nil || len(record.RawSample) == 0 {
+		return request.Span{}, false, false, nil
+	}
+	if record.RawSample[0] != ebpfcommon.EventTypeCustomSpan {
+		return request.Span{}, false, false, nil
+	}
+
+	ev, err := DecodeCustomSpanEvent(record.RawSample)
+	if err != nil {
+		p.log.Debug("custom_span: decode failed", "error", err)
+		return request.Span{}, false, true, nil
+	}
+	span, ready, err := p.customSpan.builder.Build(ev)
+	if err != nil {
+		p.log.Debug("custom_span: build failed", "error", err)
+		return request.Span{}, false, true, nil
+	}
+	return span, ready, true, nil
+}
+
+// customSpanEvictionLoop prunes pending start frames older than TTL.
+func (p *Tracer) customSpanEvictionLoop(ctx context.Context) {
+	if p.customSpan == nil {
+		return
+	}
+	interval := p.cfg.EBPF.CustomSpans.TTL / 4
+	if interval < 10*time.Second {
+		interval = 10 * time.Second
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n := p.customSpan.pairer.EvictExpired(); n > 0 {
+				p.log.Debug("custom_span: evicted stale pending starts", "count", n)
+			}
+		}
 	}
 }
 
@@ -622,6 +856,13 @@ func (p *Tracer) Run(
 ) {
 	p.eventCtx = ebpfEventContext
 
+	// Register custom_span dispatcher onto the shared EBPFEventContext so
+	// gotracer can route EVENT_CUSTOM_SPAN records to us when it wins the
+	// SharedRingBuffer slot.
+	if p.customSpan != nil && ebpfEventContext != nil {
+		ebpfEventContext.CustomSpanHandler = p.handleCustomSpanRecord
+	}
+
 	// At this point we now have loaded the bpf objects, which means we should insert any
 	// pids that are allowed into the bpf map
 	if p.bpfObjects.ValidPids != nil {
@@ -635,6 +876,7 @@ func (p *Tracer) Run(
 
 	go p.watchForMisclassifedEvents(ctx)
 	go p.lookForTimeouts(ctx, parseContext, timeoutTicker, eventsChan)
+	go p.customSpanEvictionLoop(ctx)
 	defer timeoutTicker.Stop()
 
 	p.runItersForPids()
@@ -678,6 +920,13 @@ func (p *Tracer) processSharedRingbufRecord(
 		p.handleJVMRuntimeMetricsRecord,
 	); handled {
 		return request.Span{}, true, err
+	}
+
+	if span, ready, handled, err := p.handleCustomSpanRecord(record); handled {
+		if !ready {
+			return request.Span{}, true, err
+		}
+		return span, false, err
 	}
 
 	s, ignore, err := ebpfcommon.ReadBPFTraceAsSpan(parseContext, cfg, record, p.pidsFilter)

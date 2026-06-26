@@ -18,16 +18,19 @@ import (
 	"github.com/prometheus/procfs"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
+	"go.opentelemetry.io/obi/pkg/internal/goexec"
 )
 
 const (
-	obiUSDTMaxArgs     = 12
-	obiUSDTMaxSpecCnt  = 256
-	obiUSDTNoteType    = 3
-	obiUSDTNoteName    = "stapsdt"
-	obiUSDTArgConst    = uint8(0)
-	obiUSDTArgReg      = uint8(1)
-	obiUSDTArgRegDeref = uint8(2)
+	obiUSDTMaxArgs        = 12
+	obiUSDTMaxSpecCnt     = 256
+	obiUSDTNoteType       = 3
+	obiUSDTNoteName       = "stapsdt"
+	obiUSDTArgConst       = uint8(0)
+	obiUSDTArgReg         = uint8(1)
+	obiUSDTArgRegDeref    = uint8(2)
+	obiUSDTArgRegDerefStr = uint8(3)
+	obiUSDTArgGoString    = uint8(4)
 )
 
 // TODO: Reevaluate github.com/parca-dev/usdt if it exposes target-ELF-driven
@@ -71,11 +74,24 @@ type obiUSDTArgSpec struct {
 	_           [3]byte
 }
 
+// obiUSDTMatchNameLen mirrors k_obi_usdt_match_name_len in usdt_types.h.
+const obiUSDTMatchNameLen = 64
+
+// obiUSDTPairKind mirrors enum obi_usdt_pair_kind.
+const (
+	obiUSDTPairArg0 = uint8(0)
+	obiUSDTPairTid  = uint8(1)
+)
+
 type obiUSDTSpec struct {
-	Args     [obiUSDTMaxArgs]obiUSDTArgSpec
-	Cookie   uint64
-	ArgCount uint16
-	_        [6]byte
+	Args         [obiUSDTMaxArgs]obiUSDTArgSpec
+	Cookie       uint64
+	ArgCount     uint16
+	PairKind     uint8
+	MatchArgIdx  uint8
+	MatchEnabled uint8
+	_            [3]byte
+	MatchName    [obiUSDTMatchNameLen]byte
 }
 
 type obiUSDTIPKey struct {
@@ -90,6 +106,13 @@ type usdtTarget struct {
 	SemaOff uint64
 	Spec    obiUSDTSpec
 	SpecKey string
+	// ReturnRelIPs holds per-instruction RET offsets when the target
+	// binary is Go. Kernel uretprobe on Go is unsafe (the trampoline
+	// rewrites the on-stack return address, which the Go GC walks and
+	// can mistake for a heap pointer), so for Go function_span we attach
+	// regular uprobes at each RET site instead — same approach as the
+	// gotracer in pkg/internal/ebpf/gotracer.
+	ReturnRelIPs []uint64
 }
 
 var (
@@ -278,6 +301,86 @@ func usdtTargetFromNote(
 		Spec:    spec,
 		SpecKey: fmt.Sprintf("%s:%s:%s:%s", elfFile.Machine, note.Provider, note.Name, note.Args),
 	}, nil
+}
+
+// lookupFunctionTarget resolves a function symbol to a uprobe-attachable
+// target. Used by custom_span function-mode for symbol-based attachment
+// (Go binaries).
+func lookupFunctionTarget(
+	elfFile *elf.File,
+	pid app.PID,
+	maps []*procfs.ProcMap,
+	mappedPath string,
+	function string,
+	spec obiUSDTSpec,
+) (usdtTarget, error) {
+	syms, _ := elfFile.Symbols()
+	dynsyms, _ := elfFile.DynamicSymbols()
+	syms = append(syms, dynsyms...)
+
+	var sym *elf.Symbol
+	for i := range syms {
+		s := &syms[i]
+		if s.Name != function {
+			continue
+		}
+		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
+			continue
+		}
+		if s.Value == 0 {
+			continue
+		}
+		sym = s
+		break
+	}
+	if sym == nil {
+		return usdtTarget{}, fmt.Errorf("symbol %q not found in executable", function)
+	}
+
+	relIP, err := elfFileOffset(elfFile, sym.Value, true)
+	if err != nil {
+		return usdtTarget{}, fmt.Errorf("symbol %q: %w", function, err)
+	}
+	absIP, err := absoluteUSDTIP(pid, maps, mappedPath, relIP)
+	if err != nil {
+		return usdtTarget{}, fmt.Errorf("symbol %q: %w", function, err)
+	}
+
+	target := usdtTarget{
+		AbsIP:   absIP,
+		RelIP:   relIP,
+		Spec:    spec,
+		SpecKey: fmt.Sprintf("%s:func:%s", elfFile.Machine, function),
+	}
+	// For Go binaries, collect RET-site offsets inside the function so
+	// the function_span "end" uprobe can attach as a regular uprobe at
+	// each return, avoiding the uretprobe trampoline that interacts
+	// badly with Go's stack scanning / regabi.
+	if sym.Size > 0 && DetectFunctionLang(elfFile) == FunctionLangGo {
+		buf := make([]byte, sym.Size)
+		if _, err := elfReadFunctionBytes(elfFile, sym.Value, buf); err == nil {
+			rets, ferr := goexec.FindReturnOffsets(relIP, buf)
+			if ferr == nil {
+				target.ReturnRelIPs = rets
+			}
+		}
+	}
+	return target, nil
+}
+
+// elfReadFunctionBytes copies the function's instructions starting at vaddr
+// into buf. Returns the number of bytes read on success.
+func elfReadFunctionBytes(elfFile *elf.File, vaddr uint64, buf []byte) (int, error) {
+	for _, prog := range elfFile.Progs {
+		if prog.Type != elf.PT_LOAD || (prog.Flags&elf.PF_X) == 0 {
+			continue
+		}
+		if vaddr < prog.Vaddr || vaddr >= prog.Vaddr+prog.Memsz {
+			continue
+		}
+		return prog.ReadAt(buf, int64(vaddr-prog.Vaddr))
+	}
+	return 0, fmt.Errorf("vaddr %#x not in any executable PT_LOAD segment", vaddr)
 }
 
 func adjustedUSDTAddress(baseAddr, noteBase, addr uint64) uint64 {

@@ -194,6 +194,15 @@ Per-protocol maximum bytes to capture per request per direction, sent to userspa
 | `ebpf.buffer_sizes.postgres` | `integer` | `OTEL_EBPF_BPF_BUFFER_SIZE_POSTGRES` | `0` |  |  |  |
 | `ebpf.buffer_sizes.tcp` | `integer` | `OTEL_EBPF_BPF_BUFFER_SIZE_TCP` | `0` |  |  |  |
 
+### `ebpf.custom_spans`
+
+CustomSpanConfig declares user-driven spans backed by USDT or uprobes. The feature is enabled when Spans is non-empty.
+
+| YAML Path | Type | Env Var | Default | Values | Deprecated | Description |
+|---|---|---|---|---|---|---|
+| `ebpf.custom_spans.spans` | [`CustomSpanSpec`](#customspanspec)[] |  |  |  |  |  |
+| `ebpf.custom_spans.ttl` | `duration` | `OTEL_EBPF_CUSTOM_SPAN_TTL` | `5m` | `30s`, `5m`, `1ms`, etc |  |  |
+
 ### `ebpf.log_enricher`
 
 | YAML Path | Type | Env Var | Default | Values | Deprecated | Description |
@@ -662,6 +671,16 @@ Buckets defines the histograms bucket boundaries, and allows users to redefine t
 | `response_size_histogram` | `number`[] |  |  |
 | `stat_tcp_rtt_histogram` | `number`[] |  |  |
 
+### CustomSpanSpec
+
+CustomSpanSpec defines one span. Exactly one target key inside `on:` is required; modifiers (Paired, Match) apply only where noted.
+
+| Field | Type | Values | Description |
+|---|---|---|---|
+| `attrs` | `map[string]object` |  |  |
+| `name` | `string` |  |  |
+| `on` | [`CustomSpanTarget`](#customspantarget) |  | CustomSpanTarget enumerates probe-target options. Exactly one of {USDTNoRet, USDTSpan, FunctionNoRet, FunctionSpan} must be non-empty. |
+
 ### ExtraGroupAttributesMap
 
 Map of attribute group names to arrays of attribute names. Only 'k8s_app_meta' is currently supported as a key.
@@ -783,6 +802,18 @@ SensitiveQueryParamsConfig controls which query-parameter keys are redacted. The
 | `incoming` | `string`[] |  |  |
 | `outgoing` | `string`[] |  |  |
 
+### CustomSpanTarget
+
+CustomSpanTarget enumerates probe-target options. Exactly one of {USDTNoRet, USDTSpan, FunctionNoRet, FunctionSpan} must be non-empty.
+
+| Field | Type | Values | Description |
+|---|---|---|---|
+| `function_noret` | `string` |  | Attaches an entry uprobe only — zero-duration marker. Use for functions that never return (event loops, noreturn). |
+| `function_span` | `string` |  | Attaches an entry uprobe + uretprobe; emits a span whose duration is entry-to-return. |
+| `match` | [`CustomSpanMatch`](#customspanmatch) |  | Drops events whose probe arg at Match.Arg does not equal Match.Value (byte-for-byte). In-BPF filter; valid on any USDT shape. |
+| `usdt_noret` | `string` |  | Attaches a uprobe at a single stapsdt probe "<provider>:<name>"; each fire emits a zero-duration marker event. |
+| `usdt_span` | `string` |  | Is "<provider>:<base>"; OBI attaches at "<base>_start" and "<base>_end" and emits a span whose duration spans the two probes. Pairing correlates on arg_int[0]. |
+
 ### HTTPParsingMatch
 
 HTTPParsingMatch defines matching criteria for an HTTP parsing rule. Header rules use Patterns and CaseSensitive. Body rules use ObfuscationJSONPaths. URLPathPatterns and Methods are shared across both types.
@@ -793,7 +824,6 @@ HTTPParsingMatch defines matching criteria for an HTTP parsing rule. Header rule
 | `methods` | `string`[] | `DELETE`, `GET`, `HEAD`, `OPTIONS`, `PATCH`, `POST`, `PUT` | Is a list of HTTP methods this rule applies to (shared). Empty means all methods. |
 | `obfuscation_json_paths` | `string`[] | `$.password`, `$.user.name`, `$.items[0].id`, etc | Is a list of JSONPath expressions for fields to obfuscate (body only) |
 | `patterns` | `glob`[] | `app-*`, `service-??`, `prod-*-db`, etc | Is a list of glob patterns to match header names against (headers only) |
-| `response_status_code` | [`NumericRange`](#numericrange) |  | Filters this rule to only apply when the response status code matches the given range. If unset, the rule applies regardless of status code. |
 | `url_path_patterns` | `glob`[] | `app-*`, `service-??`, `prod-*-db`, etc | Is a list of glob patterns to match the request path against (shared) |
 
 ### SamplerConfig
@@ -813,15 +843,11 @@ SvcMetricsConfig is equivalent to MetricsConfig, but avoids defining environment
 |---|---|---|---|
 | `features` | `string`[] | `*`, `all`, `application`, `application_host`, `application_jvm`, `application_runtime`, `application_service_graph`, `application_span`, `application_span_otel`, `application_span_sizes`, `ebpf`, `network`, `network_flow_packets`, `network_inter_zone`, `stats`, `stats_tcp_failed_connections`, `stats_tcp_io`, `stats_tcp_retransmits`, `stats_tcp_rtt` | Specifies which metric features to export. Accepted values: application, network, application_span, application_service_graph, ... envDefault is provided to avoid breaking changes |
 
-### NumericRange
+### CustomSpanMatch
 
-NumericRange defines numeric comparison criteria for a rule match condition. All fields are optional; only the provided fields are evaluated.
+CustomSpanMatch filters events against a string-valued probe argument.
 
 | Field | Type | Values | Description |
 |---|---|---|---|
-| `equals` | `integer` |  |  |
-| `greater_equals` | `integer` |  |  |
-| `greater_than` | `integer` |  |  |
-| `less_equals` | `integer` |  |  |
-| `less_than` | `integer` |  |  |
-| `not_equals` | `integer` |  |  |
+| `arg` | `integer` |  |  |
+| `value` | `string` |  |  |

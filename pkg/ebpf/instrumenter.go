@@ -6,6 +6,7 @@
 package ebpf // import "go.opentelemetry.io/obi/pkg/ebpf"
 
 import (
+	"context"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
@@ -340,6 +341,85 @@ func resolveExePath(pid app.PID) (string, uint64, error) {
 	return exePath, stat.Ino, nil
 }
 
+type usdtMapEntry struct {
+	instrPath  string
+	mappedPath string
+	exe        *link.Executable
+	elfFile    *elf.File
+}
+
+// openExeMappings opens every unique executable inode in /proc/<pid>/maps.
+// Closers must be invoked by the caller.
+func openExeMappings(pid app.PID, maps []*procfs.ProcMap) ([]*usdtMapEntry, []io.Closer) {
+	seen := map[uint64]bool{}
+	var entries []*usdtMapEntry
+	var closers []io.Closer
+	for _, m := range maps {
+		if m.Perms == nil || !m.Perms.Execute || m.Pathname == "" {
+			continue
+		}
+		if m.Pathname[0] == '[' {
+			continue
+		}
+		ino := m.Inode
+		if ino == 0 || seen[ino] {
+			continue
+		}
+		seen[ino] = true
+
+		// /proc/<pid>/map_files/<addr>-<addr> resolves to the mapped inode
+		// even for memfd-backed mappings whose Pathname (e.g.
+		// "/memfd:libstapsdt:foo (deleted)") fails normal path lookup.
+		mapFilesPath := fmt.Sprintf("/proc/%d/map_files/%x-%x", pid, m.StartAddr, m.EndAddr)
+		exe, err := link.OpenExecutable(mapFilesPath)
+		elfFile, elfErr := elf.Open(mapFilesPath)
+		instrPath := mapFilesPath
+		if err != nil || elfErr != nil {
+			if elfFile != nil {
+				elfFile.Close()
+			}
+			exe, err = link.OpenExecutable(m.Pathname)
+			elfFile, elfErr = elf.Open(m.Pathname)
+			instrPath = m.Pathname
+			if err != nil || elfErr != nil {
+				if elfFile != nil {
+					elfFile.Close()
+				}
+				continue
+			}
+		}
+
+		entries = append(entries, &usdtMapEntry{
+			instrPath:  instrPath,
+			mappedPath: m.Pathname,
+			exe:        exe,
+			elfFile:    elfFile,
+		})
+		closers = append(closers, elfFile)
+	}
+	return entries, closers
+}
+
+// exeMappedPath returns the /proc/<pid>/maps Pathname for the discovered
+// executable. Matches by inode first (kernel may canonicalize the path),
+// then by string equality.
+func exeMappedPath(maps []*procfs.ProcMap, exePath string, exeIno uint64) string {
+	for _, m := range maps {
+		if m.Perms == nil || !m.Perms.Execute {
+			continue
+		}
+		if exeIno != 0 && m.Inode == exeIno {
+			return m.Pathname
+		}
+	}
+	for _, m := range maps {
+		if m.Pathname == exePath && m.Perms != nil && m.Perms.Execute {
+			return m.Pathname
+		}
+	}
+	return ""
+}
+
 func resolveInstrPath(
 	pid app.PID,
 	lib string,
@@ -452,13 +532,22 @@ func (i *instrumenter) usdtProbes(pid app.PID, ns uint32, p Tracer) error {
 		return nil
 	}
 
-	exePath, _, err := resolveExePath(pid)
+	exePath, exeIno, err := resolveExePath(pid)
 	if err != nil {
 		return err
 	}
 
 	var usdtClosers []io.Closer
 	for lib, probes := range probesByLib {
+		if lib == ebpfcommon.USDTAutoDiscoverLib {
+			autoClosers, err := i.usdtProbesAutoDiscover(pid, ns, maps, probes)
+			if err != nil {
+				closeAll(usdtClosers)
+				return err
+			}
+			usdtClosers = append(usdtClosers, autoClosers...)
+			continue
+		}
 		baseLib, selected, err := matchVersionedUprobeLibrary(lib, maps)
 		if err != nil {
 			ilog().Warn("invalid version annotation for USDT library", "lib", lib, "error", err)
@@ -473,6 +562,15 @@ func (i *instrumenter) usdtProbes(pid app.PID, ns uint32, p Tracer) error {
 		if !found {
 			ilog().Debug("skipping USDT library not found in process maps", "pid", pid, "lib", baseLib)
 			continue
+		}
+		if mappedPath == "" {
+			// Empty lib → discovered exe. absoluteUSDTIP needs the path the
+			// kernel records in /proc/<pid>/maps to find the load base.
+			mappedPath = exeMappedPath(maps, exePath, exeIno)
+			if mappedPath == "" {
+				ilog().Debug("USDT: no executable mapping for exe path", "pid", pid, "exe", exePath)
+				continue
+			}
 		}
 
 		exe, err := link.OpenExecutable(instrPath)
@@ -515,6 +613,88 @@ func (i *instrumenter) usdtProbes(pid app.PID, ns uint32, p Tracer) error {
 	return nil
 }
 
+// usdtProbesAutoDiscover handles `lib == "*"`: scans every executable
+// mapping in /proc/<pid>/maps for the requested provider/name. Required for
+// runtime-registered probes (libstapsdt-style) whose .so path is not known
+// until the process registers them.
+func (i *instrumenter) usdtProbesAutoDiscover(
+	pid app.PID,
+	ns uint32,
+	maps []*procfs.ProcMap,
+	probes []*ebpfcommon.USDTProbeDesc,
+) ([]io.Closer, error) {
+	entries, scanClosers := openExeMappings(pid, maps)
+	defer closeAll(scanClosers)
+	if len(entries) == 0 {
+		ilog().Debug("USDT auto-discover: no executable mappings", "pid", pid)
+		return nil, nil
+	}
+	if ilog().Enabled(context.Background(), slog.LevelDebug) {
+		paths := make([]string, 0, len(entries))
+		for _, e := range entries {
+			paths = append(paths, e.mappedPath)
+		}
+		ilog().Debug("USDT auto-discover: scanning mappings", "pid", pid, "count", len(entries), "paths", paths)
+	}
+
+	var usdtClosers []io.Closer
+	for _, probe := range probes {
+		var matched *usdtMapEntry
+		for _, e := range entries {
+			if probe.Function != "" {
+				if probe.BuildFunctionSpec == nil {
+					continue
+				}
+				built, err := probe.BuildFunctionSpec(e.elfFile)
+				if err != nil {
+					continue
+				}
+				spec, _ := built.(obiUSDTSpec)
+				if _, err := lookupFunctionTarget(e.elfFile, pid, maps, e.mappedPath, probe.Function, spec); err != nil {
+					continue
+				}
+				matched = e
+				break
+			}
+			ts, err := collectUSDTTargets(e.elfFile, pid, maps, e.mappedPath, probe.Provider, probe.Name)
+			if err != nil {
+				ilog().Debug("USDT auto-discover: scan error", "pid", pid, "provider", probe.Provider, "name", probe.Name, "path", e.mappedPath, "error", err)
+				continue
+			}
+			if len(ts) == 0 {
+				continue
+			}
+			matched = e
+			break
+		}
+		if matched == nil {
+			ident := probe.Provider + ":" + probe.Name
+			if probe.Function != "" {
+				ident = "function:" + probe.Function
+			}
+			if probe.Required {
+				closeAll(usdtClosers)
+				return nil, fmt.Errorf("USDT auto-discover: required probe %s not found in any mapping", ident)
+			}
+			ilog().Debug("USDT auto-discover: probe not found in any mapping", "pid", pid, "probe", ident)
+			continue
+		}
+		closers, err := i.instrumentUSDTProbe(matched.exe, matched.elfFile, pid, ns, maps, matched.mappedPath, probe)
+		if err != nil {
+			if probe.Required {
+				closeAll(usdtClosers)
+				return nil, err
+			}
+			ilog().Debug("USDT auto-discover: error attaching probe",
+				"pid", pid, "provider", probe.Provider, "name", probe.Name,
+				"mapping", matched.mappedPath, "error", err)
+			continue
+		}
+		usdtClosers = append(usdtClosers, closers...)
+	}
+	return usdtClosers, nil
+}
+
 func (i *instrumenter) instrumentUSDTProbe(
 	exe *link.Executable,
 	elfFile *elf.File,
@@ -528,16 +708,61 @@ func (i *instrumenter) instrumentUSDTProbe(
 		return nil, errors.New("USDT probe is missing program, maps, or spec manager")
 	}
 
-	targets, err := collectUSDTTargets(elfFile, pid, maps, mappedPath, probe.Provider, probe.Name)
-	if err != nil {
-		return nil, err
-	}
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("USDT probe %s:%s not found", probe.Provider, probe.Name)
+	var targets []usdtTarget
+	if probe.Function != "" {
+		if probe.BuildFunctionSpec == nil {
+			return nil, fmt.Errorf("USDT probe %s: BuildFunctionSpec callback missing", probe.Function)
+		}
+		built, err := probe.BuildFunctionSpec(elfFile)
+		if err != nil {
+			return nil, err
+		}
+		spec, ok := built.(obiUSDTSpec)
+		if !ok {
+			return nil, fmt.Errorf("USDT probe %s: BuildFunctionSpec returned %T, want obiUSDTSpec", probe.Function, built)
+		}
+		t, err := lookupFunctionTarget(elfFile, pid, maps, mappedPath, probe.Function, spec)
+		if err != nil {
+			return nil, err
+		}
+		targets = []usdtTarget{t}
+	} else {
+		ts, err := collectUSDTTargets(elfFile, pid, maps, mappedPath, probe.Provider, probe.Name)
+		if err != nil {
+			return nil, err
+		}
+		if len(ts) == 0 {
+			return nil, fmt.Errorf("USDT probe %s:%s not found", probe.Provider, probe.Name)
+		}
+		targets = ts
 	}
 
 	closers := make([]io.Closer, 0, len(targets))
 	for _, target := range targets {
+		target.Spec.Cookie = probe.Cookie
+		if probe.RewriteSpec != nil {
+			out, err := probe.RewriteSpec(target.Spec)
+			if err != nil {
+				if errors.Is(err, ErrCustomSpanDrift) {
+					ilog().Warn("custom_span: probe arg layout drift, skipping probe",
+						"provider", probe.Provider,
+						"name", probe.Name,
+						"cookie", probe.Cookie,
+						"error", err,
+					)
+					continue
+				}
+				closeAll(closers)
+				return nil, fmt.Errorf("rewriting USDT spec for %s:%s: %w", probe.Provider, probe.Name, err)
+			}
+			rewritten, ok := out.(obiUSDTSpec)
+			if !ok {
+				closeAll(closers)
+				return nil, fmt.Errorf("USDT spec rewrite returned unexpected type %T", out)
+			}
+			target.Spec = rewritten
+			target.SpecKey = fmt.Sprintf("%s|rw:%d", target.SpecKey, probe.Cookie)
+		}
 		specID, err := probe.SpecManager.ID(target.SpecKey, obiUSDTMaxSpecCnt)
 		if err != nil {
 			closeAll(closers)
@@ -581,6 +806,7 @@ func (i *instrumenter) instrumentUSDTProbe(
 			Address:      target.RelIP,
 			PID:          int(pid),
 			RefCtrOffset: target.SemaOff,
+			Cookie:       uint64(specID),
 		})
 		if err != nil {
 			_ = ipMapCleanup.Close()
@@ -588,6 +814,40 @@ func (i *instrumenter) instrumentUSDTProbe(
 			return nil, fmt.Errorf("attaching USDT probe %s:%s at %#x: %w", probe.Provider, probe.Name, target.RelIP, err)
 		}
 		closers = append(closers, &usdtLinkCloser{link: up, cleanup: ipMapCleanup})
+
+		if probe.ReturnProgram != nil {
+			// Go binaries: kernel uretprobe is unsafe (the trampoline
+			// rewrites the on-stack return address; Go's stack scanner
+			// then mistakes it for a heap pointer). lookupFunctionTarget
+			// fills target.ReturnRelIPs for Go targets — attach a regular
+			// uprobe at every RET instruction instead, mirroring the
+			// pattern used by gotracer.
+			if len(target.ReturnRelIPs) > 0 {
+				for _, retOff := range target.ReturnRelIPs {
+					retUp, err := exe.Uprobe("", probe.ReturnProgram, &link.UprobeOptions{
+						Address: retOff,
+						PID:     int(pid),
+						Cookie:  uint64(specID),
+					})
+					if err != nil {
+						closeAll(closers)
+						return nil, fmt.Errorf("attaching USDT return probe %s at %#x: %w", probe.Function, retOff, err)
+					}
+					closers = append(closers, retUp)
+				}
+			} else {
+				retUp, err := exe.Uretprobe("", probe.ReturnProgram, &link.UprobeOptions{
+					Address: target.RelIP,
+					PID:     int(pid),
+					Cookie:  uint64(specID),
+				})
+				if err != nil {
+					closeAll(closers)
+					return nil, fmt.Errorf("attaching USDT return probe %s at %#x: %w", probe.Function, target.RelIP, err)
+				}
+				closers = append(closers, retUp)
+			}
+		}
 	}
 
 	return closers, nil
