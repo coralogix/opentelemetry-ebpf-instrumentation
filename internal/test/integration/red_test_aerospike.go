@@ -84,7 +84,7 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 		{
 			Route:     "http://localhost:8391",
 			Subpath:   "aerospike",
-			Comm:      "testserver",
+			Comm:      "java",
 			Namespace: "integration-test",
 			Spans: []TestCaseSpan{
 				{Name: "PUT", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "PUT")}},

@@ -12,8 +12,8 @@ services:
 
   testserver:
     build:
-      context: ../../../internal/test/integration/components/goaerospike/
-      dockerfile: Dockerfile
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/javaaerospike/Dockerfile
     image: hatest-testserver-aerospike
     ports:
       - "${TEST_SERVICE_PORTS}"
