@@ -371,6 +371,8 @@ func acceptSpan(is instrumentations.InstrumentationSelection, span *request.Span
 		return is.CouchbaseEnabled()
 	case request.EventTypeMemcachedClient, request.EventTypeMemcachedServer:
 		return is.MemcachedEnabled()
+	case request.EventTypeAerospikeClient:
+		return is.AerospikeEnabled()
 	}
 
 	return false

@@ -5,9 +5,6 @@ package ebpfcommon
 
 import (
 	"encoding/hex"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,36 +14,38 @@ import (
 	"go.opentelemetry.io/obi/pkg/internal/largebuf"
 )
 
-// Fixtures are real frames captured from aerospike-server 8.1.2.3 CE driven by
-// aerospike-client-go v7 (see testdata/aerospike/fixtures.json). Each request
-// fixture's documented op/namespace/set/user_key fields are the ground-truth
-// expectations.
-type aerospikeFixtures struct {
-	Requests []struct {
-		Name       string `json:"name"`
-		Op         string `json:"op"`
-		Namespace  string `json:"namespace"`
-		Set        string `json:"set"`
-		UserKey    string `json:"user_key"`
-		Truncated  bool   `json:"truncated"`
-		RequestHex string `json:"request_hex"`
-	} `json:"requests"`
-	Responses []struct {
-		Name        string `json:"name"`
-		ResultCode  int    `json:"result_code"`
-		ResponseHex string `json:"response_hex"`
-	} `json:"responses"`
+// The request_hex values below are real proto frames (8-byte proto header +
+// AS_MSG body) captured from aerospike-server 8.1.2.3 CE driven by
+// aerospike-client-go v7, with SendKey enabled so write requests carry the user
+// key. scan/query requests are truncated to the first 256 bytes (the eBPF
+// inline-capture prefix) since their tail is a multi-KB partition list.
+var aerospikeRequestFixtures = []struct {
+	name      string
+	op        string
+	namespace string
+	set       string
+	userKey   string
+	hexFrame  string
+}{
+	{"put", "PUT", "test", "s_put", "k_put", "02030000000000711600010000000000000000000000000003e6000400020000000500746573740000000601735f707574000000150489622694e051d31aff9b8421f3431c5a3f013ca90000000702036b5f7075740000000d020300046e616d65616c6963650000000f02010003616765000000000000001e"},
+	{"get", "GET", "test", "s_get", "", "02030000000000421603000000000000000000000000000003e7000300000000000500746573740000000601735f6765740000001504cb38076ffcab7692bfee20ee0c8c489bda264fad"},
+	{"getbin", "GET", "test", "s_getbin", "", "020300000000004e1601000000000000000000000000000003e7000300010000000500746573740000000901735f67657462696e0000001504e7f2d43da0fdc4bea404189150398c14b7778d0b000000050100000161"},
+	{"exists", "EXISTS", "test", "s_exists", "", "02030000000000451621000000000000000000000000000003e7000300000000000500746573740000000901735f6578697374730000001504a5bc5df19751f03b6c2f9a140f1fbd630b82d2bd"},
+	{"touch", "TOUCH", "test", "s_touch", "k_touch", "02030000000000591600010000000000000000000000000003e7000400010000000500746573740000000801735f746f75636800000015042e6243c6ffa19b0a1809986344561e1ac48fc84c0000000902036b5f746f756368000000040b000000"},
+	{"operate", "OPERATE", "test", "s_operate", "k_operate", "02030000000000811603010000000000000000000000000003e7000400030000000500746573740000000a01735f6f70657261746500000015042bf7edddd5a1f8614e732a4391fcf0189ae2312b0000000b02036b5f6f7065726174650000001305010007636f756e7465720000000000000005000000090903000474657874620000000401000000"},
+	{"delete", "DELETE", "test", "s_delete", "", "02030000000000451600030000000000000000000000000003e7000300000000000500746573740000000901735f64656c6574650000001504485791d17c10a75a21d892b11ed1ca744695c868"},
+	{"batch", "BATCH", "", "", "", "02030000000000851609000000000000000000000000000003e7000100000000006b2a000000030100000000971d7c1ee4b9f2f8d730e0c2e4ac2ebd713e5d0a0003000200000000000500746573740000000801735f626174636800000001f5155b25b04908c4001b53c0cd0a38751b8c642e010000000253d42f515d143c7abf3de290b23a2ae2d6c0746201"},
+	{"scan", "SCAN", "test", "s_scan", "", "0203000000002045160100040000000000000000000000000000000500000000000500746573740000000701735f7363616e000020010b00000100020003000400050006000700080009000a000b000c000d000e000f0010001100120013001400150016001700180019001a001b001c001d001e001f0020002100220023002400250026002700280029002a002b002c002d002e002f0030003100320033003400350036003700380039003a003b003c003d003e003f0040004100420043004400450046004700480049004a004b004c004d004e004f0050005100520053005400550056005700580059005a005b005c005d005e005f00600061006200630064"},
+	{"query", "QUERY", "test", "s_query", "", "0203000000002069160100040000000000000000000000000000000600000000000500746573740000000801735f717565727900000009079316f80c2b45fff70000001f16010376616c01000000080000000000000001000000080000000000000003000020010b00000100020003000400050006000700080009000a000b000c000d000e000f0010001100120013001400150016001700180019001a001b001c001d001e001f0020002100220023002400250026002700280029002a002b002c002d002e002f0030003100320033003400350036003700380039003a003b003c003d003e003f0040004100420043004400450046004700480049004a004b00"},
+	{"udf", "UDF", "test", "s_udf", "k_udf", "02030000000000681600010000000000000000000000000003e7000700000000000500746573740000000601735f7564660000001504698b9fed790b6cb33fc05cb11e5990489ae8e1250000000702036b5f756466000000081e6361705f756466000000051f6563686f000000022090"},
 }
 
-func loadAerospikeFixtures(t *testing.T) aerospikeFixtures {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "aerospike", "fixtures.json"))
-	require.NoError(t, err)
-	var fx aerospikeFixtures
-	require.NoError(t, json.Unmarshal(data, &fx))
-	require.NotEmpty(t, fx.Requests)
-	return fx
-}
+// Real success responses: a bare write ack (just the as_msg header) and a read
+// response carrying one integer bin.
+const (
+	aerospikeWriteOKResp = "020300000000001616000000000000000001000000000000000000000000"
+	aerospikeGetOKResp   = "0203000000000027160000000000000000010000000000000000000000010000000d01010001760000000000000001"
+)
 
 func mustHex(t *testing.T, s string) []byte {
 	t.Helper()
@@ -56,43 +55,36 @@ func mustHex(t *testing.T, s string) []byte {
 }
 
 func TestParseAerospikeRequest(t *testing.T) {
-	fx := loadAerospikeFixtures(t)
-	for _, r := range fx.Requests {
-		t.Run(r.Name, func(t *testing.T) {
-			buf := mustHex(t, r.RequestHex)
+	for _, tc := range aerospikeRequestFixtures {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := mustHex(t, tc.hexFrame)
 			assert.True(t, isAerospikeProto(largebuf.NewLargeBufferFrom(buf)), "should be recognized as aerospike proto")
 
 			info := parseAerospikeRequest(buf)
 			require.NotNil(t, info, "request should parse as an AS_MSG data request")
-			assert.Equal(t, r.Op, info.op, "operation")
-			assert.Equal(t, r.Namespace, info.namespace, "namespace")
-			assert.Equal(t, r.Set, info.set, "set")
-			assert.Equal(t, r.UserKey, info.userKey, "user key")
+			assert.Equal(t, tc.op, info.op, "operation")
+			assert.Equal(t, tc.namespace, info.namespace, "namespace")
+			assert.Equal(t, tc.set, info.set, "set")
+			assert.Equal(t, tc.userKey, info.userKey, "user key")
 
-			if r.Op == "BATCH" {
+			if tc.op == "BATCH" {
 				assert.Positive(t, info.batchSize, "batch size should be extracted")
 			}
 		})
 	}
 }
 
-func TestAerospikeStatus(t *testing.T) {
-	fx := loadAerospikeFixtures(t)
-	require.NotEmpty(t, fx.Responses)
-	for _, r := range fx.Responses {
-		t.Run(r.Name, func(t *testing.T) {
-			buf := largebuf.NewLargeBufferFrom(mustHex(t, r.ResponseHex))
-			status, dbErr := aerospikeStatus(buf)
-			// All captured responses succeeded (result_code 0).
-			assert.Equal(t, 0, status)
-			assert.Empty(t, dbErr.ErrorCode)
-		})
+func TestAerospikeStatusSuccess(t *testing.T) {
+	for _, h := range []string{aerospikeWriteOKResp, aerospikeGetOKResp} {
+		status, dbErr := aerospikeStatus(largebuf.NewLargeBufferFrom(mustHex(t, h)))
+		assert.Equal(t, 0, status)
+		assert.Empty(t, dbErr.ErrorCode)
 	}
 }
 
 func TestAerospikeStatusError(t *testing.T) {
-	// Synthesize a KEY_EXISTS_ERROR (result_code 5) response: proto(type 3, size 22)
-	// + as_msg header with result_code at body offset 5.
+	// Synthesize a KEY_EXISTS_ERROR (result_code 5): proto(type 3, size 22) +
+	// as_msg header with result_code at body offset 5.
 	body := make([]byte, 22)
 	body[0] = 22 // header_sz
 	body[5] = 5  // result_code = KEY_EXISTS_ERROR
@@ -108,32 +100,20 @@ func TestAerospikeStatusError(t *testing.T) {
 	assert.Equal(t, 0, status)
 }
 
-func findRequest(t *testing.T, fx aerospikeFixtures, name string) string {
+func fixtureHex(t *testing.T, name string) string {
 	t.Helper()
-	for _, r := range fx.Requests {
-		if r.Name == name {
-			return r.RequestHex
+	for _, tc := range aerospikeRequestFixtures {
+		if tc.name == name {
+			return tc.hexFrame
 		}
 	}
-	t.Fatalf("request fixture %q not found", name)
-	return ""
-}
-
-func findResponse(t *testing.T, fx aerospikeFixtures, name string) string {
-	t.Helper()
-	for _, r := range fx.Responses {
-		if r.Name == name {
-			return r.ResponseHex
-		}
-	}
-	t.Fatalf("response fixture %q not found", name)
+	t.Fatalf("fixture %q not found", name)
 	return ""
 }
 
 func TestMatchAerospikeSpan(t *testing.T) {
-	fx := loadAerospikeFixtures(t)
-	req := largebuf.NewLargeBufferFrom(mustHex(t, findRequest(t, fx, "put")))
-	resp := largebuf.NewLargeBufferFrom(mustHex(t, findResponse(t, fx, "write_ok")))
+	req := largebuf.NewLargeBufferFrom(mustHex(t, fixtureHex(t, "put")))
+	resp := largebuf.NewLargeBufferFrom(mustHex(t, aerospikeWriteOKResp))
 
 	event := &TCPRequestInfo{}
 	span, ignore, matched, err := matchAerospike(event, req, resp)
@@ -152,10 +132,9 @@ func TestMatchAerospikeSpan(t *testing.T) {
 }
 
 func TestMatchAerospikeReversed(t *testing.T) {
-	fx := loadAerospikeFixtures(t)
 	// Buffers swapped, as if OBI attached mid-connection and saw the response first.
-	resp := largebuf.NewLargeBufferFrom(mustHex(t, findResponse(t, fx, "get_ok")))
-	req := largebuf.NewLargeBufferFrom(mustHex(t, findRequest(t, fx, "get")))
+	resp := largebuf.NewLargeBufferFrom(mustHex(t, aerospikeGetOKResp))
+	req := largebuf.NewLargeBufferFrom(mustHex(t, fixtureHex(t, "get")))
 
 	event := &TCPRequestInfo{}
 	span, _, matched, err := matchAerospike(event, resp, req)
