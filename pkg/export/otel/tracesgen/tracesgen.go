@@ -1329,6 +1329,33 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		if span.DBNamespace != "" {
 			attrs = append(attrs, request.DBNamespace(span.DBNamespace))
 		}
+	case request.EventTypeAerospikeClient:
+		attrs = []attribute.KeyValue{
+			request.ServerAddr(request.HostAsServer(span)),
+			request.ServerPort(span.HostPort),
+			request.PeerService(request.PeerServiceFromSpan(span)),
+			request.DBSystemName("aerospike"),
+		}
+		if span.Method != "" {
+			attrs = append(attrs, request.DBOperationName(span.Method))
+		}
+		if span.Path != "" {
+			attrs = append(attrs, request.DBCollectionName(span.Path))
+		}
+		if span.DBNamespace != "" {
+			attrs = append(attrs, request.DBNamespace(span.DBNamespace))
+		}
+		// The user key is high-cardinality and only present when the client enabled
+		// sendKey; emit it as db.query.text only when that opt-in attribute is enabled.
+		if _, ok := optionalAttrs[attr.DBQueryText]; ok {
+			if span.Statement != "" {
+				attrs = append(attrs, request.DBQueryText(span.Statement))
+			}
+		}
+		if span.Status != 0 {
+			attrs = append(attrs, request.DBResponseStatusCode(span.DBError.ErrorCode))
+			attrs = append(attrs, attributes.DBResponseErrorAttr(optionalAttrs, span.DBError.Description)...)
+		}
 	case request.EventTypeMemcachedClient, request.EventTypeMemcachedServer:
 		attrs = []attribute.KeyValue{
 			request.ServerAddr(request.HostAsServer(span)),
