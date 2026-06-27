@@ -59,6 +59,8 @@ const (
 	asFieldIndexHi     = 26
 	asFieldUDFLo       = 30 // UDF fields span 30..33
 	asFieldUDFHi       = 33
+	asFieldBatch       = 41 // batch (41) / batch-with-set (42)
+	asFieldBatchSet    = 42
 
 	// op type ids
 	asOpWrite = 2
@@ -66,6 +68,11 @@ const (
 
 	// largest declared proto body we will treat as plausibly Aerospike
 	asMaxBodyLen = 128 * 1024 * 1024
+
+	// status / result codes
+	asResultKeyNotFound = 2
+
+	asResultCodeOffset = asProtoHeaderLen + 5 // result_code: as_msg header byte 5
 )
 
 type aerospikeInfo struct {
@@ -84,26 +91,20 @@ func beUint(b []uint8) uint64 {
 	return v
 }
 
-// asProtoType validates the 8-byte proto header and returns (type, ok). The
-// declared body length is validated for sanity but not returned: the captured
-// buffer may be shorter than the declared length when the kernel truncated a
-// large frame (e.g. an 8 KB scan request), so callers parse against what they
-// actually have.
-func asProtoType(buf []uint8) (uint8, bool) {
-	if len(buf) < asProtoHeaderLen {
+// validProtoHeader reports whether the 8-byte slice is a plausible Aerospike proto
+// header, returning the message type.
+func validProtoHeader(h []uint8) (uint8, bool) {
+	if len(h) < asProtoHeaderLen || h[0] != asProtoVersion {
 		return 0, false
 	}
-	if buf[0] != asProtoVersion {
-		return 0, false
-	}
-	typ := buf[1]
+	typ := h[1]
 	switch typ {
 	case asTypeInfo, asTypeSecurity, asTypeMessage, asTypeCompressed:
 	default:
 		return 0, false
 	}
-	bodyLen := int(beUint(buf[2:8]))
-	if bodyLen <= 0 || bodyLen > asMaxBodyLen {
+	bodyLen := beUint(h[2:asProtoHeaderLen])
+	if bodyLen == 0 || bodyLen > asMaxBodyLen {
 		return 0, false
 	}
 	return typ, true
@@ -112,10 +113,15 @@ func asProtoType(buf []uint8) (uint8, bool) {
 // isAerospikeProto reports whether a buffer begins with a plausible Aerospike
 // proto header of any message type.
 func isAerospikeProto(buf *largebuf.LargeBuffer) bool {
-	if buf == nil {
+	if buf == nil || buf.Len() < asProtoHeaderLen {
 		return false
 	}
-	_, ok := asProtoType(buf.UnsafeView())
+	r := buf.NewReader()
+	h, err := r.ReadN(asProtoHeaderLen)
+	if err != nil {
+		return false
+	}
+	_, ok := validProtoHeader(h)
 	return ok
 }
 
@@ -125,84 +131,136 @@ func asMsgIsRequest(info1, info2 uint8) bool {
 	return info1&(asInfo1Read|asInfo1Batch) != 0 || info2&asInfo2Write != 0
 }
 
-// parseAerospikeRequest parses a type-3 AS_MSG request frame. It returns nil if
-// the buffer is not a type-3 request (info/auth/compressed, a response, or
-// malformed). Parsing is defensive: it always advances by the declared field/op
-// sizes and stops at the end of the captured (possibly truncated) buffer.
-func parseAerospikeRequest(buf []uint8) *aerospikeInfo {
-	typ, ok := asProtoType(buf)
+// parseAerospikeRequest parses a type-3 AS_MSG request frame. Returns nil if the
+// buffer is not a type-3 request (info/auth/compressed, a response, or malformed).
+// Parsing is defensive: a short/truncated read stops the walk and returns what was
+// decoded so far.
+func parseAerospikeRequest(buf *largebuf.LargeBuffer) *aerospikeInfo {
+	if buf == nil || buf.Len() < asProtoHeaderLen+asMsgHeaderLen {
+		return nil
+	}
+	r := buf.NewReader()
+
+	proto, err := r.ReadN(asProtoHeaderLen)
+	if err != nil {
+		return nil
+	}
+	typ, ok := validProtoHeader(proto)
 	if !ok || typ != asTypeMessage {
 		return nil
 	}
-	body := buf[asProtoHeaderLen:]
-	if len(body) < asMsgHeaderLen {
+
+	asm, err := r.ReadN(asMsgHeaderLen)
+	if err != nil {
 		return nil
 	}
 	// header_sz is a constant 22; checking it makes the (version==2, type==3,
 	// header_sz==22, request-intent bits) signature strong enough to classify the
 	// connection from a single frame without false positives.
-	if body[0] != asMsgHeaderLen {
+	if asm[0] != asMsgHeaderLen {
 		return nil
 	}
-	info1, info2 := body[1], body[2]
+	info1, info2 := asm[1], asm[2]
 	if !asMsgIsRequest(info1, info2) {
 		return nil
 	}
-	nFields := int(beUint(body[18:20]))
+	nFields := int(beUint(asm[18:20]))
+	nOps := int(beUint(asm[20:22]))
 
 	info := &aerospikeInfo{}
 	hasDigest := false
 	hasIndex := false
 	hasUDF := false
 
-	p := asMsgHeaderLen
-	for i := 0; i < nFields && p+4 <= len(body); i++ {
-		fsz := int(beUint(body[p : p+4]))
-		if fsz < 1 || p+4+fsz > len(body) {
+	// A truncated read (e.g. a scan/query partition list cut off at the capture
+	// boundary) stops the walk; the operation is still classified from the flags
+	// and the fields decoded before the cut.
+fieldLoop:
+	for i := 0; i < nFields; i++ {
+		fsz, err := r.ReadU32BE()
+		if err != nil || fsz < 1 {
 			break
 		}
-		ftype := body[p+4]
-		val := body[p+5 : p+4+fsz]
+		ftype, err := r.ReadU8()
+		if err != nil {
+			break
+		}
+		valLen := int(fsz) - 1
 		switch {
 		case ftype == asFieldNamespace:
-			info.namespace = string(val)
-		case ftype == asFieldSet:
-			info.set = string(val)
-		case ftype == asFieldKey:
-			// value is prefixed by a 1-byte particle type; decode string keys.
-			if len(val) > 1 {
-				info.userKey = string(val[1:])
+			v, err := r.ReadN(valLen)
+			if err != nil {
+				break fieldLoop
 			}
-		case ftype == asFieldDigestRipe:
-			hasDigest = true
+			info.namespace = string(v)
+		case ftype == asFieldSet:
+			v, err := r.ReadN(valLen)
+			if err != nil {
+				break fieldLoop
+			}
+			info.set = string(v)
+		case ftype == asFieldKey:
+			// value = 1-byte particle type + key bytes; decode string keys.
+			if valLen > 1 {
+				v, err := r.ReadN(valLen)
+				if err != nil {
+					break fieldLoop
+				}
+				info.userKey = string(v[1:])
+			} else if r.Skip(valLen) != nil {
+				break fieldLoop
+			}
+		case ftype == asFieldBatch || ftype == asFieldBatchSet:
+			// batch field value begins with a 4-byte operation count.
+			if valLen >= 4 {
+				n, err := r.ReadU32BE()
+				if err != nil {
+					break fieldLoop
+				}
+				info.batchSize = int(n)
+				if r.Skip(valLen-4) != nil {
+					break fieldLoop
+				}
+			} else if r.Skip(valLen) != nil {
+				break fieldLoop
+			}
 		case ftype >= asFieldIndexNameLo && ftype <= asFieldIndexHi:
 			hasIndex = true
+			if r.Skip(valLen) != nil {
+				break fieldLoop
+			}
 		case ftype >= asFieldUDFLo && ftype <= asFieldUDFHi:
 			hasUDF = true
+			if r.Skip(valLen) != nil {
+				break fieldLoop
+			}
+		default:
+			if ftype == asFieldDigestRipe {
+				hasDigest = true
+			}
+			if r.Skip(valLen) != nil {
+				break fieldLoop
+			}
 		}
-		p += 4 + fsz
 	}
 
-	info.op = classifyAerospikeOp(info1, info2, body, p, hasDigest, hasIndex, hasUDF, &info.batchSize)
+	info.op = classifyAerospikeOp(info1, info2, &r, nOps, hasDigest, hasIndex, hasUDF)
 	return info
 }
 
 // classifyAerospikeOp derives the operation name from the info flags plus, for
-// writes, the per-op type bytes (to separate PUT / TOUCH / OPERATE). opStart is
-// the offset of the first op within body.
-func classifyAerospikeOp(info1, info2 uint8, body []uint8, opStart int, hasDigest, hasIndex, hasUDF bool, batchSize *int) string {
+// writes, the per-op type bytes (to separate PUT / TOUCH / OPERATE). The reader
+// cursor must be positioned at the first op.
+func classifyAerospikeOp(info1, info2 uint8, r *largebuf.LargeBufferReader, nOps int, hasDigest, hasIndex, hasUDF bool) string {
 	switch {
 	case hasUDF:
 		return "UDF"
 	case info1&asInfo1Batch != 0:
-		if bs := aerospikeBatchSize(body); bs > 0 {
-			*batchSize = bs
-		}
 		return "BATCH"
 	case info2&asInfo2Write != 0 && info2&asInfo2Delete != 0:
 		return "DELETE"
 	case info2&asInfo2Write != 0:
-		return classifyAerospikeWrite(body, opStart)
+		return classifyAerospikeWrite(r, nOps)
 	case info1&asInfo1Read != 0:
 		switch {
 		case hasIndex:
@@ -219,18 +277,21 @@ func classifyAerospikeOp(info1, info2 uint8, body []uint8, opStart int, hasDiges
 }
 
 // classifyAerospikeWrite separates PUT (all writes), TOUCH (a lone touch op) and
-// OPERATE (anything else: increment/append/CDT/mixed read+write).
-func classifyAerospikeWrite(body []uint8, opStart int) string {
+// OPERATE (anything else: increment/append/CDT/mixed read+write) from the per-op
+// type bytes.
+func classifyAerospikeWrite(r *largebuf.LargeBufferReader, nOps int) string {
 	allWrite := true
 	allTouch := true
 	count := 0
-	p := opStart
-	for p+4 <= len(body) {
-		opSz := int(beUint(body[p : p+4]))
-		if opSz < 1 || p+4+opSz > len(body) {
+	for i := 0; i < nOps; i++ {
+		opSz, err := r.ReadU32BE()
+		if err != nil || opSz < 1 {
 			break
 		}
-		opType := body[p+4]
+		opType, err := r.ReadU8()
+		if err != nil {
+			break
+		}
 		count++
 		if opType != asOpWrite {
 			allWrite = false
@@ -238,7 +299,9 @@ func classifyAerospikeWrite(body []uint8, opStart int) string {
 		if opType != asOpTouch {
 			allTouch = false
 		}
-		p += 4 + opSz
+		if r.Skip(int(opSz)-1) != nil {
+			break
+		}
 	}
 	switch {
 	case count == 0:
@@ -252,51 +315,27 @@ func classifyAerospikeWrite(body []uint8, opStart int) string {
 	}
 }
 
-// aerospikeBatchSize best-effort counts the entries in a batch request from the
-// batch field header (field type 41/42); 0 if it can't be determined.
-func aerospikeBatchSize(body []uint8) int {
-	nFields := int(beUint(body[18:20]))
-	p := asMsgHeaderLen
-	for i := 0; i < nFields && p+4 <= len(body); i++ {
-		fsz := int(beUint(body[p : p+4]))
-		if fsz < 1 || p+4+fsz > len(body) {
-			break
-		}
-		ftype := body[p+4]
-		if (ftype == 41 || ftype == 42) && fsz >= 5 {
-			// batch field value begins with a 4-byte count of operations.
-			return int(beUint(body[p+5 : p+9]))
-		}
-		p += 4 + fsz
-	}
-	return 0
-}
-
 // aerospikeStatus reads the result_code from a response AS_MSG and maps it to a
 // span status (0 = ok). KEY_NOT_FOUND is treated as a non-error miss.
 func aerospikeStatus(buf *largebuf.LargeBuffer) (int, request.DBError) {
-	if buf == nil {
+	if buf == nil || buf.Len() < asProtoHeaderLen+asMsgHeaderLen {
 		return 0, request.DBError{}
 	}
-	data := buf.UnsafeView()
-	typ, ok := asProtoType(data)
-	if !ok || typ != asTypeMessage {
+	version, err := buf.U8At(0)
+	if err != nil || version != asProtoVersion {
 		return 0, request.DBError{}
 	}
-	if len(data) < asProtoHeaderLen+asMsgHeaderLen {
+	typ, err := buf.U8At(1)
+	if err != nil || typ != asTypeMessage {
 		return 0, request.DBError{}
 	}
-	resultCode := data[asProtoHeaderLen+5]
-	if resultCode == 0 || resultCode == asResultKeyNotFound {
+	resultCode, err := buf.U8At(asResultCodeOffset)
+	if err != nil || resultCode == 0 || resultCode == asResultKeyNotFound {
 		return 0, request.DBError{}
 	}
-	return 1, request.DBError{
-		ErrorCode:   aerospikeResultName(resultCode),
-		Description: aerospikeResultName(resultCode),
-	}
+	name := aerospikeResultName(resultCode)
+	return 1, request.DBError{ErrorCode: name, Description: name}
 }
-
-const asResultKeyNotFound = 2
 
 func aerospikeResultName(code uint8) string {
 	switch code {

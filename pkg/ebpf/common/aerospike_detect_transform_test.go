@@ -57,8 +57,8 @@ func mustHex(t *testing.T, s string) []byte {
 func TestParseAerospikeRequest(t *testing.T) {
 	for _, tc := range aerospikeRequestFixtures {
 		t.Run(tc.name, func(t *testing.T) {
-			buf := mustHex(t, tc.hexFrame)
-			assert.True(t, isAerospikeProto(largebuf.NewLargeBufferFrom(buf)), "should be recognized as aerospike proto")
+			buf := largebuf.NewLargeBufferFrom(mustHex(t, tc.hexFrame))
+			assert.True(t, isAerospikeProto(buf), "should be recognized as aerospike proto")
 
 			info := parseAerospikeRequest(buf)
 			require.NotNil(t, info, "request should parse as an AS_MSG data request")
@@ -72,6 +72,25 @@ func TestParseAerospikeRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseAerospikeRequestMultiChunk splits the same PUT frame across several
+// chunks at awkward boundaries (inside the proto header, the as_msg header, and a
+// field value); it must parse identically to the contiguous case.
+func TestParseAerospikeRequestMultiChunk(t *testing.T) {
+	full := mustHex(t, fixtureHex(t, "put"))
+	lb := largebuf.NewLargeBuffer()
+	lb.AppendChunk(full[:5])   // splits the 8-byte proto header
+	lb.AppendChunk(full[5:35]) // splits the as_msg header and into fields
+	lb.AppendChunk(full[35:])
+
+	require.True(t, isAerospikeProto(lb))
+	info := parseAerospikeRequest(lb)
+	require.NotNil(t, info)
+	assert.Equal(t, "PUT", info.op)
+	assert.Equal(t, "test", info.namespace)
+	assert.Equal(t, "s_put", info.set)
+	assert.Equal(t, "k_put", info.userKey)
 }
 
 func TestAerospikeStatusSuccess(t *testing.T) {
