@@ -665,7 +665,7 @@ func TestSuite_Aerospike(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-aerospike.yml", path.Join(pathOutput, "test-suite-aerospike.log"))
 	require.NoError(t, err)
 
-	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8391:8080`)
+	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8390:8080`)
 	require.NoError(t, compose.Up())
 	t.Run("Aerospike metrics", testREDMetricsAerospikeOnly)
 	runWeaverValidation(t)

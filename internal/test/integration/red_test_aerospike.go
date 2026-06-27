@@ -84,7 +84,7 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 	}
 	testCases := []TestCase{
 		{
-			Route:     "http://localhost:8391",
+			Route:     "http://localhost:8390",
 			Subpath:   "aerospike",
 			Comm:      "java",
 			Namespace: "integration-test",
