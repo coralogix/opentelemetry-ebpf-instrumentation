@@ -117,18 +117,21 @@ static __always_inline int custom_span_str_from_spec(
         return 0;
     }
     if (arg->arg_type == k_obi_usdt_arg_go_string) {
-        if (!obi_usdt_reg_off_ok(arg->reg_off + 8)) {
+        // Go string {ptr, len}. ptr is at reg_off; len is at val_off
+        // (a second pt_regs offset). Go regabi on amd64 spreads scalars
+        // across non-consecutive registers (AX, BX, CX, DI, SI, R8, ...),
+        // so a {ptr, len} pair does NOT live at reg_off and reg_off+8 —
+        // userspace encodes the second register's offset explicitly.
+        s16 len_reg_off = (s16)(arg->val_off & 0xFFFF);
+        if (!obi_usdt_reg_off_ok(len_reg_off)) {
             return k_obi_usdt_arg_err_bad_reg;
         }
         unsigned long slen = 0;
-        if ((err = bpf_probe_read_kernel(
-                 &slen, sizeof(slen), (unsigned char *)ctx + arg->reg_off + 8))) {
+        if ((err =
+                 bpf_probe_read_kernel(&slen, sizeof(slen), (unsigned char *)ctx + len_reg_off))) {
             return err;
         }
         u32 n = (u32)slen;
-        if (arg->val_off && n > (u32)arg->val_off) {
-            n = (u32)arg->val_off;
-        }
         if (n >= dst_max) {
             n = dst_max - 1;
         }

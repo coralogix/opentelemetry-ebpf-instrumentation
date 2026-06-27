@@ -774,19 +774,32 @@ func (i *instrumenter) instrumentUSDTProbe(
 			return nil, fmt.Errorf("updating USDT spec map: %w", err)
 		}
 		ipMapPIDs := usdtIPMapPIDs(pid)
-		insertedIPKeys := make([]obiUSDTIPKey, 0, len(ipMapPIDs))
-		for _, mapPID := range ipMapPIDs {
-			ipKey := obiUSDTIPKey{
-				PID:       uint32(mapPID),
-				Namespace: ns,
-				IP:        target.AbsIP,
+		// Collect every IP that will fire BPF for this spec: the entry
+		// site, plus every RET site for Go function-mode (the per-RET
+		// uprobe pattern in lookupFunctionTarget). Pre-5.15 kernels lack
+		// bpf_get_attach_cookie, so BPF resolves the spec via the IP
+		// map keyed on PT_REGS_IP — each distinct probe IP must map to
+		// spec_id, or the return-probe handler can't find its spec.
+		absIPs := []uint64{target.AbsIP}
+		ipDelta := target.AbsIP - target.RelIP
+		for _, retOff := range target.ReturnRelIPs {
+			absIPs = append(absIPs, retOff+ipDelta)
+		}
+		insertedIPKeys := make([]obiUSDTIPKey, 0, len(ipMapPIDs)*len(absIPs))
+		for _, absIP := range absIPs {
+			for _, mapPID := range ipMapPIDs {
+				ipKey := obiUSDTIPKey{
+					PID:       uint32(mapPID),
+					Namespace: ns,
+					IP:        absIP,
+				}
+				if err := probe.IPMap.Put(ipKey, specID); err != nil {
+					_ = (usdtIPMapCleanup{ipMap: probe.IPMap, keys: insertedIPKeys}).Close()
+					closeAll(closers)
+					return nil, fmt.Errorf("updating USDT IP map: %w", err)
+				}
+				insertedIPKeys = append(insertedIPKeys, ipKey)
 			}
-			if err := probe.IPMap.Put(ipKey, specID); err != nil {
-				_ = (usdtIPMapCleanup{ipMap: probe.IPMap, keys: insertedIPKeys}).Close()
-				closeAll(closers)
-				return nil, fmt.Errorf("updating USDT IP map: %w", err)
-			}
-			insertedIPKeys = append(insertedIPKeys, ipKey)
 		}
 		ipMapCleanup := usdtIPMapCleanup{ipMap: probe.IPMap, keys: insertedIPKeys}
 
@@ -805,8 +818,8 @@ func (i *instrumenter) instrumentUSDTProbe(
 		up, err := exe.Uprobe("", probe.Program, &link.UprobeOptions{
 			Address:      target.RelIP,
 			PID:          int(pid),
-			RefCtrOffset: target.SemaOff,
-			Cookie:       uint64(specID),
+			RefCtrOffset: refCtrOffsetForAttach(target.SemaOff),
+			Cookie:       cookieForAttach(specID),
 		})
 		if err != nil {
 			_ = ipMapCleanup.Close()
@@ -827,7 +840,7 @@ func (i *instrumenter) instrumentUSDTProbe(
 					retUp, err := exe.Uprobe("", probe.ReturnProgram, &link.UprobeOptions{
 						Address: retOff,
 						PID:     int(pid),
-						Cookie:  uint64(specID),
+						Cookie:  cookieForAttach(specID),
 					})
 					if err != nil {
 						closeAll(closers)
@@ -839,7 +852,7 @@ func (i *instrumenter) instrumentUSDTProbe(
 				retUp, err := exe.Uretprobe("", probe.ReturnProgram, &link.UprobeOptions{
 					Address: target.RelIP,
 					PID:     int(pid),
-					Cookie:  uint64(specID),
+					Cookie:  cookieForAttach(specID),
 				})
 				if err != nil {
 					closeAll(closers)
@@ -851,6 +864,33 @@ func (i *instrumenter) instrumentUSDTProbe(
 	}
 
 	return closers, nil
+}
+
+// cookieForAttach returns specID when the running kernel supports
+// bpf_get_attach_cookie (≥5.15), or 0 otherwise. Pre-5.15 kernels
+// reject uprobe attach with a non-zero cookie ("cookies are not
+// supported"), so we omit the cookie there and let BPF fall back to
+// the IP-keyed spec map.
+func cookieForAttach(specID uint32) uint64 {
+	if !ebpfcommon.HasAttachCookie() {
+		return 0
+	}
+	return uint64(specID)
+}
+
+// refCtrOffsetForAttach returns sema_off when the uprobe PMU supports
+// the `ref_ctr_offset` attr (kernel ≥4.20), or 0 otherwise. cilium-ebpf
+// rejects a non-zero RefCtrOffset on kernels lacking the attr with
+// "RefCtrOffsetPMU not supported", which breaks attach for static
+// stapsdt probes that carry a semaphore (FOLLY_SDT_WITH_SEMAPHORE,
+// Rust `usdt` crate). On those kernels the attach still succeeds with
+// RefCtrOffset=0, but the probe body stays gated and won't fire — see
+// HasUprobeRefCtrOffset in pkg/ebpf/common.
+func refCtrOffsetForAttach(semaOff uint64) uint64 {
+	if !ebpfcommon.HasUprobeRefCtrOffset() {
+		return 0
+	}
+	return semaOff
 }
 
 func usdtIPMapPIDs(pid app.PID) []app.PID {

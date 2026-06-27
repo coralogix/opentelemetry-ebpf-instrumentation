@@ -6,6 +6,7 @@
 package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 
 import (
+	"os"
 	"sync"
 
 	"github.com/cilium/ebpf"
@@ -29,4 +30,27 @@ func HasAttachCookie() bool {
 		hasAttachCookieResult = features.HaveProgramHelper(ebpf.Kprobe, asm.FnGetAttachCookie) == nil
 	})
 	return hasAttachCookieResult
+}
+
+var (
+	hasUprobeRefCtrOffsetOnce   sync.Once
+	hasUprobeRefCtrOffsetResult bool
+)
+
+// HasUprobeRefCtrOffset reports whether the uprobe PMU exposes the
+// `ref_ctr_offset` format attribute (kernel ≥4.20). When this is absent,
+// passing UprobeOptions.RefCtrOffset to cilium-ebpf is rejected with
+// `RefCtrOffsetPMU not supported`, so callers should omit it on older
+// kernels (e.g. RHEL 8 / 4.18 backports). Probes that gate their inline
+// body on a non-zero semaphore (FOLLY_SDT_WITH_SEMAPHORE, the `usdt`
+// crate) won't fire on these kernels because nothing bumps the counter,
+// but the attach itself succeeds and other probes work.
+func HasUprobeRefCtrOffset() bool {
+	hasUprobeRefCtrOffsetOnce.Do(func() {
+		// Mirrors cilium-ebpf's link/uprobe.go feature gate
+		// (`/sys/bus/event_source/devices/uprobe/format/ref_ctr_offset`).
+		_, err := os.Stat("/sys/bus/event_source/devices/uprobe/format/ref_ctr_offset")
+		hasUprobeRefCtrOffsetResult = err == nil
+	})
+	return hasUprobeRefCtrOffsetResult
 }

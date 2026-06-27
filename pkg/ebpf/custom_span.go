@@ -266,8 +266,20 @@ func BuildGoABISpec(span *config.CustomSpanSpec, cookie uint64, arch string, lan
 				spec.ArgType = obiUSDTArgRegDerefStr
 			} else {
 				spec.ArgType = obiUSDTArgGoString
+				// Go strings are {ptr, len}: ptr at reg_off, len at the
+				// next regabi slot's offset. On amd64 Go regabi
+				// (AX,BX,CX,DI,SI,R8,...) the pair is in non-consecutive
+				// registers, so we record the second register's pt_regs
+				// offset explicitly. arm64 slots ARE consecutive
+				// (x0..x7), so this just resolves to reg_off+8 there.
+				nextRegOff, ok := fnArgRegOffset(arch, a.Arg+1, lang)
+				if !ok {
+					return CompiledCustomSpanSpec{}, fmt.Errorf(
+						"%w: attr %q: Go-string arg %d has no next-reg slot on %s",
+						ErrCustomSpanDrift, name, a.Arg, arch)
+				}
+				spec.ValOff = uint64(uint16(nextRegOff))
 			}
-			spec.ValOff = uint64(config.CustomSpanStringSize)
 			out.ArgKinds[a.Arg] = CustomSpanArgStr
 		default:
 			spec.ArgType = obiUSDTArgReg

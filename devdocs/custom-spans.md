@@ -121,7 +121,14 @@ instrumentation library or technique that gets you there.
 
 For function-mode spans, OBI auto-detects whether the binary is Go (via
 `.gopclntab` and friends) or C/C++ and reads string arguments with the
-matching calling convention.
+matching calling convention. The Go-string read uses the regabi-emitted
+`{ptr, len}` pair from non-consecutive registers on amd64 (AX/BX/CX/DI/SI/R8/…),
+not a `reg_off+8` adjacency assumption.
+
+The `match:` modifier needs `bpf_get_attach_cookie()` (kernel ≥5.15) to
+disambiguate two `custom_spans` that share a probe IP. On older kernels
+OBI silently skips the `match:`-filtered span and keeps the unfiltered
+base attached.
 
 ### Quick recipes per language
 
@@ -519,8 +526,23 @@ exactly. Requires Python built with `--enable-pydtrace`.
 - **Reader** (`pkg/internal/ebpf/generictracer/custom_span_reader.go`)
   pairs events. Paired USDT spans key on `arg_int[0]`, paired function
   spans key on the firing thread's TID.
-- **Kernel requirements**: stapsdt + uprobe attach work on 5.8+;
-  paired function spans require 5.15+ for `bpf_get_attach_cookie()`.
+- **Kernel requirements**: stapsdt + uprobe attach work on 5.8+.
+  The cookie-based spec lookup needs `bpf_get_attach_cookie()`
+  (≥5.15). Pre-5.15 kernels — including RHEL 8 / 4.18 backports — use
+  an `(pid, ns, ip)` map fallback. Two `custom_spans` that target the
+  same USDT probe (a base span plus a `match:`-filtered variant) share
+  an IP and cannot be disambiguated by the IP-map fallback, so OBI
+  **skips the `match:`-filtered span on pre-5.15 kernels** and lets the
+  unfiltered base probe attach cleanly. The 5.15+ cookie path attaches
+  both variants normally.
+- **Semaphore-gated probes**: `FOLLY_SDT_WITH_SEMAPHORE` and the Rust
+  `usdt` crate emit probe bodies whose inline asm checks a `u16`
+  counter before firing. The kernel only bumps that counter when the
+  uprobe attaches with the `ref_ctr_offset` PMU attr (kernel ≥4.20).
+  Pre-4.20 kernels accept the attach with `RefCtrOffset=0`, but the
+  inline body short-circuits and **no events emit**. Plain
+  `DTRACE_PROBE*` / `FOLLY_SDT` (without the `_WITH_SEMAPHORE`
+  variant) and libstapsdt-backed runtime probes are unaffected.
 
 ## TODO
 

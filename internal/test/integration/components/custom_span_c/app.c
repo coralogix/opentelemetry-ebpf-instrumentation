@@ -91,7 +91,15 @@ __attribute__((noinline)) void process_order(uint64_t order_id,
   DTRACE_PROBE2(custom_span_c, order_end, order_id, status);
 }
 
+// Volatile sink keeps a prologue instruction before the DTRACE_PROBE site so
+// the function-entry IP and the USDT probePC differ. On pre-5.15 kernels
+// without bpf_get_attach_cookie() OBI falls back to an IP-keyed spec map; if
+// two custom_spans share an IP the second one's spec masks the first. Keeping
+// them at distinct IPs lets `cache.hit` (usdt_noret) and `cache.func.c`
+// (function_span at cache_lookup) coexist on every supported kernel.
+static volatile int cache_lookup_calls;
 __attribute__((noinline)) void cache_lookup(const char *key) {
+  cache_lookup_calls++;
   DTRACE_PROBE1(custom_span_c, cache_hit, key);
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/procfs"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
+	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/internal/goexec"
 )
 
@@ -352,11 +353,18 @@ func lookupFunctionTarget(
 		Spec:    spec,
 		SpecKey: fmt.Sprintf("%s:func:%s", elfFile.Machine, function),
 	}
-	// For Go binaries, collect RET-site offsets inside the function so
-	// the function_span "end" uprobe can attach as a regular uprobe at
-	// each return, avoiding the uretprobe trampoline that interacts
-	// badly with Go's stack scanning / regabi.
-	if sym.Size > 0 && DetectFunctionLang(elfFile) == FunctionLangGo {
+	// Per-RET uprobes (vs. a kernel uretprobe) are required in two cases:
+	//   - Go binaries: the uretprobe trampoline rewrites the on-stack
+	//     return address and Go's stack scanner mistakes it for a heap
+	//     pointer.
+	//   - Pre-5.15 kernels without bpf_get_attach_cookie: BPF resolves
+	//     the spec via the IP map keyed on PT_REGS_IP. At a uretprobe
+	//     fire, PT_REGS_IP is the caller's return address (not the
+	//     function), so no IP-map entry can resolve it. A regular
+	//     uprobe at each RET instruction keeps PT_REGS_IP inside the
+	//     function and we can register every RET site upfront.
+	needPerRET := sym.Size > 0 && (DetectFunctionLang(elfFile) == FunctionLangGo || !ebpfcommon.HasAttachCookie())
+	if needPerRET {
 		buf := make([]byte, sym.Size)
 		if _, err := elfReadFunctionBytes(elfFile, sym.Value, buf); err == nil {
 			rets, ferr := goexec.FindReturnOffsets(relIP, buf)

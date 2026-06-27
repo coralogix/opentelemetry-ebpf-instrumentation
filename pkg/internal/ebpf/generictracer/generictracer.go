@@ -623,10 +623,22 @@ func (p *Tracer) customSpanProbesForLib(_ string) []*ebpfcommon.USDTProbeDesc {
 	if p.customSpan == nil {
 		return nil
 	}
+	// On pre-5.15 kernels bpf_get_attach_cookie is unavailable, so BPF
+	// resolves the spec via the IP map. Two custom_spans that target the
+	// same USDT probe (e.g. `cache.hit` and a `cache.match` variant) share
+	// an IP and last-write-wins masks one. The match-filter variant is
+	// optional sugar; skip it on no-cookie kernels so the unfiltered base
+	// probe wins and emits cleanly. Cookies make this disambiguation
+	// possible on 5.15+, where match-filter probes attach normally.
+	hasCookie := ebpfcommon.HasAttachCookie()
 	descs := make([]*ebpfcommon.USDTProbeDesc, 0, 2*len(p.customSpan.spans))
 	for _, binding := range p.customSpan.spans {
 		span := binding.span
 		cookie := binding.cookie
+
+		if !hasCookie && span.HasMatch() {
+			continue
+		}
 
 		if span.IsAnyFunction() {
 			spanCopy := span
