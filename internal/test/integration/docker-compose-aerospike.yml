@@ -62,7 +62,6 @@ services:
   # OpenTelemetry Collector
   otelcol:
     image: otel/opentelemetry-collector-contrib:0.155.0@sha256:4935caa35e9a4cb387e35732e8fb22b2b5759af8d12e7043357f03837f6e8df5
-    container_name: otel-col
     deploy:
       resources:
         limits:
@@ -94,7 +93,6 @@ services:
   # Prometheus
   prometheus:
     image: quay.io/prometheus/prometheus:v3.12.0@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
-    container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus-config.yml
       - --web.enable-lifecycle
