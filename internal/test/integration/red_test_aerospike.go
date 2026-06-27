@@ -6,6 +6,7 @@ package integration // import "go.opentelemetry.io/obi/internal/test/integration
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -20,23 +21,24 @@ import (
 )
 
 func testREDMetricsForAerospikeLibrary(t *testing.T, testCase TestCase) {
-	url := testCase.Route
+	baseURL := testCase.Route
 	urlPath := testCase.Subpath
 	comm := testCase.Comm
 	namespace := testCase.Namespace
 
-	// Drive the instrumented service a few times so each Aerospike operation is
-	// executed repeatedly.
+	// Drive the instrumented service a few times so each Aerospike operation runs.
 	for i := 0; i < 4; i++ {
-		ti.DoHTTPGet(t, url+"/"+urlPath, 200)
+		ti.DoHTTPGet(t, baseURL+"/"+urlPath, 200)
 	}
 
-	// Prometheus should eventually report the db client duration metric per op.
+	// Prometheus should report the db client duration metric per operation.
 	pq := promtest.Client{HostPort: prometheusHostPort}
 	for _, span := range testCase.Spans {
+		operation := span.FindAttribute("db.operation.name")
+		require.NotNil(t, operation, "db.operation.name attribute not found in span %s", span.Name)
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
 			results, err := pq.Query(`db_client_operation_duration_seconds_count{` +
-				`db_operation_name="` + span.Name + `",` +
+				`db_operation_name="` + operation.Value.AsString() + `",` +
 				`db_system_name="aerospike",` +
 				`service_namespace="` + namespace + `"}`)
 			require.NoError(ct, err, "failed to query prometheus for %s", span.Name)
@@ -46,29 +48,29 @@ func testREDMetricsForAerospikeLibrary(t *testing.T, testCase TestCase) {
 		}, testTimeout, 100*time.Millisecond)
 	}
 
-	// No HTTP server metrics should be produced (we only instrument aerospike here).
+	// No HTTP server metrics should be produced (only aerospike is instrumented here).
 	results, err := pq.Query(`http_server_request_duration_seconds_count{}`)
 	require.NoError(t, err, "failed to query prometheus for http_server_request_duration_seconds_count")
 	require.Empty(t, results, "expected no HTTP requests, got %d", len(results))
 
-	// Jaeger should contain a span per operation carrying the expected attributes.
+	// Jaeger should contain a span per operation with the expected attributes. The
+	// span name (jaeger "operation") is "{db.operation.name} {db.namespace}.{db.collection.name}".
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		for _, span := range testCase.Spans {
-			command := span.Name
-			resp, err := http.Get(jaegerQueryURL + "?service=" + comm + "&operation=" + command)
-			require.NoError(ct, err, "failed to query jaeger for %s", command)
+			resp, err := http.Get(jaegerQueryURL + "?service=" + comm + "&operation=" + url.QueryEscape(span.Name))
+			require.NoError(ct, err, "failed to query jaeger for %s", span.Name)
 			if resp == nil {
 				return
 			}
-			require.Equal(ct, http.StatusOK, resp.StatusCode, "unexpected status code for %s: %d", command, resp.StatusCode)
+			require.Equal(ct, http.StatusOK, resp.StatusCode, "unexpected status code for %s: %d", span.Name, resp.StatusCode)
 			var tq jaeger.TracesQuery
-			require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq), "failed to decode jaeger response for %s", command)
+			require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq), "failed to decode jaeger response for %s", span.Name)
 			var tags []jaeger.Tag
 			for _, attr := range span.Attributes {
 				tags = append(tags, otelAttributeToJaegerTag(attr))
 			}
 			traces := tq.FindBySpan(tags...)
-			assert.LessOrEqual(ct, 1, len(traces), "span %s with tags %v not found in traces %v", command, tags, tq.Data)
+			assert.LessOrEqual(ct, 1, len(traces), "span %s with tags %v not found in traces %v", span.Name, tags, tq.Data)
 		}
 	}, testTimeout, 100*time.Millisecond)
 }
@@ -87,10 +89,10 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 			Comm:      "java",
 			Namespace: "integration-test",
 			Spans: []TestCaseSpan{
-				{Name: "PUT", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "PUT")}},
-				{Name: "GET", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "GET")}},
-				{Name: "DELETE", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "DELETE")}},
-				{Name: "SCAN", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "SCAN")}},
+				{Name: "PUT test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "PUT")}},
+				{Name: "GET test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "GET")}},
+				{Name: "DELETE test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "DELETE")}},
+				{Name: "SCAN test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "SCAN")}},
 			},
 		},
 	}
@@ -105,11 +107,11 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 	}
 }
 
-func waitForAerospikeTestComponents(t *testing.T, url, subpath string) {
+func waitForAerospikeTestComponents(t *testing.T, baseURL, subpath string) {
 	pq := promtest.Client{HostPort: prometheusHostPort}
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		// the test service endpoint is healthy
-		req, err := http.NewRequest(http.MethodGet, url+subpath, nil)
+		req, err := http.NewRequest(http.MethodGet, baseURL+subpath, nil)
 		require.NoError(ct, err)
 		r, err := testHTTPClient.Do(req)
 		require.NoError(ct, err)
