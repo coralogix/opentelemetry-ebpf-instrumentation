@@ -12,6 +12,14 @@ request and response payloads of an unclassified TCP connection are handed to
 the Aerospike parser. The protocol is **one-request-one-response per connection
 (FIFO)**, so the generic per-connection direction-flip correlation is exact.
 
+Aerospike clients read each response in two steps (an 8-byte proto-header read,
+then a separate read for the body), so the body — which carries `result_code` —
+can land in a later recv. To capture it regardless of the client's read pattern,
+this build adds a small kernel-side response reassembly step (see
+`bpf/generictracer/protocol_aerospike.h`) that accumulates response segments
+until the first full frame is present before the event is emitted. This is what
+makes `db.response.status_code` reliable here.
+
 ### proto header (8 bytes, every message)
 
 All multi-byte integers are big-endian.

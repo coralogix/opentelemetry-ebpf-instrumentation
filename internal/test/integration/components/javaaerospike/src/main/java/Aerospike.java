@@ -14,13 +14,10 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 
 /**
- * Minimal HTTP server that triggers Aerospike record operations so OBI can
- * observe them passively over the wire. Uses the
- * com.aerospike:aerospike-client-jdk21 client.
- *
- * - `/` runs a deterministic PUT, GET, DELETE, SCAN sequence. The PUT sets
- *   sendKey so the primary key travels on the wire (exercising db.query.text).
- * - `/error` forces a KEY_EXISTS_ERROR so the error result-code path is covered.
+ * Minimal HTTP server that triggers a deterministic PUT, GET, DELETE, SCAN
+ * sequence on every request, so OBI can observe Aerospike operations passively
+ * over the wire. Uses the com.aerospike:aerospike-client-jdk21 client. The PUT
+ * sets sendKey so the primary key travels on the wire (exercising db.query.text).
  */
 public class Aerospike {
     private static final String NAMESPACE = "test";
@@ -64,21 +61,22 @@ public class Aerospike {
             }
             respondOK(exchange);
         });
+        // /error pre-seeds a key, then issues a CREATE_ONLY put on the same key,
+        // which the server rejects with KEY_EXISTS_ERROR (result_code 5). This
+        // exercises the response result_code -> db.response.status_code path.
         server.createContext("/error", exchange -> {
-            // Force a KEY_EXISTS_ERROR (result_code 5): a CREATE_ONLY write onto a
-            // key that already exists.
-            WritePolicy createOnly = new WritePolicy();
-            createOnly.recordExistsAction = RecordExistsAction.CREATE_ONLY;
-            Key key = new Key(NAMESPACE, SET, "obi_err");
             try {
-                as.delete(null, key);                          // clean slate
-                as.put(createOnly, key, new Bin("v", 1));      // first create succeeds
-                as.put(createOnly, key, new Bin("v", 2));      // second create -> KEY_EXISTS_ERROR
+                Key key = new Key(NAMESPACE, SET, "obi-err");
+                as.put(sendKey, key, new Bin("product", "seeded")); // ensure the key exists
+                WritePolicy createOnly = new WritePolicy(sendKey);
+                createOnly.recordExistsAction = RecordExistsAction.CREATE_ONLY;
+                as.put(createOnly, key, new Bin("product", "again")); // -> KEY_EXISTS_ERROR
             } catch (Exception e) {
                 System.out.println("expected error op: " + e.getMessage());
             }
             respondOK(exchange);
         });
+
         server.setExecutor(null);
         System.out.println("starting HTTP server on :8080");
         server.start();

@@ -111,30 +111,35 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 	}
 }
 
-// testAerospikeErrors drives the /error endpoint, which forces a KEY_EXISTS_ERROR
-// write, and asserts the span carries the error result code in db.response.status_code.
-func testAerospikeErrors(t *testing.T) {
+// testREDMetricsAerospikeError drives the /error endpoint, which forces a
+// KEY_EXISTS_ERROR (result_code 5) on a PUT, and asserts the PUT span carries
+// db.response.status_code=KEY_EXISTS_ERROR end-to-end. This exercises the
+// eBPF response-frame reassembly that lets the Go parser observe result_code.
+func testREDMetricsAerospikeError(t *testing.T) {
 	baseURL := "http://localhost:8390"
 	comm := "java"
 
+	// Drive the error endpoint a few times.
 	for i := 0; i < 4; i++ {
 		ti.DoHTTPGet(t, baseURL+"/error", 200)
 	}
 
-	errorTags := []jaeger.Tag{
+	tags := []jaeger.Tag{
 		otelAttributeToJaegerTag(attribute.String("db.system.name", "aerospike")),
 		otelAttributeToJaegerTag(attribute.String("db.operation.name", "PUT")),
 		otelAttributeToJaegerTag(attribute.String("db.response.status_code", "KEY_EXISTS_ERROR")),
 	}
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		resp, err := http.Get(jaegerQueryURL + "?service=" + comm + "&operation=" + url.QueryEscape("PUT test.demo"))
-		require.NoError(ct, err)
-		require.NotNil(ct, resp)
+		require.NoError(ct, err, "failed to query jaeger for errored PUT")
+		if resp == nil {
+			return
+		}
 		require.Equal(ct, http.StatusOK, resp.StatusCode)
 		var tq jaeger.TracesQuery
 		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
-		traces := tq.FindBySpan(errorTags...)
-		assert.LessOrEqual(ct, 1, len(traces), "expected an errored PUT span with db.response.status_code=KEY_EXISTS_ERROR")
+		traces := tq.FindBySpan(tags...)
+		assert.LessOrEqual(ct, 1, len(traces), "errored PUT span with KEY_EXISTS_ERROR not found in traces %v", tq.Data)
 	}, testTimeout, 100*time.Millisecond)
 }
 
