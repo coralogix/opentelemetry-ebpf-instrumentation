@@ -317,10 +317,8 @@ func detectHeuristicProtocol(parseCtx *EBPFParseContext, event *TCPRequestInfo, 
 // data requests produce a span; info/auth/compressed frames are left for the
 // generic ignore path. Correlation is the generic per-connection direction flip.
 func matchAerospike(event *TCPRequestInfo, requestBuffer, responseBuffer *largebuf.LargeBuffer) (request.Span, bool, bool, error) { //nolint:unparam
-	if !isAerospikeProto(requestBuffer) && !isAerospikeProto(responseBuffer) {
-		return request.Span{}, false, false, nil
-	}
-
+	// parseAerospikeRequest validates the proto/as_msg header itself and returns
+	// nil for non-Aerospike or response frames, so it doubles as the detector.
 	if info := parseAerospikeRequest(requestBuffer); info != nil {
 		status, dbError := aerospikeStatus(responseBuffer)
 		return TCPToAerospikeToSpan(event, info, status, dbError), false, true, nil

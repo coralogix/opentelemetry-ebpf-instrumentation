@@ -89,7 +89,11 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 			Comm:      "java",
 			Namespace: "integration-test",
 			Spans: []TestCaseSpan{
-				{Name: "PUT test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "PUT")}},
+				// PUT sends the key (sendKey), so db.query.text carries the primary key.
+				{Name: "PUT test.demo", Attributes: []attribute.KeyValue{
+					attribute.String("db.operation.name", "PUT"),
+					attribute.String("db.query.text", "obi"),
+				}},
 				{Name: "GET test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "GET")}},
 				{Name: "DELETE test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "DELETE")}},
 				{Name: "SCAN test.demo", Attributes: []attribute.KeyValue{attribute.String("db.operation.name", "SCAN")}},
@@ -105,6 +109,33 @@ func testREDMetricsAerospikeOnly(t *testing.T) {
 			testREDMetricsForAerospikeLibrary(t, testCase)
 		})
 	}
+}
+
+// testAerospikeErrors drives the /error endpoint, which forces a KEY_EXISTS_ERROR
+// write, and asserts the span carries the error result code in db.response.status_code.
+func testAerospikeErrors(t *testing.T) {
+	baseURL := "http://localhost:8390"
+	comm := "java"
+
+	for i := 0; i < 4; i++ {
+		ti.DoHTTPGet(t, baseURL+"/error", 200)
+	}
+
+	errorTags := []jaeger.Tag{
+		otelAttributeToJaegerTag(attribute.String("db.system.name", "aerospike")),
+		otelAttributeToJaegerTag(attribute.String("db.operation.name", "PUT")),
+		otelAttributeToJaegerTag(attribute.String("db.response.status_code", "KEY_EXISTS_ERROR")),
+	}
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := http.Get(jaegerQueryURL + "?service=" + comm + "&operation=" + url.QueryEscape("PUT test.demo"))
+		require.NoError(ct, err)
+		require.NotNil(ct, resp)
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+		var tq jaeger.TracesQuery
+		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
+		traces := tq.FindBySpan(errorTags...)
+		assert.LessOrEqual(ct, 1, len(traces), "expected an errored PUT span with db.response.status_code=KEY_EXISTS_ERROR")
+	}, testTimeout, 100*time.Millisecond)
 }
 
 func waitForAerospikeTestComponents(t *testing.T, baseURL, subpath string) {

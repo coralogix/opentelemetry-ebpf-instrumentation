@@ -1162,6 +1162,7 @@ type Span struct {
 	Status            int            `json:"-"`
 	ResponseLength    int64          `json:"-"`
 	ContentLength     int64          `json:"-"`
+	DBBatchSize       int            `json:"-"`
 	RequestStart      int64          `json:"-"`
 	Start             int64          `json:"-"`
 	End               int64          `json:"-"`

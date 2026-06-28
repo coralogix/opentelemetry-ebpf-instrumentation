@@ -7,12 +7,10 @@ This document describes the Aerospike protocol parser that OBI provides.
 Aerospike clients talk to the server over a custom binary protocol (the native
 "proto version 2" protocol) on the service port (default **3000**). It is a
 length-prefixed binary protocol — not HTTP, gRPC, or Protocol Buffers despite
-the unfortunate "proto" name. OBI parses this wire format entirely in userspace:
-the generic kprobe TCP path captures the request and response payloads of an
-unclassified TCP connection and hands them to the Aerospike parser. No eBPF/C
-changes are required, and because the protocol is **one-request-one-response per
-connection (FIFO)**, the generic per-connection direction-flip correlation is
-sufficient — no kernel-side state is needed.
+the unfortunate "proto" name. OBI parses this wire format in userspace: the
+request and response payloads of an unclassified TCP connection are handed to
+the Aerospike parser. The protocol is **one-request-one-response per connection
+(FIFO)**, so the generic per-connection direction-flip correlation is exact.
 
 ### proto header (8 bytes, every message)
 
@@ -143,15 +141,23 @@ The span name follows the OTel database convention `{operation} {target}`, e.g.
 ### User key (opt-in)
 
 When the client was configured with `sendKey`, the request carries the user key
-(field type 2). OBI decodes it (string keys) and emits it as `db.query.text`,
-**only when the `db.query.text` attribute is explicitly selected**
-(`attributes.select`). The 20-byte RIPEMD-160 digest is never emitted — it is
-high-cardinality and a one-way hash of the key.
+(field type 2). `db.query.text` carries **only that primary key** — the
+identifier the application used to address the record (e.g. `k_put`) — not the
+bin names/values or any record payload. This differs from a protocol like
+Couchbase KV where the document body is on the wire; Aerospike record/bin values
+are not captured (see Limitations).
+
+OBI decodes the key only when its particle type is string (integer/blob keys are
+binary and high-cardinality, so they are skipped), and emits it **only when the
+`db.query.text` attribute is explicitly selected** (`attributes.select`). The
+20-byte RIPEMD-160 digest is never emitted — it is high-cardinality and a
+one-way hash of the key.
+
+TLS-encrypted connections are also supported: OBI's TLS instrumentation captures
+the decrypted payloads, so the AS_MSG frames are parsed the same as cleartext.
 
 ## Limitations
 
-- **TLS**: connections using TLS on the service port are encrypted and cannot be
-  parsed from the wire.
 - **Compression**: type-4 compressed AS_MSG frames are skipped (off by default
   in the clients).
 - **Multi-record data**: only operation metadata is captured, not returned
@@ -174,3 +180,40 @@ or via environment variables:
 OTEL_EBPF_TRACES_INSTRUMENTATIONS=aerospike
 OTEL_EBPF_METRICS_INSTRUMENTATIONS=aerospike
 ```
+
+## Semantic conventions and prior art
+
+Aerospike is **not** part of the OpenTelemetry semantic conventions: there is no
+registered `db.system.name` value for it, so OBI emits `aerospike` as a custom
+value, following the spec's guidance to use a custom value when no well-known one
+applies. Otherwise this parser maps onto the standard, stable OTel database span
+attributes (`db.operation.name`, `db.collection.name`, `db.namespace`,
+`db.operation.batch.size`, `db.query.text`, `db.response.status_code`).
+
+There is **no official OpenTelemetry instrumentation for Aerospike**, and no
+client-side tracing for it anywhere in the ecosystem. The existing Aerospike
+observability tooling is metrics-only:
+
+- **Server-side metrics**: the OpenTelemetry Collector
+  [`aerospikereceiver`](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/aerospikereceiver)
+  (`aerospike.node.*`, `aerospike.namespace.*`) and the official
+  [aerospike-prometheus-exporter](https://github.com/aerospike/aerospike-prometheus-exporter)
+  (`aerospike_node_*`, `aerospike_namespace_*`, …) both scrape the server.
+- **Client-side metrics**: the official Aerospike client libraries
+  ([Java](https://aerospike.com/docs/develop/client/java/metrics/),
+  [Go](https://aerospike.com/docs/develop/client/go/metrics/)) expose built-in
+  latency histograms per command type, but emit no spans and have no out-of-the-box
+  OTel exporter.
+
+So OBI's client-side span generation here is novel — it is the only source that
+produces per-operation traces for Aerospike.
+
+## References
+
+- Aerospike wire protocol (info & AS_MSG):
+  <https://aerospike.com/docs/server/architecture/wire-protocol>
+- Aerospike client (`as_msg`) message format and info/result codes:
+  <https://github.com/aerospike/aerospike-client-c> (the C client headers are the
+  canonical reference for the field/op/particle type ids and result codes used here)
+- OTel database semantic conventions (spans):
+  <https://opentelemetry.io/docs/specs/semconv/database/database-spans/>

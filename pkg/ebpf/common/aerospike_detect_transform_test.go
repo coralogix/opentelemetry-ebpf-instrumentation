@@ -58,7 +58,6 @@ func TestParseAerospikeRequest(t *testing.T) {
 	for _, tc := range aerospikeRequestFixtures {
 		t.Run(tc.name, func(t *testing.T) {
 			buf := largebuf.NewLargeBufferFrom(mustHex(t, tc.hexFrame))
-			assert.True(t, isAerospikeProto(buf), "should be recognized as aerospike proto")
 
 			info := parseAerospikeRequest(buf)
 			require.NotNil(t, info, "request should parse as an AS_MSG data request")
@@ -84,7 +83,6 @@ func TestParseAerospikeRequestMultiChunk(t *testing.T) {
 	lb.AppendChunk(full[5:35]) // splits the as_msg header and into fields
 	lb.AppendChunk(full[35:])
 
-	require.True(t, isAerospikeProto(lb))
 	info := parseAerospikeRequest(lb)
 	require.NotNil(t, info)
 	assert.Equal(t, "PUT", info.op)

@@ -5,13 +5,8 @@ package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 
 // Aerospike native client protocol (proto version 2) parser.
 //
-// Aerospike rides the generic kprobe TCP path: the request and response payloads
-// captured for an unclassified TCP connection are handed here and parsed entirely
-// in userspace. The protocol is one-request-one-response per connection (FIFO),
-// so the generic direction-flip correlation is sufficient — no kernel state is
-// needed. Only type-3 AS_MSG data frames produce spans; type-1 Info (text admin)
-// and type-2 security/auth frames are ignored, and type-4 compressed frames are
-// skipped (the zlib body is opaque to byte parsing).
+// Only type-3 AS_MSG data frames produce spans. The protocol is
+// one-request-one-response per connection (FIFO).
 //
 // Wire layout (all multi-byte integers big-endian):
 //
@@ -23,6 +18,8 @@ package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 //	op:     op_sz(4), op(1), particle_type(1), version(1), name_sz(1), name, value
 
 import (
+	"encoding/binary"
+	"strconv"
 	"unsafe"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
@@ -35,14 +32,10 @@ const (
 	asMsgHeaderLen   = 22
 	asProtoVersion   = 2
 
-	asTypeInfo       = 1
-	asTypeSecurity   = 2
-	asTypeMessage    = 3 // AS_MSG: the data protocol
-	asTypeCompressed = 4
+	asTypeMessage = 3 // AS_MSG: the data protocol
 
 	// info1 flags (read side)
 	asInfo1Read   = 0x01
-	asInfo1GetAll = 0x02
 	asInfo1Batch  = 0x08
 	asInfo1NoBins = 0x20 // GET_NO_BINS, used by exists
 
@@ -61,6 +54,9 @@ const (
 	asFieldUDFHi       = 33
 	asFieldBatch       = 41 // batch (41) / batch-with-set (42)
 	asFieldBatchSet    = 42
+
+	// particle type ids (the 1-byte prefix on a field/bin value)
+	asParticleString = 3
 
 	// op type ids
 	asOpWrite = 2
@@ -83,46 +79,22 @@ type aerospikeInfo struct {
 	batchSize int
 }
 
-func beUint(b []uint8) uint64 {
-	var v uint64
-	for _, x := range b {
-		v = v<<8 | uint64(x)
-	}
-	return v
+// protoBodyLen decodes the 6-byte big-endian size field of a proto header.
+func protoBodyLen(h []uint8) uint64 {
+	var b [8]byte
+	copy(b[2:], h[2:asProtoHeaderLen])
+	return binary.BigEndian.Uint64(b[:])
 }
 
-// validProtoHeader reports whether the 8-byte slice is a plausible Aerospike proto
-// header, returning the message type.
-func validProtoHeader(h []uint8) (uint8, bool) {
-	if len(h) < asProtoHeaderLen || h[0] != asProtoVersion {
-		return 0, false
-	}
-	typ := h[1]
-	switch typ {
-	case asTypeInfo, asTypeSecurity, asTypeMessage, asTypeCompressed:
-	default:
-		return 0, false
-	}
-	bodyLen := beUint(h[2:asProtoHeaderLen])
-	if bodyLen == 0 || bodyLen > asMaxBodyLen {
-		return 0, false
-	}
-	return typ, true
-}
-
-// isAerospikeProto reports whether a buffer begins with a plausible Aerospike
-// proto header of any message type.
-func isAerospikeProto(buf *largebuf.LargeBuffer) bool {
-	if buf == nil || buf.Len() < asProtoHeaderLen {
+// validProtoHeader reports whether the 8-byte slice is a plausible Aerospike
+// type-3 AS_MSG proto header. Info/security/compressed frames don't produce spans
+// so they are rejected here.
+func validProtoHeader(h []uint8) bool {
+	if len(h) < asProtoHeaderLen || h[0] != asProtoVersion || h[1] != asTypeMessage {
 		return false
 	}
-	r := buf.NewReader()
-	h, err := r.ReadN(asProtoHeaderLen)
-	if err != nil {
-		return false
-	}
-	_, ok := validProtoHeader(h)
-	return ok
+	bodyLen := protoBodyLen(h)
+	return bodyLen != 0 && bodyLen <= asMaxBodyLen
 }
 
 // asMsgIsRequest distinguishes a request from a response AS_MSG body. Requests
@@ -142,11 +114,7 @@ func parseAerospikeRequest(buf *largebuf.LargeBuffer) *aerospikeInfo {
 	r := buf.NewReader()
 
 	proto, err := r.ReadN(asProtoHeaderLen)
-	if err != nil {
-		return nil
-	}
-	typ, ok := validProtoHeader(proto)
-	if !ok || typ != asTypeMessage {
+	if err != nil || !validProtoHeader(proto) {
 		return nil
 	}
 
@@ -164,17 +132,22 @@ func parseAerospikeRequest(buf *largebuf.LargeBuffer) *aerospikeInfo {
 	if !asMsgIsRequest(info1, info2) {
 		return nil
 	}
-	nFields := int(beUint(asm[18:20]))
-	nOps := int(beUint(asm[20:22]))
+	nFields := int(binary.BigEndian.Uint16(asm[18:20]))
+	nOps := int(binary.BigEndian.Uint16(asm[20:22]))
 
 	info := &aerospikeInfo{}
-	hasDigest := false
-	hasIndex := false
-	hasUDF := false
+	hasDigest, hasIndex, hasUDF := parseAerospikeFields(&r, nFields, info)
 
-	// A truncated read (e.g. a scan/query partition list cut off at the capture
-	// boundary) stops the walk; the operation is still classified from the flags
-	// and the fields decoded before the cut.
+	info.op = classifyAerospikeOp(info1, info2, &r, nOps, hasDigest, hasIndex, hasUDF)
+	return info
+}
+
+// parseAerospikeFields walks the field section, filling namespace/set/key/batch
+// size into info and reporting which marker fields (digest, secondary index, UDF)
+// were seen. A truncated read (e.g. a scan/query partition list cut off at the
+// capture boundary) stops the walk; the operation is still classified from the
+// flags and the fields decoded before the cut.
+func parseAerospikeFields(r *largebuf.LargeBufferReader, nFields int, info *aerospikeInfo) (hasDigest, hasIndex, hasUDF bool) {
 fieldLoop:
 	for i := 0; i < nFields; i++ {
 		fsz, err := r.ReadU32BE()
@@ -200,15 +173,14 @@ fieldLoop:
 			}
 			info.set = string(v)
 		case ftype == asFieldKey:
-			// value = 1-byte particle type + key bytes; decode string keys.
-			if valLen > 1 {
-				v, err := r.ReadN(valLen)
-				if err != nil {
-					break fieldLoop
-				}
-				info.userKey = string(v[1:])
-			} else if r.Skip(valLen) != nil {
+			// value = 1-byte particle type + key bytes. Only string keys are
+			// decoded; integer/blob keys would be binary and high-cardinality.
+			v, err := r.ReadN(valLen)
+			if err != nil {
 				break fieldLoop
+			}
+			if valLen > 1 && v[0] == asParticleString {
+				info.userKey = string(v[1:])
 			}
 		case ftype == asFieldBatch || ftype == asFieldBatchSet:
 			// batch field value begins with a 4-byte operation count.
@@ -243,9 +215,7 @@ fieldLoop:
 			}
 		}
 	}
-
-	info.op = classifyAerospikeOp(info1, info2, &r, nOps, hasDigest, hasIndex, hasUDF)
-	return info
+	return hasDigest, hasIndex, hasUDF
 }
 
 // classifyAerospikeOp derives the operation name from the info flags plus, for
@@ -262,18 +232,24 @@ func classifyAerospikeOp(info1, info2 uint8, r *largebuf.LargeBufferReader, nOps
 	case info2&asInfo2Write != 0:
 		return classifyAerospikeWrite(r, nOps)
 	case info1&asInfo1Read != 0:
-		switch {
-		case hasIndex:
-			return "QUERY"
-		case !hasDigest:
-			return "SCAN"
-		case info1&asInfo1NoBins != 0:
-			return "EXISTS"
-		default:
-			return "GET"
-		}
+		return classifyAerospikeRead(info1, hasDigest, hasIndex)
 	}
 	return "UNKNOWN"
+}
+
+// classifyAerospikeRead separates QUERY (secondary index), SCAN (no digest, i.e.
+// whole-namespace), EXISTS (GET_NO_BINS) and GET (single-record read).
+func classifyAerospikeRead(info1 uint8, hasDigest, hasIndex bool) string {
+	switch {
+	case hasIndex:
+		return "QUERY"
+	case !hasDigest:
+		return "SCAN"
+	case info1&asInfo1NoBins != 0:
+		return "EXISTS"
+	default:
+		return "GET"
+	}
 }
 
 // classifyAerospikeWrite separates PUT (all writes), TOUCH (a lone touch op) and
@@ -362,22 +338,8 @@ func aerospikeResultName(code uint8) string {
 	case 22:
 		return "FORBIDDEN"
 	default:
-		return uintToStr(uint64(code))
+		return strconv.FormatUint(uint64(code), 10)
 	}
-}
-
-func uintToStr(v uint64) string {
-	if v == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for v > 0 {
-		i--
-		b[i] = byte('0' + v%10)
-		v /= 10
-	}
-	return string(b[i:])
 }
 
 func TCPToAerospikeToSpan(trace *TCPRequestInfo, info *aerospikeInfo, status int, dbError request.DBError) request.Span {
@@ -410,10 +372,10 @@ func TCPToAerospikeToSpan(trace *TCPRequestInfo, info *aerospikeInfo, status int
 			UserPID:   app.PID(trace.Pid.UserPid),
 			Namespace: trace.Pid.Ns,
 		},
-		DBNamespace:   info.namespace,
-		DBSystem:      "aerospike",
-		DBError:       dbError,
-		Statement:     info.userKey,
-		ContentLength: int64(info.batchSize),
+		DBNamespace: info.namespace,
+		DBSystem:    "aerospike",
+		DBError:     dbError,
+		Statement:   info.userKey,
+		DBBatchSize: info.batchSize,
 	}
 }
