@@ -131,7 +131,7 @@ plus, for writes, the per-op type bytes:
 | `db.collection.name`      | set field             | `"users"`                |
 | `db.operation.batch.size` | batch field (BATCH)   | `3`                      |
 | `db.query.text`           | user key (opt-in)     | `"k_put"`                |
-| `db.response.status_code` | result_code (on error)| `"KEY_EXISTS_ERROR"`     |
+| `db.response.status_code` | result_code (on error)| `"KEY_EXISTS_ERROR"` †   |
 | `server.address`          | connection info       | Server hostname          |
 | `server.port`             | connection info       | `3000`                   |
 
@@ -162,6 +162,14 @@ the decrypted payloads, so the AS_MSG frames are parsed the same as cleartext.
   in the clients).
 - **Multi-record data**: only operation metadata is captured, not returned
   record/bin values.
+- **† Response status codes**: `db.response.status_code` is parsed from the
+  response `result_code`, but it is only populated when the full first response
+  frame is captured. Aerospike clients typically read a response in two steps —
+  an 8-byte proto header read, then a separate read for the body — so on the
+  generic TCP path the captured response buffer often holds only the header, and
+  the `result_code` (in the body) is not observed. Error status is therefore
+  best-effort on this path; reliably capturing it requires kernel-side response
+  reassembly (an eBPF change outside this parser's scope).
 
 ## Configuration
 

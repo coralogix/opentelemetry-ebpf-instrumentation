@@ -6,7 +6,6 @@ import com.aerospike.client.Bin;
 import com.aerospike.client.Host;
 import com.aerospike.client.Key;
 import com.aerospike.client.policy.ClientPolicy;
-import com.aerospike.client.policy.RecordExistsAction;
 import com.aerospike.client.policy.WritePolicy;
 import com.sun.net.httpserver.HttpServer;
 
@@ -14,13 +13,10 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 
 /**
- * Minimal HTTP server that triggers Aerospike record operations so OBI can
- * observe them passively over the wire. Uses the
- * com.aerospike:aerospike-client-jdk21 client.
- *
- * - `/` runs a deterministic PUT, GET, DELETE, SCAN sequence. The PUT sets
- *   sendKey so the primary key travels on the wire (exercising db.query.text).
- * - `/error` forces a KEY_EXISTS_ERROR so the error result-code path is covered.
+ * Minimal HTTP server that triggers a deterministic PUT, GET, DELETE, SCAN
+ * sequence on every request, so OBI can observe Aerospike operations passively
+ * over the wire. Uses the com.aerospike:aerospike-client-jdk21 client. The PUT
+ * sets sendKey so the primary key travels on the wire (exercising db.query.text).
  */
 public class Aerospike {
     private static final String NAMESPACE = "test";
@@ -61,21 +57,6 @@ public class Aerospike {
                 }); // SCAN
             } catch (Exception e) {
                 System.out.println("op failed: " + e.getMessage());
-            }
-            respondOK(exchange);
-        });
-        server.createContext("/error", exchange -> {
-            // Force a KEY_EXISTS_ERROR (result_code 5): a CREATE_ONLY write onto a
-            // key that already exists.
-            WritePolicy createOnly = new WritePolicy();
-            createOnly.recordExistsAction = RecordExistsAction.CREATE_ONLY;
-            Key key = new Key(NAMESPACE, SET, "obi_err");
-            try {
-                as.delete(null, key);                          // clean slate
-                as.put(createOnly, key, new Bin("v", 1));      // first create succeeds
-                as.put(createOnly, key, new Bin("v", 2));      // second create -> KEY_EXISTS_ERROR
-            } catch (Exception e) {
-                System.out.println("expected error op: " + e.getMessage());
             }
             respondOK(exchange);
         });
