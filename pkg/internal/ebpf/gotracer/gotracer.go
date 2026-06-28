@@ -202,6 +202,8 @@ func (p *Tracer) SetupTailCalls() {
 		p.bpfObjects.ObiProtocolHttp2GrpcHandleEndFrame,                 // 10
 		p.bpfObjects.ObiProtocolHttp2GrpcHandleStartFrameServer,         // 11
 		p.bpfObjects.ObiProtocolHttp2GrpcHandleStartFrameServerFinalize, // 12
+		// Large buffer multi-batch emission
+		p.bpfObjects.ObiLargeBufEmitContinue, // 13  k_tail_large_buf_emit_continue
 	} {
 		p.log.Debug("loading program into tail call jump table", "index", i, "program", prog.String())
 		if err := p.bpfObjects.JumpTable.Update(uint32(i), uint32(prog.FD()), ebpf.UpdateAny); err != nil {
@@ -477,6 +479,17 @@ func (p *Tracer) ProcessBinary(fileInfo *exec.FileInfo) {
 
 func (p *Tracer) AddCloser(c ...io.Closer) {
 	p.closers = append(p.closers, c...)
+}
+
+var goChannelLinkProbeSymbols = []string{
+	"runtime.chansend1",
+	"runtime.chanrecv1",
+	"runtime.chanrecv2",
+}
+
+// GoChannelLinkProbeSymbols returns the Go runtime symbols used to correlate direct channel handoffs.
+func GoChannelLinkProbeSymbols() []string {
+	return append([]string(nil), goChannelLinkProbeSymbols...)
 }
 
 func (p *Tracer) GoProbes() map[string][]*ebpfcommon.ProbeDesc {
@@ -826,15 +839,15 @@ func (p *Tracer) GoProbes() map[string][]*ebpfcommon.ProbeDesc {
 	}
 
 	if p.goChannelLinkProbesEnabled() {
-		m["runtime.chansend1"] = []*ebpfcommon.ProbeDesc{{
+		m[goChannelLinkProbeSymbols[0]] = []*ebpfcommon.ProbeDesc{{
 			Start: p.bpfObjects.ObiUprobeRuntimeChansend1,
 			End:   p.bpfObjects.ObiUprobeRuntimeChansend1Return,
 		}}
-		m["runtime.chanrecv1"] = []*ebpfcommon.ProbeDesc{{
+		m[goChannelLinkProbeSymbols[1]] = []*ebpfcommon.ProbeDesc{{
 			Start: p.bpfObjects.ObiUprobeRuntimeChanrecv1,
 			End:   p.bpfObjects.ObiUprobeRuntimeChanrecv1Return,
 		}}
-		m["runtime.chanrecv2"] = []*ebpfcommon.ProbeDesc{{
+		m[goChannelLinkProbeSymbols[2]] = []*ebpfcommon.ProbeDesc{{
 			Start: p.bpfObjects.ObiUprobeRuntimeChanrecv2,
 			End:   p.bpfObjects.ObiUprobeRuntimeChanrecv2Return,
 		}}

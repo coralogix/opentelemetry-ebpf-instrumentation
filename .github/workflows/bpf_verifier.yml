@@ -5,6 +5,18 @@ on:
     branches: [main, release-*]
   pull_request:
     branches: [main, release-*]
+    paths:
+      - ".github/workflows/bpf_verifier.yml"
+      - ".github/actions/generate-bpf/**"
+      - ".github/actions/free-disk/**"
+      - ".github/actions/setup-lvh-kernel/**"
+      - "bpf/**"
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "internal/test/vm/**"
+      - "scripts/kernel-matrix-json.sh"
+      - "Makefile"
   workflow_call:
     inputs:
       ref:

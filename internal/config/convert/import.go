@@ -4,7 +4,10 @@
 package convert // import "go.opentelemetry.io/obi/internal/config/convert"
 
 import (
+	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 
 	"go.opentelemetry.io/obi/internal/config/schema"
 	"go.opentelemetry.io/obi/pkg/appolly/services"
@@ -33,6 +36,9 @@ func V2ToRuntime(src *schema.Extension) (*obi.Config, error) {
 	if err := schema.ValidateStandalone(src); err != nil {
 		return nil, err
 	}
+	if err := validateV2RulePatterns(src.Capture.Rules); err != nil {
+		return nil, err
+	}
 
 	cfg := runtimeConfigDefaults()
 	applyV2Capture(&cfg, src)
@@ -58,6 +64,7 @@ func runtimeConfigDefaults() obi.Config {
 
 func applyV2Capture(cfg *obi.Config, src *schema.Extension) {
 	applyV2Policy(cfg, src.Capture.Policy, completePolicy(src.Capture.Policy))
+	applyV2Rules(cfg, src.Capture.Rules)
 	applyV2Limits(cfg, src.Capture.Limits, completeLimits(src.Capture.Limits))
 	applyV2Safety(cfg, src.Capture.Safety, !zeroValue(src.Capture.Safety))
 	applyV2Channels(cfg, src.Capture.Channels, completeChannels(src.Capture.Channels))
@@ -86,6 +93,381 @@ func applyV2Policy(cfg *obi.Config, policy schema.CapturePolicy, complete bool) 
 	if !zeroValue(policy.MinProcessAge) {
 		cfg.Discovery.MinProcessAge = policy.MinProcessAge.TimeDuration()
 	}
+}
+
+type runtimeDiscoveryRules struct {
+	includeGlobs                    services.GlobDefinitionCriteria
+	excludeGlobs                    services.GlobDefinitionCriteria
+	includeRegex                    services.RegexDefinitionCriteria
+	excludeRegex                    services.RegexDefinitionCriteria
+	excludeOTelInstrumentedServices bool
+	defaultOTLPGRPCPort             int
+}
+
+func applyV2Rules(cfg *obi.Config, rules []schema.Rule) {
+	if rules == nil {
+		return
+	}
+
+	applyRuntimeDiscoveryRules(cfg, runtimeDiscoveryRulesFromV2(rules))
+}
+
+func runtimeDiscoveryRulesFromV2(rules []schema.Rule) runtimeDiscoveryRules {
+	var converted runtimeDiscoveryRules
+	for _, rule := range rules {
+		if collectV2ExportsOTLPExclusionRule(&converted, rule) {
+			continue
+		}
+		globSelector, regexSelector, ok := selectorFromRule(rule)
+		if !ok {
+			continue
+		}
+
+		switch rule.Action {
+		case schema.CaptureActionInclude:
+			if regexSelector != nil {
+				converted.includeRegex = append(converted.includeRegex, *regexSelector)
+			} else {
+				converted.includeGlobs = append(converted.includeGlobs, *globSelector)
+			}
+		case schema.CaptureActionExclude:
+			if regexSelector != nil {
+				converted.excludeRegex = append(converted.excludeRegex, *regexSelector)
+			} else {
+				converted.excludeGlobs = append(converted.excludeGlobs, *globSelector)
+			}
+		}
+	}
+	return converted
+}
+
+func applyRuntimeDiscoveryRules(cfg *obi.Config, rules runtimeDiscoveryRules) {
+	// A present v2 rules section is authoritative for runtime selector state,
+	// including the default exclusions emitted by RuntimeToV2.
+	cfg.Discovery.Instrument = rules.includeGlobs
+	cfg.Discovery.ExcludeInstrument = rules.excludeGlobs
+	cfg.Discovery.DefaultExcludeInstrument = nil
+	cfg.Discovery.Services = rules.includeRegex
+	cfg.Discovery.ExcludeServices = rules.excludeRegex
+	cfg.Discovery.DefaultExcludeServices = nil
+	cfg.Discovery.ExcludeOTelInstrumentedServices = rules.excludeOTelInstrumentedServices
+	if rules.excludeOTelInstrumentedServices {
+		cfg.Discovery.DefaultOtlpGRPCPort = rules.defaultOTLPGRPCPort
+	}
+}
+
+// The v2 exports_otlp exclusion rule is the exported form of this runtime
+// boolean/port pair, not a general selector.
+func collectV2ExportsOTLPExclusionRule(rules *runtimeDiscoveryRules, rule schema.Rule) bool {
+	if rule.Action != schema.CaptureActionExclude || !ruleMatchOnlyExportsOTLP(rule.Match) {
+		return false
+	}
+
+	rules.excludeOTelInstrumentedServices = true
+	rules.defaultOTLPGRPCPort = rule.Match.Process.ExportsOTLP.Port
+	return true
+}
+
+func validateV2RulePatterns(rules []schema.Rule) error {
+	for i, rule := range rules {
+		path := fmt.Sprintf("capture.rules[%d].match", i)
+		if err := validateV2RuleProcessGlobPatterns(path+".process", rule.Match.Process); err != nil {
+			return err
+		}
+		if err := validateV2RuleProcessRegexPatterns(path+".process", rule.Match.Process); err != nil {
+			return err
+		}
+		if err := validateV2RuleKubernetesGlobPatterns(path+".kubernetes", rule.Match.Kubernetes); err != nil {
+			return err
+		}
+		if err := validateV2RuleKubernetesRegexPatterns(path+".kubernetes", rule.Match.Kubernetes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateV2RuleProcessGlobPatterns(path string, match schema.RuleProcessMatch) error {
+	if err := validateGlobAttr(path+".language_glob", match.LanguageGlob); err != nil {
+		return err
+	}
+	if err := validateGlobAttr(path+".cmd_args_glob", match.CmdArgsGlob); err != nil {
+		return err
+	}
+	return validateGlobAttr(path+".exe_path_glob", match.ExePathGlob)
+}
+
+func validateV2RuleProcessRegexPatterns(path string, match schema.RuleProcessMatch) error {
+	if err := validateRegexpAttr(path+".language_regex", match.LanguageRegex); err != nil {
+		return err
+	}
+	if err := validateRegexpAttr(path+".cmd_args_regex", match.CmdArgsRegex); err != nil {
+		return err
+	}
+	return validateRegexpAttr(path+".exe_path_regex", match.ExePathRegex)
+}
+
+func validateV2RuleKubernetesGlobPatterns(path string, match schema.RuleKubernetesMatch) error {
+	if err := validateGlobAttr(path+".namespace_glob", match.NamespaceGlob); err != nil {
+		return err
+	}
+	if err := validateGlobAttrMap(path+".metadata_glob", match.MetadataGlob); err != nil {
+		return err
+	}
+	if err := validateGlobAttrMap(path+".pod_labels", match.PodLabels); err != nil {
+		return err
+	}
+	return validateGlobAttrMap(path+".pod_annotations", match.PodAnnotations)
+}
+
+func validateV2RuleKubernetesRegexPatterns(path string, match schema.RuleKubernetesMatch) error {
+	if err := validateRegexpAttr(path+".namespace_regex", match.NamespaceRegex); err != nil {
+		return err
+	}
+	if err := validateRegexpAttrMap(path+".metadata_regex", match.MetadataRegex); err != nil {
+		return err
+	}
+	if err := validateRegexpAttrMap(path+".pod_labels_regex", match.PodLabelsRegex); err != nil {
+		return err
+	}
+	return validateRegexpAttrMap(path+".pod_annotations_regex", match.PodAnnotationsRegex)
+}
+
+func validateGlobAttr(path string, values []string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	var attr services.GlobAttr
+	pattern := globPattern(values)
+	if err := attr.UnmarshalText([]byte(pattern)); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+func validateGlobAttrMap(path string, values map[string][]string) error {
+	for key, value := range values {
+		if err := validateGlobAttr(fmt.Sprintf("%s[%q]", path, key), value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRegexpAttr(path, value string) error {
+	if value == "" {
+		return nil
+	}
+	var attr services.RegexpAttr
+	if err := attr.UnmarshalText([]byte(value)); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
+}
+
+func validateRegexpAttrMap(path string, values map[string]string) error {
+	for key, value := range values {
+		if err := validateRegexpAttr(fmt.Sprintf("%s[%q]", path, key), value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func selectorFromRule(rule schema.Rule) (*services.GlobAttributes, *services.RegexSelector, bool) {
+	if rule.Match.Process.ExportsOTLP != nil || ruleMatchEmpty(rule.Match) {
+		return nil, nil, false
+	}
+
+	if ruleUsesRegex(rule.Match) {
+		if ruleUsesGlob(rule.Match) {
+			return nil, nil, false
+		}
+		selector := regexSelectorFromRule(rule)
+		applyV2RegexRuleRefinement(&selector, rule.Refine)
+		return nil, &selector, true
+	}
+
+	selector := globSelectorFromRule(rule)
+	applyV2GlobRuleRefinement(&selector, rule.Refine)
+	return &selector, nil, true
+}
+
+func ruleMatchOnlyExportsOTLP(match schema.RuleMatch) bool {
+	if match.Process.ExportsOTLP == nil {
+		return false
+	}
+	match.Process.ExportsOTLP = nil
+	return ruleMatchEmpty(match)
+}
+
+func ruleUsesRegex(match schema.RuleMatch) bool {
+	return match.Process.LanguageRegex != "" ||
+		match.Process.CmdArgsRegex != "" ||
+		match.Process.ExePathRegex != "" ||
+		match.Kubernetes.NamespaceRegex != "" ||
+		len(match.Kubernetes.MetadataRegex) > 0 ||
+		len(match.Kubernetes.PodLabelsRegex) > 0 ||
+		len(match.Kubernetes.PodAnnotationsRegex) > 0
+}
+
+func ruleUsesGlob(match schema.RuleMatch) bool {
+	return len(match.Process.LanguageGlob) > 0 ||
+		len(match.Process.CmdArgsGlob) > 0 ||
+		len(match.Process.ExePathGlob) > 0 ||
+		len(match.Kubernetes.NamespaceGlob) > 0 ||
+		len(match.Kubernetes.MetadataGlob) > 0 ||
+		len(match.Kubernetes.PodLabels) > 0 ||
+		len(match.Kubernetes.PodAnnotations) > 0
+}
+
+func globSelectorFromRule(rule schema.Rule) services.GlobAttributes {
+	match := rule.Match
+	return services.GlobAttributes{
+		OpenPorts:      intEnumValue(match.Process.OpenPorts),
+		PIDs:           slices.Clone(match.Process.TargetPIDs),
+		Languages:      globAttr(match.Process.LanguageGlob),
+		CmdArgs:        globAttr(match.Process.CmdArgsGlob),
+		Path:           globAttr(match.Process.ExePathGlob),
+		ContainersOnly: match.Process.ContainersOnly,
+		Metadata:       globMetadata(match.Kubernetes),
+		PodLabels:      globAttrMap(match.Kubernetes.PodLabels),
+		PodAnnotations: globAttrMap(match.Kubernetes.PodAnnotations),
+	}
+}
+
+func regexSelectorFromRule(rule schema.Rule) services.RegexSelector {
+	match := rule.Match
+	return services.RegexSelector{
+		OpenPorts:      intEnumValue(match.Process.OpenPorts),
+		PIDs:           slices.Clone(match.Process.TargetPIDs),
+		Languages:      regexpAttr(match.Process.LanguageRegex),
+		CmdArgs:        regexpAttr(match.Process.CmdArgsRegex),
+		Path:           regexpAttr(match.Process.ExePathRegex),
+		ContainersOnly: match.Process.ContainersOnly,
+		Metadata:       regexMetadata(match.Kubernetes),
+		PodLabels:      regexpAttrMap(match.Kubernetes.PodLabelsRegex),
+		PodAnnotations: regexpAttrMap(match.Kubernetes.PodAnnotationsRegex),
+	}
+}
+
+func applyV2GlobRuleRefinement(selector *services.GlobAttributes, refine schema.RuleRefinement) {
+	if refine.Exports != nil {
+		selector.ExportModes = exportModesFromRefinement(*refine.Exports)
+	}
+	if refine.HTTP != nil && !zeroValue(refine.HTTP.Routes) {
+		selector.Routes = &services.CustomRoutesConfig{
+			Incoming: cloneStrings(refine.HTTP.Routes.Incoming.Patterns),
+			Outgoing: cloneStrings(refine.HTTP.Routes.Outgoing.Patterns),
+		}
+	}
+}
+
+func applyV2RegexRuleRefinement(selector *services.RegexSelector, refine schema.RuleRefinement) {
+	if refine.Exports != nil {
+		selector.ExportModes = exportModesFromRefinement(*refine.Exports)
+	}
+	if refine.HTTP != nil && !zeroValue(refine.HTTP.Routes) {
+		selector.Routes = &services.CustomRoutesConfig{
+			Incoming: cloneStrings(refine.HTTP.Routes.Incoming.Patterns),
+			Outgoing: cloneStrings(refine.HTTP.Routes.Outgoing.Patterns),
+		}
+	}
+}
+
+func exportModesFromRefinement(refine schema.ExportModeRefinement) services.ExportModes {
+	modes := services.NewExportModes()
+	if refine.Traces {
+		modes.AllowTraces()
+	}
+	if refine.Metrics {
+		modes.AllowMetrics()
+	}
+	return modes
+}
+
+func intEnumValue(in *services.IntEnum) services.IntEnum {
+	if in == nil {
+		return services.IntEnum{}
+	}
+	return *in
+}
+
+func globAttr(values []string) services.GlobAttr {
+	switch len(values) {
+	case 0:
+		return services.GlobAttr{}
+	default:
+		return services.NewGlob(globPattern(values))
+	}
+}
+
+func globPattern(values []string) string {
+	if len(values) == 1 {
+		return values[0]
+	}
+	return "{" + strings.Join(values, ",") + "}"
+}
+
+func globAttrMap(values map[string][]string) map[string]*services.GlobAttr {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]*services.GlobAttr, len(values))
+	for key, value := range values {
+		attr := globAttr(value)
+		out[key] = &attr
+	}
+	return out
+}
+
+func globMetadata(match schema.RuleKubernetesMatch) services.MetadataGlobMap {
+	out := globAttrMap(match.MetadataGlob)
+	if out == nil {
+		out = services.MetadataGlobMap{}
+	}
+	if len(match.NamespaceGlob) > 0 {
+		attr := globAttr(match.NamespaceGlob)
+		out[services.AttrNamespace] = &attr
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func regexpAttr(value string) services.RegexpAttr {
+	if value == "" {
+		return services.RegexpAttr{}
+	}
+	return services.NewRegexp(value)
+}
+
+func regexpAttrMap(values map[string]string) map[string]*services.RegexpAttr {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]*services.RegexpAttr, len(values))
+	for key, value := range values {
+		attr := regexpAttr(value)
+		out[key] = &attr
+	}
+	return out
+}
+
+func regexMetadata(match schema.RuleKubernetesMatch) services.MetadataRegexMap {
+	out := regexpAttrMap(match.MetadataRegex)
+	if out == nil {
+		out = services.MetadataRegexMap{}
+	}
+	if match.NamespaceRegex != "" {
+		attr := regexpAttr(match.NamespaceRegex)
+		out[services.AttrNamespace] = &attr
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func applyV2Limits(cfg *obi.Config, limits schema.CaptureLimits, complete bool) {
