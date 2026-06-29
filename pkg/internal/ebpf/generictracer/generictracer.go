@@ -681,7 +681,14 @@ func (p *Tracer) functionModeProbe(span *config.CustomSpanSpec, cookie uint64,
 			return nil, err
 		}
 		if isPaired {
-			compiled.Spec.PairKind = obiebpf.ObiUSDTPairTid()
+			// Go yields the OS thread on I/O so TID-based pairing breaks
+			// for any function that makes RPC/network calls. Pair on the
+			// goroutine pointer instead (stable across goroutine moves).
+			if lang == obiebpf.FunctionLangGo {
+				compiled.Spec.PairKind = obiebpf.ObiUSDTPairG()
+			} else {
+				compiled.Spec.PairKind = obiebpf.ObiUSDTPairTid()
+			}
 		}
 		return compiled.Spec, nil
 	}

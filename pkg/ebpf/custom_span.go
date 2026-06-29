@@ -13,8 +13,10 @@ import (
 	"go.opentelemetry.io/obi/pkg/config"
 )
 
-// ObiUSDTPairTid exposes the pair_kind constant for paired function spans.
+// ObiUSDTPairTid / ObiUSDTPairG expose the pair_kind constants for paired
+// function spans (C: pid_tgid; Go: goroutine pointer).
 func ObiUSDTPairTid() uint8 { return obiUSDTPairTid }
+func ObiUSDTPairG() uint8   { return obiUSDTPairG }
 
 // CustomSpanArgKind mirrors enum custom_span_arg_kind in custom_span.h.
 type CustomSpanArgKind uint8

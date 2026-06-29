@@ -27,7 +27,8 @@ type CustomSpanRawEvent struct {
 	Kind        uint8
 	ArgCnt      uint8
 	HasTraceCtx uint8
-	_           uint32
+	PairKind    uint8
+	_           [3]byte
 	Cookie      uint64
 	Timestamp   uint64
 	GlobalPid   uint32
@@ -36,6 +37,7 @@ type CustomSpanRawEvent struct {
 	NsTid       uint32
 	PidNsID     uint32
 	_           uint32
+	GPtr        uint64
 	TraceID     [16]byte
 	SpanID      [8]byte
 	ArgKind     [customSpanMaxArgs]uint8

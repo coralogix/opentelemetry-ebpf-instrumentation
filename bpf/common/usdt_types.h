@@ -15,6 +15,7 @@ enum {
 enum obi_usdt_pair_kind {
     k_obi_usdt_pair_arg0 = 0, // legacy: pair on arg_int[0] value
     k_obi_usdt_pair_tid = 1,  // function-pair: pair on pid_tgid
+    k_obi_usdt_pair_g = 2,    // Go function-pair: pair on goroutine pointer (r14/x28)
 };
 
 enum obi_usdt_arg_type {

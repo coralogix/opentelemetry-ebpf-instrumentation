@@ -7,6 +7,7 @@
 #include <bpfcore/bpf_builtins.h>
 #include <bpfcore/bpf_helpers.h>
 #include <bpfcore/bpf_tracing.h>
+#include <bpfcore/utils.h>
 
 #include <generictracer/custom_span.h>
 #include <common/event_defs.h>
@@ -270,11 +271,12 @@ static __always_inline int custom_span_emit(struct pt_regs *ctx, u8 kind) {
     e->kind = kind;
     e->arg_cnt = 0;
     e->has_trace_ctx = 0;
-    e->_pad0 = 0;
-    e->_pad1 = 0;
-    e->_pad2 = 0;
+    e->pair_kind = spec->pair_kind;
     e->cookie = spec->cookie;
     e->timestamp = bpf_ktime_get_ns();
+    // Goroutine pointer: stable across goroutine scheduling onto different
+    // OS threads. Used as pair key for Go function_span; harmless otherwise.
+    e->g_ptr = (u64)GOROUTINE_PTR(ctx);
     custom_span_fill_pid(pid_tgid, e);
     custom_span_attach_trace_ctx(pid_tgid, e);
     custom_span_fill_args(ctx, spec, e);

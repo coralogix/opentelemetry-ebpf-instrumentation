@@ -19,12 +19,12 @@ import (
 )
 
 // CustomSpanDef binds a config span to its runtime cookie and the per-arg
-// attribute layout used to decode incoming events.
+// attribute layout used to decode incoming events. Pair-key source is
+// carried per-event via CustomSpanRawEvent.PairKind, not stored here.
 type CustomSpanDef struct {
 	Cookie    uint64
 	Name      string
 	IsPair    bool
-	PairOnTid bool // function-paired: pair entry+ret on (pid, tid, cookie)
 	usedSlots []customSpanAttrSlot
 }
 
@@ -36,10 +36,9 @@ type customSpanAttrSlot struct {
 
 func NewCustomSpanDef(span *config.CustomSpanSpec, cookie uint64) *CustomSpanDef {
 	def := &CustomSpanDef{
-		Cookie:    cookie,
-		Name:      span.Name,
-		IsPair:    span.IsUSDTSpan() || span.IsFunctionSpan(),
-		PairOnTid: span.IsFunctionSpan(),
+		Cookie: cookie,
+		Name:   span.Name,
+		IsPair: span.IsUSDTSpan() || span.IsFunctionSpan(),
 	}
 	for name, a := range span.Attrs {
 		if int(a.Arg) >= customSpanMaxArgs {
@@ -77,21 +76,25 @@ func (r *CustomSpanRegistry) Lookup(cookie uint64) (*CustomSpanDef, bool) {
 	return d, ok
 }
 
-// customSpanPairKey indexes the userspace pairing map. For USDT-paired spans,
-// Key = arg_int[0] (the "arg 0 is the correlation key" convention). For
-// function-paired spans, Key = global TID so entry uprobe + uretprobe pair on
-// the firing thread.
+// customSpanPairKey indexes the userspace pairing map. Pair-key source is
+// driven by ev.PairKind which mirrors spec.pair_kind: arg_int[0] for USDT
+// paired (the correlation-key convention), GlobalTid for C function_span,
+// GPtr (Go runtime g*) for Go function_span — TID is unstable on Go since
+// the scheduler moves goroutines between OS threads at every blocking call.
 type customSpanPairKey struct {
 	PID    uint32
 	Cookie uint64
 	Key    uint64
 }
 
-func makePairKey(def *CustomSpanDef, ev *CustomSpanRawEvent) customSpanPairKey {
+func makePairKey(_ *CustomSpanDef, ev *CustomSpanRawEvent) customSpanPairKey {
 	k := customSpanPairKey{PID: ev.GlobalPid, Cookie: ev.Cookie}
-	if def.PairOnTid {
+	switch ev.PairKind {
+	case 1: // obiUSDTPairTid
 		k.Key = uint64(ev.GlobalTid)
-	} else {
+	case 2: // obiUSDTPairG
+		k.Key = ev.GPtr
+	default: // obiUSDTPairArg0
 		k.Key = ev.ArgInt[0]
 	}
 	return k

@@ -8,6 +8,7 @@ package ebpf // import "go.opentelemetry.io/obi/pkg/ebpf"
 import (
 	"bytes"
 	"debug/elf"
+	"debug/gosym"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -78,10 +79,12 @@ type obiUSDTArgSpec struct {
 // obiUSDTMatchNameLen mirrors k_obi_usdt_match_name_len in usdt_types.h.
 const obiUSDTMatchNameLen = 64
 
-// obiUSDTPairTid mirrors k_obi_usdt_pair_tid — function-paired probes
-// pair entry+ret on pid_tgid. k_obi_usdt_pair_arg0 (=0) is the zero value
-// and used implicitly by usdt_span probes; no Go constant needed.
-const obiUSDTPairTid = uint8(1)
+// obiUSDTPair{Tid,G} mirror k_obi_usdt_pair_*. _arg0 (=0) is the implicit
+// USDT pairing on arg_int[0]; no Go constant needed.
+const (
+	obiUSDTPairTid = uint8(1)
+	obiUSDTPairG   = uint8(2)
+)
 
 type obiUSDTSpec struct {
 	Args         [obiUSDTMaxArgs]obiUSDTArgSpec
@@ -379,8 +382,25 @@ func lookupElfFunctionSym(elfFile *elf.File, function string) (uint64, uint64, b
 }
 
 func lookupGopclntabFunc(elfFile *elf.File, function string) (uint64, uint64, bool) {
-	tab, err := goexec.GoSymbolTable(elfFile)
-	if err != nil || tab == nil {
+	// Prefer goexec's moduledata-scanning resolver (matches gotracer). Fall
+	// back to the simple .text base when moduledata isn't recoverable —
+	// gosym only needs a runtime-text address to decode function entries.
+	if tab, err := goexec.GoSymbolTable(elfFile); err == nil && tab != nil {
+		if f := tab.LookupFunc(function); f != nil && f.End >= f.Entry {
+			return f.Entry, f.End - f.Entry, true
+		}
+	}
+	pcl := elfFile.Section(".gopclntab")
+	text := elfFile.Section(".text")
+	if pcl == nil || text == nil {
+		return 0, 0, false
+	}
+	data, err := pcl.Data()
+	if err != nil {
+		return 0, 0, false
+	}
+	tab, err := gosym.NewTable(nil, gosym.NewLineTable(data, text.Addr))
+	if err != nil {
 		return 0, 0, false
 	}
 	f := tab.LookupFunc(function)
