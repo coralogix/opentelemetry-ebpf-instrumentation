@@ -336,6 +336,24 @@ type EBPFEventContext struct {
 // custom_span event; ready=true when span is a completed result to emit.
 type CustomSpanRecordHandler func(record *ringbuf.Record) (request.Span, bool, bool, error)
 
+// DispatchCustomSpan runs ctx.CustomSpanHandler against record when the
+// record is an EVENT_CUSTOM_SPAN. Returns (span, skip, ok, err) where
+// ok=true means the record was a custom_span event and the caller
+// should stop further parsing.
+func DispatchCustomSpan(ctx *EBPFEventContext, record *ringbuf.Record) (span request.Span, skip, ok bool, err error) {
+	if ctx == nil || ctx.CustomSpanHandler == nil || len(record.RawSample) == 0 || record.RawSample[0] != EventTypeCustomSpan {
+		return request.Span{}, false, false, nil
+	}
+	s, ready, handled, herr := ctx.CustomSpanHandler(record)
+	if !handled {
+		return request.Span{}, false, false, nil
+	}
+	if !ready {
+		return request.Span{}, true, true, herr
+	}
+	return s, false, true, herr
+}
+
 var MisclassifiedEvents = make(chan MisclassifiedEvent)
 
 func ptlog() *slog.Logger { return slog.With("component", "ebpf.ProcessTracer") }

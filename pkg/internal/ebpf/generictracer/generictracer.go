@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -214,7 +215,7 @@ func (p *Tracer) initCustomSpan() {
 		cookie := uint64(idx) + 1
 		spanCopy := spans[idx]
 		rt.spans = append(rt.spans, customSpanBinding{cookie: cookie, span: spanCopy})
-		registry.Register(NewCustomSpanDef(&spanCopy, obiebpf.CompiledCustomSpanSpec{Cookie: cookie}))
+		registry.Register(NewCustomSpanDef(&spanCopy, cookie))
 	}
 
 	p.customSpan = rt
@@ -599,9 +600,9 @@ func (p *Tracer) USDTProbes() map[string][]*ebpfcommon.USDTProbeDesc {
 		}
 	}
 	if p.customSpan != nil {
-		for _, lib := range p.customSpanProbeLibs() {
-			out[lib] = append(out[lib], p.customSpanProbesForLib(lib)...)
-		}
+		// One bucket under the auto-discover marker covers both static
+		// stapsdt notes in the exe and libstapsdt-backed runtime .so's.
+		out[ebpfcommon.USDTAutoDiscoverLib] = append(out[ebpfcommon.USDTAutoDiscoverLib], p.customSpanProbes()...)
 	}
 	if len(out) == 0 {
 		return nil
@@ -609,28 +610,26 @@ func (p *Tracer) USDTProbes() map[string][]*ebpfcommon.USDTProbeDesc {
 	return out
 }
 
-// customSpanProbeLibs uses the auto-discover marker so probes attach wherever
-// they live — static stapsdt in the exe or libstapsdt-backed runtime .so.
-func (p *Tracer) customSpanProbeLibs() []string {
-	return []string{ebpfcommon.USDTAutoDiscoverLib}
-}
-
-// customSpanProbesForLib expands each span into its USDTProbeDesc(s).
+// customSpanProbes expands every configured span into its
+// USDTProbeDesc(s):
 //   - paired USDT span → 2 descs (start+end) sharing a cookie
 //   - single-shot USDT → 1 desc
 //   - function-mode (Function:) → 1 desc, symbol-based uprobe at entry
-func (p *Tracer) customSpanProbesForLib(_ string) []*ebpfcommon.USDTProbeDesc {
+//
+// Pre-5.15 kernels lack bpf_get_attach_cookie, so BPF resolves specs via
+// the IP map. Two custom_spans that target the same USDT probe (e.g.
+// `cache.hit` and a `cache.match` variant) share an IP and the
+// last-write-wins behavior masks one. We skip the match-filtered
+// variant on those kernels so the unfiltered base probe attaches
+// cleanly. Cookie-aware kernels keep both.
+func (p *Tracer) customSpanProbes() []*ebpfcommon.USDTProbeDesc {
 	if p.customSpan == nil {
 		return nil
 	}
-	// On pre-5.15 kernels bpf_get_attach_cookie is unavailable, so BPF
-	// resolves the spec via the IP map. Two custom_spans that target the
-	// same USDT probe (e.g. `cache.hit` and a `cache.match` variant) share
-	// an IP and last-write-wins masks one. The match-filter variant is
-	// optional sugar; skip it on no-cookie kernels so the unfiltered base
-	// probe wins and emits cleanly. Cookies make this disambiguation
-	// possible on 5.15+, where match-filter probes attach normally.
 	hasCookie := ebpfcommon.HasAttachCookie()
+	specMgr := p.customSpanSpecMgr()
+	specsMap := p.bpfObjects.ObiUsdtSpecs
+	ipMap := p.bpfObjects.ObiUsdtIpToSpecId
 	descs := make([]*ebpfcommon.USDTProbeDesc, 0, 2*len(p.customSpan.spans))
 	for _, binding := range p.customSpan.spans {
 		span := binding.span
@@ -641,68 +640,75 @@ func (p *Tracer) customSpanProbesForLib(_ string) []*ebpfcommon.USDTProbeDesc {
 		}
 
 		if span.IsAnyFunction() {
-			spanCopy := span
-			cookieCopy := cookie
-			isPaired := span.IsFunctionSpan()
-			entryProg := p.bpfObjects.ObiCustomSpanEvent
-			var retProg *ebpf.Program
-			if isPaired {
-				entryProg = p.bpfObjects.ObiCustomSpanStart
-				retProg = p.bpfObjects.ObiCustomSpanFuncRet
-			}
-			builder := func(elfFile any) (any, error) {
-				ef, _ := elfFile.(*elf.File)
-				lang := obiebpf.FunctionLangC
-				if ef != nil {
-					lang = obiebpf.DetectFunctionLang(ef)
-				}
-				compiled, err := obiebpf.BuildGoABISpec(&spanCopy, cookieCopy, runtime.GOARCH, lang)
-				if err != nil {
-					return nil, err
-				}
-				if isPaired {
-					compiled.Spec.PairKind = obiebpf.ObiUSDTPairTid()
-				}
-				return compiled.Spec, nil
-			}
-			descs = append(descs, &ebpfcommon.USDTProbeDesc{
-				Function:          span.FunctionSymbol(),
-				BuildFunctionSpec: builder,
-				Program:           entryProg,
-				ReturnProgram:     retProg,
-				SpecsMap:          p.bpfObjects.ObiUsdtSpecs,
-				IPMap:             p.bpfObjects.ObiUsdtIpToSpecId,
-				SpecManager:       p.customSpanSpecMgr(),
-				Cookie:            cookie,
-			})
+			descs = append(descs, p.functionModeProbe(&span, cookie, specMgr, specsMap, ipMap))
 			continue
 		}
 
-		rewrite := obiebpf.MakeCustomSpanSpecRewriteWithMatch(&span, cookie)
+		rewrite := obiebpf.MakeCustomSpanSpecRewrite(&span, cookie)
 		switch {
 		case span.IsUSDTSpan():
 			descs = append(descs,
-				p.makeCustomSpanProbe(span.USDTStartProbe(), p.bpfObjects.ObiCustomSpanStart, cookie, rewrite),
-				p.makeCustomSpanProbe(span.USDTEndProbe(), p.bpfObjects.ObiCustomSpanEnd, cookie, rewrite),
+				p.usdtSpanProbe(span.USDTStartProbe(), p.bpfObjects.ObiCustomSpanStart, cookie, rewrite, specMgr, specsMap, ipMap),
+				p.usdtSpanProbe(span.USDTEndProbe(), p.bpfObjects.ObiCustomSpanEnd, cookie, rewrite, specMgr, specsMap, ipMap),
 			)
 		case span.IsUSDTNoRet():
 			descs = append(descs,
-				p.makeCustomSpanProbe(span.USDTNoRetProbe(), p.bpfObjects.ObiCustomSpanEvent, cookie, rewrite),
+				p.usdtSpanProbe(span.USDTNoRetProbe(), p.bpfObjects.ObiCustomSpanEvent, cookie, rewrite, specMgr, specsMap, ipMap),
 			)
 		}
 	}
 	return descs
 }
 
-func (p *Tracer) makeCustomSpanProbe(probeIdent string, program *ebpf.Program, cookie uint64, rewrite ebpfcommon.USDTSpecRewriter) *ebpfcommon.USDTProbeDesc {
+func (p *Tracer) functionModeProbe(span *config.CustomSpanSpec, cookie uint64,
+	specMgr *ebpfcommon.USDTSpecManager, specsMap, ipMap *ebpf.Map,
+) *ebpfcommon.USDTProbeDesc {
+	isPaired := span.IsFunctionSpan()
+	entryProg := p.bpfObjects.ObiCustomSpanEvent
+	var retProg *ebpf.Program
+	if isPaired {
+		entryProg = p.bpfObjects.ObiCustomSpanStart
+		retProg = p.bpfObjects.ObiCustomSpanFuncRet
+	}
+	builder := func(elfFile any) (any, error) {
+		ef, _ := elfFile.(*elf.File)
+		lang := obiebpf.FunctionLangC
+		if ef != nil {
+			lang = obiebpf.DetectFunctionLang(ef)
+		}
+		compiled, err := obiebpf.BuildFunctionABISpec(span, cookie, runtime.GOARCH, lang)
+		if err != nil {
+			return nil, err
+		}
+		if isPaired {
+			compiled.Spec.PairKind = obiebpf.ObiUSDTPairTid()
+		}
+		return compiled.Spec, nil
+	}
+	return &ebpfcommon.USDTProbeDesc{
+		Function:          span.FunctionSymbol(),
+		BuildFunctionSpec: builder,
+		Program:           entryProg,
+		ReturnProgram:     retProg,
+		SpecsMap:          specsMap,
+		IPMap:             ipMap,
+		SpecManager:       specMgr,
+		Cookie:            cookie,
+	}
+}
+
+func (p *Tracer) usdtSpanProbe(probeIdent string, program *ebpf.Program, cookie uint64,
+	rewrite ebpfcommon.USDTSpecRewriter,
+	specMgr *ebpfcommon.USDTSpecManager, specsMap, ipMap *ebpf.Map,
+) *ebpfcommon.USDTProbeDesc {
 	provider, name, _ := splitProbeIdent(probeIdent)
 	return &ebpfcommon.USDTProbeDesc{
 		Provider:    provider,
 		Name:        name,
 		Program:     program,
-		SpecsMap:    p.bpfObjects.ObiUsdtSpecs,
-		IPMap:       p.bpfObjects.ObiUsdtIpToSpecId,
-		SpecManager: p.customSpanSpecMgr(),
+		SpecsMap:    specsMap,
+		IPMap:       ipMap,
+		SpecManager: specMgr,
 		Cookie:      cookie,
 		RewriteSpec: rewrite,
 	}
@@ -711,12 +717,7 @@ func (p *Tracer) makeCustomSpanProbe(probeIdent string, program *ebpf.Program, c
 // splitProbeIdent splits a "provider:name" identifier as validated by the
 // config layer.
 func splitProbeIdent(probe string) (string, string, bool) {
-	for i := 0; i < len(probe); i++ {
-		if probe[i] == ':' {
-			return probe[:i], probe[i+1:], true
-		}
-	}
-	return probe, "", false
+	return strings.Cut(probe, ":")
 }
 
 // handleCustomSpanRecord dispatches an EVENT_CUSTOM_SPAN ringbuf record. Returns
@@ -934,8 +935,8 @@ func (p *Tracer) processSharedRingbufRecord(
 		return request.Span{}, true, err
 	}
 
-	if span, ready, handled, err := p.handleCustomSpanRecord(record); handled {
-		if !ready {
+	if span, skip, ok, err := ebpfcommon.DispatchCustomSpan(p.eventCtx, record); ok {
+		if skip {
 			return request.Span{}, true, err
 		}
 		return span, false, err

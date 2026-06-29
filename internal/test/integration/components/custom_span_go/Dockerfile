@@ -25,7 +25,8 @@ WORKDIR /src
 COPY internal/test/integration/components/custom_span_go/go.mod ./go.mod
 COPY internal/test/integration/components/custom_span_go/go.sum ./go.sum
 COPY internal/test/integration/components/custom_span_go/main.go ./main.go
-RUN CGO_ENABLED=1 go build -o /custom_span_go .
+# -ldflags="-s -w" strips .symtab so OBI must resolve main.processOrder via .gopclntab.
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /custom_span_go .
 
 FROM debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
 

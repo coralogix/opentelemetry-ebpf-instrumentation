@@ -40,26 +40,40 @@ ebpf:
     ttl: 1m        # how long to wait for an end event after a start
     spans:
       - name: order.process
-        on: { usdt_span: "myapp:order" }
+        on:
+          usdt_span: myapp:order
         attrs:
-          order_id: { arg: 0 }
-          customer: { arg: 1, type: string }
+          order_id:
+            arg: 0
+          customer:
+            arg: 1
+            type: string
 
       - name: cache.hit
-        on: { usdt_noret: "myapp:cache_hit" }
+        on:
+          usdt_noret: myapp:cache_hit
         attrs:
-          key: { arg: 0, type: string }
+          key:
+            arg: 0
+            type: string
 
       - name: billing.charge
-        on: { function_span: "billing::Service::charge" }
+        on:
+          function_span: billing::Service::charge
         attrs:
-          tenant:     { arg: 0, type: string }
-          request_id: { arg: 2, type: u64 }
+          tenant:
+            arg: 0
+            type: string
+          request_id:
+            arg: 2
+            type: u64
 
       - name: py.process_paid_order
         on:
-          usdt_noret: "python:function__entry"
-          match: { arg: 1, value: "process_paid_order" }
+          usdt_noret: python:function__entry
+          match:
+            arg: 1
+            value: process_paid_order
 ```
 
 Each span needs a `name` and exactly one **target** under `on:`. There
@@ -86,9 +100,14 @@ span) to the probe argument and how to read it.
 
 ```yaml
 attrs:
-  order_id: { arg: 0 }                   # integer, sign+width auto-derived from ELF (USDT only)
-  customer: { arg: 1, type: string }     # always specify `type: string` for strings
-  status:   { arg: 2, type: i32 }        # explicit integer type (required for function-mode)
+  order_id: # integer, sign+width auto-derived from ELF (USDT only)
+    arg: 0
+  customer: # always specify `type: string` for strings
+    arg: 1
+    type: string
+  status: # explicit integer type (required for function-mode)
+    arg: 2
+    type: i32
 ```
 
 String attributes are read up to 128 bytes per fire.
@@ -125,6 +144,10 @@ matching calling convention. The Go-string read uses the regabi-emitted
 `{ptr, len}` pair from non-consecutive registers on amd64 (AX/BX/CX/DI/SI/R8/…),
 not a `reg_off+8` adjacency assumption.
 
+Go binaries stripped with `-ldflags="-s -w"` keep `.gopclntab`. OBI
+resolves `function_span: "main.Foo"` against it when `.symtab` is empty,
+so production-built Go services work zero-code.
+
 The `match:` modifier needs `bpf_get_attach_cookie()` (kernel ≥5.15) to
 disambiguate two `custom_spans` that share a probe IP. On older kernels
 OBI silently skips the `match:`-filtered span and keeps the unfiltered
@@ -153,10 +176,14 @@ void process_order(uint64_t order_id, const char *customer) {
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 USDT paired with folly (semaphore-gated; skipped when no eBPF consumer):
@@ -187,10 +214,15 @@ __attribute__((noinline)) void process_order(uint64_t order_id,
 
 ```yaml
 - name: order.func
-  on: { function_span: "process_order" }
+  on:
+    function_span: process_order
   attrs:
-    order_id: { arg: 0, type: u64 }
-    customer: { arg: 1, type: string }     # C ABI: arg 1 = RSI / x1
+    order_id:
+      arg: 0
+      type: u64
+    customer: # C ABI: arg 1 = RSI / x1
+      arg: 1
+      type: string
 ```
 
 #### Rust — via the [`usdt`](https://crates.io/crates/usdt) crate
@@ -213,10 +245,14 @@ fn process_order(id: u64, customer: &str) {
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 Function-mode paired (Rust auto-detected from ELF; uses Go-style
@@ -233,10 +269,15 @@ pub fn process_order(id: u64, customer: &str) {
 
 ```yaml
 - name: order.func
-  on: { function_span: "process_order" }
+  on:
+    function_span: process_order
   attrs:
-    order_id: { arg: 0, type: u64 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+      type: u64
+    customer:
+      arg: 1
+      type: string
 ```
 
 #### Go — via [`mmcshane/salp`](https://github.com/mmcshane/salp)
@@ -258,10 +299,14 @@ func processOrder(id uint64, customer string) {
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 Function-mode paired (note the `//go:noinline` directive so the symbol
@@ -276,10 +321,15 @@ func processOrder(id uint64, customer string) {
 
 ```yaml
 - name: order.func
-  on: { function_span: "main.processOrder" }
+  on:
+    function_span: main.processOrder
   attrs:
-    order_id: { arg: 0, type: u64 }        # Go regabi: x0 / AX
-    customer: { arg: 1, type: string }     # {ptr, len} in x1+x2 / BX+CX
+    order_id: # Go regabi: x0 / AX
+      arg: 0
+      type: u64
+    customer: # {ptr, len} in x1+x2 / BX+CX
+      arg: 1
+      type: string
 ```
 
 #### Python — via [`python-stapsdt`](https://pypi.org/project/stapsdt/)
@@ -303,10 +353,14 @@ def process_order(order_id, customer):
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 `match:` on the builtin `python:function__entry` — no extra
@@ -324,8 +378,10 @@ def process_paid_order(order_id: int, customer: str) -> None:
 ```yaml
 - name: py.process_paid_order
   on:
-    usdt_noret: "python:function__entry"
-    match: { arg: 1, value: "process_paid_order" }
+    usdt_noret: python:function__entry
+    match:
+      arg: 1
+      value: process_paid_order
 ```
 
 #### Ruby — via [`ruby-stapsdt`](https://github.com/rock-core/ruby-stapsdt)
@@ -349,10 +405,14 @@ end
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 #### Java — JNI bridge over libstapsdt
@@ -375,10 +435,14 @@ void processOrder(long orderId, String customer) {
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 #### Node.js — Node-API addon over libstapsdt
@@ -401,10 +465,14 @@ function processOrder(orderId, customer) {
 
 ```yaml
 - name: order.process
-  on: { usdt_span: "checkout:order" }
+  on:
+    usdt_span: checkout:order
   attrs:
-    order_id: { arg: 0 }
-    customer: { arg: 1, type: string }
+    order_id:
+      arg: 0
+    customer:
+      arg: 1
+      type: string
 ```
 
 ### Attribute and matching cheat sheet
@@ -434,32 +502,48 @@ ebpf:
     ttl: 1m
     spans:
       - name: order.process
-        on: { usdt_span: "checkout:order" }
+        on:
+          usdt_span: checkout:order
         attrs:
-          order_id: { arg: 0 }
-          customer: { arg: 1, type: string }
+          order_id:
+            arg: 0
+          customer:
+            arg: 1
+            type: string
 
       - name: cache.hit
-        on: { usdt_noret: "checkout:cache_hit" }
+        on:
+          usdt_noret: checkout:cache_hit
         attrs:
-          key: { arg: 0, type: string }
+          key:
+            arg: 0
+            type: string
 
       - name: redis.get
         on:
-          usdt_noret: "checkout:redis_cmd"
-          match: { arg: 0, value: "GET" }
+          usdt_noret: checkout:redis_cmd
+          match:
+            arg: 0
+            value: GET
         attrs:
-          key: { arg: 1, type: string }
+          key:
+            arg: 1
+            type: string
 ```
 
 ### Time a Go function without source changes
 
 ```yaml
 - name: billing.charge
-  on: { function_span: "billing.(*Service).Charge" }
+  on:
+    function_span: billing.(*Service).Charge
   attrs:
-    tenant:     { arg: 0, type: string }
-    request_id: { arg: 2, type: u64 }
+    tenant:
+      arg: 0
+      type: string
+    request_id:
+      arg: 2
+      type: u64
 ```
 
 OBI detects Go from the binary's ELF, reads `tenant` as a Go `{ptr, len}`
@@ -470,8 +554,10 @@ string, and emits a span whose duration is the entry-to-return time.
 ```yaml
 - name: py.process_paid_order
   on:
-    usdt_noret: "python:function__entry"
-    match: { arg: 1, value: "process_paid_order" }
+    usdt_noret: python:function__entry
+    match:
+      arg: 1
+      value: process_paid_order
 ```
 
 One uprobe attached to the high-frequency `python:function__entry`

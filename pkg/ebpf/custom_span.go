@@ -116,65 +116,50 @@ func CompileCustomSpanSpec(
 const CustomSpanStringSize = config.CustomSpanStringSize
 
 // MakeCustomSpanSpecRewrite captures span+cookie for use as a
-// USDTSpecRewriter on the per-probe target.
+// USDTSpecRewriter on the per-probe target. Compiles attr-driven spec
+// rewrites and installs an in-BPF match-value filter when span.HasMatch().
+// At fire time, BPF compares arg_str[Match.Arg] to spec.MatchName
+// byte-for-byte and discards the event on mismatch.
 func MakeCustomSpanSpecRewrite(span *config.CustomSpanSpec, cookie uint64) func(any) (any, error) {
 	return func(in any) (any, error) {
 		spec, ok := in.(obiUSDTSpec)
 		if !ok {
-			return nil, fmt.Errorf("MakeCustomSpanSpecRewrite: expected obiUSDTSpec, got %T", in)
-		}
-		compiled, err := CompileCustomSpanSpec(spec, span, cookie)
-		if err != nil {
-			return nil, err
-		}
-		return compiled.Spec, nil
-	}
-}
-
-// MakeCustomSpanSpecRewriteWithMatch is the same as MakeCustomSpanSpecRewrite
-// but also installs an in-BPF match-value filter on the arg at Match.Arg.
-// At fire time, BPF compares arg_str[Match.Arg] to spec.MatchName byte-for-byte
-// and discards the event on mismatch.
-func MakeCustomSpanSpecRewriteWithMatch(span *config.CustomSpanSpec, cookie uint64) func(any) (any, error) {
-	return func(in any) (any, error) {
-		spec, ok := in.(obiUSDTSpec)
-		if !ok {
-			return nil, fmt.Errorf("MakeCustomSpanSpecRewriteWithMatch: expected obiUSDTSpec, got %T", in)
+			return nil, fmt.Errorf("custom_span rewrite: expected obiUSDTSpec, got %T", in)
 		}
 		compiled, err := CompileCustomSpanSpec(spec, span, cookie)
 		if err != nil {
 			return nil, err
 		}
 		out := compiled.Spec
-		if span.HasMatch() {
-			m := span.On.Match
-			if uint16(m.Arg) >= spec.ArgCount {
-				return nil, fmt.Errorf("%w: match.arg %d exceeds probe arg count %d",
-					ErrCustomSpanDrift, m.Arg, spec.ArgCount)
-			}
-			// Coerce both `reg` (the value IS a user pointer to a NUL-string)
-			// and `reg_deref` (the value is `*(reg+off)`, which for string args
-			// is usually still a pointer the caller wants us to deref) into a
-			// string read. This makes match work on USDT macro forms that emit
-			// either encoding.
-			argT := out.Args[m.Arg].ArgType
-			if argT == obiUSDTArgReg || argT == obiUSDTArgRegDeref {
-				out.Args[m.Arg] = obiUSDTArgSpec{
-					RegOff:  out.Args[m.Arg].RegOff,
-					ValOff:  uint64(obiUSDTMatchNameLen),
-					ArgType: obiUSDTArgRegDerefStr,
-				}
-			}
-			// Ensure the BPF fill_args loop processes the match arg even when
-			// the user declared no attrs on it. Without this, arg_kind stays
-			// `none` and match_name_ok always returns 0.
-			if uint16(m.Arg)+1 > out.ArgCount {
-				out.ArgCount = uint16(m.Arg) + 1
-			}
-			out.MatchArgIdx = m.Arg
-			out.MatchEnabled = 1
-			copyMatchName(&out.MatchName, m.Value)
+		if !span.HasMatch() {
+			return out, nil
 		}
+		m := span.On.Match
+		if uint16(m.Arg) >= spec.ArgCount {
+			return nil, fmt.Errorf("%w: match.arg %d exceeds probe arg count %d",
+				ErrCustomSpanDrift, m.Arg, spec.ArgCount)
+		}
+		// Coerce both `reg` (the value IS a user pointer to a NUL-string)
+		// and `reg_deref` (the value is `*(reg+off)`, which for string args
+		// is usually still a pointer the caller wants us to deref) into a
+		// string read. This makes match work on USDT macro forms that emit
+		// either encoding.
+		if t := out.Args[m.Arg].ArgType; t == obiUSDTArgReg || t == obiUSDTArgRegDeref {
+			out.Args[m.Arg] = obiUSDTArgSpec{
+				RegOff:  out.Args[m.Arg].RegOff,
+				ValOff:  uint64(obiUSDTMatchNameLen),
+				ArgType: obiUSDTArgRegDerefStr,
+			}
+		}
+		// Ensure the BPF fill_args loop processes the match arg even when
+		// the user declared no attrs on it. Without this, arg_kind stays
+		// `none` and match_name_ok always returns 0.
+		if uint16(m.Arg)+1 > out.ArgCount {
+			out.ArgCount = uint16(m.Arg) + 1
+		}
+		out.MatchArgIdx = m.Arg
+		out.MatchEnabled = 1
+		copyMatchName(&out.MatchName, m.Value)
 		return out, nil
 	}
 }
@@ -188,29 +173,33 @@ func copyMatchName(dst *[obiUSDTMatchNameLen]byte, s string) {
 	dst[n] = 0
 }
 
+// amd64GoRegabiOffsets maps Go regabi arg index → pt_regs byte offset
+// (AX, BX, CX, DI, SI, R8, R9, R10, R11). Used for amd64 function-mode
+// spans whose target binary is Go (1.17+).
+var amd64GoRegabiOffsets = [...]int16{80, 40, 88, 112, 104, 72, 64, 56, 48}
+
+// amd64SysVOffsets maps System V AMD64 integer arg index → pt_regs byte
+// offset (RDI, RSI, RDX, RCX, R8, R9). Used for amd64 C function-mode
+// spans.
+var amd64SysVOffsets = [...]int16{112, 104, 96, 88, 72, 64}
+
 // fnArgRegOffset maps a function-mode argument index to its pt_regs byte
 // offset. The selected ABI (Go regabi vs C System V) depends on the target
-// binary's detected language.
+// binary's detected language. arm64 shares x0..x7 between AAPCS64 and Go
+// regabi, so language doesn't matter there.
 func fnArgRegOffset(arch string, idx uint8, lang FunctionLang) (int16, bool) {
 	switch arch {
 	case "arm64":
-		// AAPCS64 and Go regabi share x0..x7 for the first eight scalar args.
 		if idx <= 7 {
 			return int16(idx) * 8, true
 		}
 	case "amd64":
+		table := amd64SysVOffsets[:]
 		if lang == FunctionLangGo {
-			// Go regabi: AX,BX,CX,DI,SI,R8,R9,R10,R11.
-			off := []int16{80, 40, 88, 112, 104, 72, 64, 56, 48}
-			if int(idx) < len(off) {
-				return off[idx], true
-			}
-		} else {
-			// System V AMD64 (C): RDI,RSI,RDX,RCX,R8,R9.
-			off := []int16{112, 104, 96, 88, 72, 64}
-			if int(idx) < len(off) {
-				return off[idx], true
-			}
+			table = amd64GoRegabiOffsets[:]
+		}
+		if int(idx) < len(table) {
+			return table[idx], true
 		}
 	}
 	return 0, false
@@ -237,11 +226,12 @@ func DetectFunctionLang(elfFile *elf.File) FunctionLang {
 	return FunctionLangC
 }
 
-// BuildGoABISpec synthesizes a USDT spec mirror for a function uprobe.
-// `attrs[N].arg` is the register-index. For Go strings use the {ptr,len}
-// 2-register layout; for C strings read NUL-terminated from a single
-// pointer arg. The arch selects the pt_regs offset table (arm64 / amd64).
-func BuildGoABISpec(span *config.CustomSpanSpec, cookie uint64, arch string, lang FunctionLang) (CompiledCustomSpanSpec, error) {
+// BuildFunctionABISpec synthesizes a USDT spec mirror for a function
+// uprobe. `attrs[N].arg` is the register-index. Strings use the Go
+// {ptr,len} 2-register layout when lang==FunctionLangGo and the C
+// NUL-terminated single-pointer layout otherwise. The arch selects the
+// pt_regs offset table (arm64 / amd64).
+func BuildFunctionABISpec(span *config.CustomSpanSpec, cookie uint64, arch string, lang FunctionLang) (CompiledCustomSpanSpec, error) {
 	out := CompiledCustomSpanSpec{Cookie: cookie}
 	out.Spec.Cookie = cookie
 

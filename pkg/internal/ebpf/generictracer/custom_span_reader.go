@@ -34,9 +34,9 @@ type customSpanAttrSlot struct {
 	Type   config.CustomSpanAttrType
 }
 
-func NewCustomSpanDef(span *config.CustomSpanSpec, compiled obiebpf.CompiledCustomSpanSpec) *CustomSpanDef {
+func NewCustomSpanDef(span *config.CustomSpanSpec, cookie uint64) *CustomSpanDef {
 	def := &CustomSpanDef{
-		Cookie:    compiled.Cookie,
+		Cookie:    cookie,
 		Name:      span.Name,
 		IsPair:    span.IsUSDTSpan() || span.IsFunctionSpan(),
 		PairOnTid: span.IsFunctionSpan(),
@@ -195,19 +195,7 @@ func (b *CustomSpanBuilder) Build(ev *CustomSpanRawEvent) (request.Span, bool, e
 		if !def.IsPair {
 			return request.Span{}, false, nil
 		}
-		b.pairer.putStart(makePairKey(def, ev), customSpanPending{
-			StartedAt:   b.pairer.now(),
-			StartTimeNs: ev.Timestamp,
-			Attrs:       extractAttrs(def, ev),
-			HasTraceCtx: ev.HasTraceCtx != 0,
-			TraceID:     trace.TraceID(ev.TraceID),
-			SpanID:      trace.SpanID(ev.SpanID),
-			GlobalPid:   ev.GlobalPid,
-			GlobalTid:   ev.GlobalTid,
-			NsPid:       ev.NsPid,
-			NsTid:       ev.NsTid,
-			PidNsID:     ev.PidNsID,
-		})
+		b.pairer.putStart(makePairKey(def, ev), b.newPending(def, ev))
 		return request.Span{}, false, nil
 
 	case uint8(obiebpf.CustomSpanKindEnd):
@@ -224,22 +212,26 @@ func (b *CustomSpanBuilder) Build(ev *CustomSpanRawEvent) (request.Span, bool, e
 		if def.IsPair {
 			return request.Span{}, false, nil
 		}
-		pending := customSpanPending{
-			StartedAt:   b.pairer.now(),
-			StartTimeNs: ev.Timestamp,
-			Attrs:       extractAttrs(def, ev),
-			HasTraceCtx: ev.HasTraceCtx != 0,
-			TraceID:     trace.TraceID(ev.TraceID),
-			SpanID:      trace.SpanID(ev.SpanID),
-			GlobalPid:   ev.GlobalPid,
-			GlobalTid:   ev.GlobalTid,
-			NsPid:       ev.NsPid,
-			NsTid:       ev.NsTid,
-			PidNsID:     ev.PidNsID,
-		}
+		pending := b.newPending(def, ev)
 		return composeSpan(def, &pending, ev, ev.Timestamp), true, nil
 	}
 	return request.Span{}, false, nil
+}
+
+func (b *CustomSpanBuilder) newPending(def *CustomSpanDef, ev *CustomSpanRawEvent) customSpanPending {
+	return customSpanPending{
+		StartedAt:   b.pairer.now(),
+		StartTimeNs: ev.Timestamp,
+		Attrs:       extractAttrs(def, ev),
+		HasTraceCtx: ev.HasTraceCtx != 0,
+		TraceID:     trace.TraceID(ev.TraceID),
+		SpanID:      trace.SpanID(ev.SpanID),
+		GlobalPid:   ev.GlobalPid,
+		GlobalTid:   ev.GlobalTid,
+		NsPid:       ev.NsPid,
+		NsTid:       ev.NsTid,
+		PidNsID:     ev.PidNsID,
+	}
 }
 
 func extractAttrs(def *CustomSpanDef, ev *CustomSpanRawEvent) map[string]string {
@@ -273,7 +265,8 @@ func applyAttrs(def *CustomSpanDef, ev *CustomSpanRawEvent, out map[string]strin
 func composeSpan(def *CustomSpanDef, pending *customSpanPending, ev *CustomSpanRawEvent, endNs uint64) request.Span {
 	attrs := pending.Attrs
 	if def.IsPair {
-		mergeEndAttrs(def, ev, attrs)
+		// Overlay end-side attrs (e.g. status code) onto the start map.
+		applyAttrs(def, ev, attrs)
 	}
 	span := request.Span{
 		Type:         request.EventTypeCustomSpan,
@@ -296,10 +289,4 @@ func composeSpan(def *CustomSpanDef, pending *customSpanPending, ev *CustomSpanR
 		span.ParentSpanID = pending.SpanID
 	}
 	return span
-}
-
-// mergeEndAttrs overlays end-side attrs (e.g. status code) onto a map
-// populated by extractAttrs from the start event.
-func mergeEndAttrs(def *CustomSpanDef, ev *CustomSpanRawEvent, into map[string]string) {
-	applyAttrs(def, ev, into)
 }

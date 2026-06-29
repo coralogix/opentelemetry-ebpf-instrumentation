@@ -199,17 +199,10 @@ func (c *CustomSpanConfig) Validate() error {
 
 func (s *CustomSpanSpec) normalizeAndValidate() error {
 	forms := 0
-	if s.IsUSDTNoRet() {
-		forms++
-	}
-	if s.IsUSDTSpan() {
-		forms++
-	}
-	if s.IsFunctionNoRet() {
-		forms++
-	}
-	if s.IsFunctionSpan() {
-		forms++
+	for _, set := range []bool{s.IsUSDTNoRet(), s.IsUSDTSpan(), s.IsFunctionNoRet(), s.IsFunctionSpan()} {
+		if set {
+			forms++
+		}
 	}
 	if forms != 1 {
 		return errors.New("on: exactly one of {usdt_noret, usdt_span, function_noret, function_span} must be set")
@@ -263,17 +256,22 @@ func (s *CustomSpanSpec) normalizeAndValidate() error {
 }
 
 // probeIdentifiers lists the distinct attach targets for this span. Used
-// for duplicate detection only.
+// for duplicate detection only. Match-filtered USDT variants are
+// disambiguated by appending the match value so a base probe + a
+// `match:`-filtered probe can coexist (cookies separate them at runtime
+// on kernel ≥5.15).
 func (s *CustomSpanSpec) probeIdentifiers() []string {
+	suffix := ""
+	if s.HasMatch() {
+		suffix = "/" + s.On.Match.Value
+	}
 	switch {
 	case s.IsAnyFunction():
 		return []string{"function:" + s.FunctionSymbol()}
 	case s.IsUSDTSpan():
-		return []string{s.On.USDTSpan + CustomSpanStartSuffix, s.On.USDTSpan + CustomSpanEndSuffix}
-	case s.IsUSDTNoRet() && s.HasMatch():
-		return []string{s.On.USDTNoRet + "/" + s.On.Match.Value}
+		return []string{s.On.USDTSpan + CustomSpanStartSuffix + suffix, s.On.USDTSpan + CustomSpanEndSuffix + suffix}
 	case s.IsUSDTNoRet():
-		return []string{s.On.USDTNoRet}
+		return []string{s.On.USDTNoRet + suffix}
 	}
 	return nil
 }

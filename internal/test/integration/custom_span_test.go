@@ -64,28 +64,29 @@ func TestCustomSpan(t *testing.T) {
 
 	// bpf_get_attach_cookie landed in 5.15 (RHEL 8 / 4.18 backport lacks
 	// it). Below 5.15 OBI skips match-filter custom_span probes — see
-	// customSpanProbesForLib — so the test must not require them.
+	// customSpanProbes — so the test must not require them.
 	cookieKernel := kernelSupportsAttachCookie()
 	refCtrKernel := ebpfcommon.HasUprobeRefCtrOffset()
 	tracesPath := path.Join(pathOutput, "custom-span-traces.json")
+	flavors := []struct {
+		port, customer, cachePrefix string
+		idBase                      int
+	}{
+		{customSpanCPort, "alice", "user", 0},
+		{customSpanPythonPort, "bob", "cart", 100},
+		{customSpanRubyPort, "carol", "stock", 200},
+		{customSpanGoPort, "dave", "sku", 300},
+		{customSpanJavaPort, "eve", "jdk", 400},
+		{customSpanNodejsPort, "frank", "node", 500},
+		{customSpanCppPort, "grace", "cpp", 600},
+		{customSpanRustPort, "heidi", "rust", 700},
+	}
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		for i := 1; i <= 5; i++ {
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=alice%d", customSpanCPort, i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=user:%d", customSpanCPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=bob%d", customSpanPythonPort, 100+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=cart:%d", customSpanPythonPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=carol%d", customSpanRubyPort, 200+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=stock:%d", customSpanRubyPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=dave%d", customSpanGoPort, 300+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=sku:%d", customSpanGoPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=eve%d", customSpanJavaPort, 400+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=jdk:%d", customSpanJavaPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=frank%d", customSpanNodejsPort, 500+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=node:%d", customSpanNodejsPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=grace%d", customSpanCppPort, 600+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=cpp:%d", customSpanCppPort, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=heidi%d", customSpanRustPort, 700+i, i), http.StatusOK)
-			ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=rust:%d", customSpanRustPort, i), http.StatusOK)
+			for _, f := range flavors {
+				ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/order?id=%d&customer=%s%d", f.port, f.idBase+i, f.customer, i), http.StatusOK)
+				ti.DoHTTPGet(ct, fmt.Sprintf("http://localhost:%s/cache?key=%s:%d", f.port, f.cachePrefix, i), http.StatusOK)
+			}
 		}
 		spans := readCustomSpanSpecs(ct, tracesPath)
 		assert.NotEmpty(ct, spansByName(spans, "order.process"), "expected C paired spans")
@@ -117,7 +118,7 @@ func TestCustomSpan(t *testing.T) {
 		// Match-filter probes require bpf_get_attach_cookie to disambiguate
 		// multiple specs at the same USDT probe IP. Kernels older than 5.15
 		// fall back to the IP-keyed spec map (last-write-wins), and OBI
-		// skips match-filter registrations there — see customSpanProbesForLib.
+		// skips match-filter registrations there — see customSpanProbes.
 		if cookieKernel {
 			goMatch := spansByName(spans, "cache.match.go")
 			assert.NotEmpty(ct, goMatch, "expected Go match-filter span on key=sku:3")
@@ -147,7 +148,7 @@ func TestCustomSpan(t *testing.T) {
 				}
 			}
 		}
-		assert.NotEmpty(ct, spansByName(spans, "order.func.c"), "expected C function-mode spans (P1)")
+		assert.NotEmpty(ct, spansByName(spans, "order.func.c"), "expected C function-mode spans")
 		assert.NotEmpty(ct, spansByName(spans, "cache.func.c"), "expected C paired function spans")
 		// order.process.cpp / .rust use semaphore-gated USDT bodies that
 		// can't fire on kernels without uprobe ref_ctr_offset support.
@@ -182,14 +183,13 @@ func waitForCustomSpanServices(t *testing.T) {
 }
 
 type otlpSpan struct {
-	Name       string         `json:"name"`
-	Attributes []otlpAttr     `json:"attributes"`
-	StartUnix  string         `json:"startTimeUnixNano"`
-	EndUnix    string         `json:"endTimeUnixNano"`
-	Parent     string         `json:"parentSpanId"`
-	TraceID    string         `json:"traceId"`
-	SpanID     string         `json:"spanId"`
-	Extra      map[string]any `json:"-"`
+	Name       string     `json:"name"`
+	Attributes []otlpAttr `json:"attributes"`
+	StartUnix  string     `json:"startTimeUnixNano"`
+	EndUnix    string     `json:"endTimeUnixNano"`
+	Parent     string     `json:"parentSpanId"`
+	TraceID    string     `json:"traceId"`
+	SpanID     string     `json:"spanId"`
 }
 
 type otlpAttr struct {

@@ -78,11 +78,10 @@ type obiUSDTArgSpec struct {
 // obiUSDTMatchNameLen mirrors k_obi_usdt_match_name_len in usdt_types.h.
 const obiUSDTMatchNameLen = 64
 
-// obiUSDTPairKind mirrors enum obi_usdt_pair_kind.
-const (
-	obiUSDTPairArg0 = uint8(0)
-	obiUSDTPairTid  = uint8(1)
-)
+// obiUSDTPairTid mirrors k_obi_usdt_pair_tid — function-paired probes
+// pair entry+ret on pid_tgid. k_obi_usdt_pair_arg0 (=0) is the zero value
+// and used implicitly by usdt_span probes; no Go constant needed.
+const obiUSDTPairTid = uint8(1)
 
 type obiUSDTSpec struct {
 	Args         [obiUSDTMaxArgs]obiUSDTArgSpec
@@ -315,30 +314,12 @@ func lookupFunctionTarget(
 	function string,
 	spec obiUSDTSpec,
 ) (usdtTarget, error) {
-	syms, _ := elfFile.Symbols()
-	dynsyms, _ := elfFile.DynamicSymbols()
-	syms = append(syms, dynsyms...)
-
-	var sym *elf.Symbol
-	for i := range syms {
-		s := &syms[i]
-		if s.Name != function {
-			continue
-		}
-		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
-			continue
-		}
-		if s.Value == 0 {
-			continue
-		}
-		sym = s
-		break
-	}
-	if sym == nil {
-		return usdtTarget{}, fmt.Errorf("symbol %q not found in executable", function)
+	entryVA, size, err := resolveFunctionSymbol(elfFile, function)
+	if err != nil {
+		return usdtTarget{}, err
 	}
 
-	relIP, err := elfFileOffset(elfFile, sym.Value, true)
+	relIP, err := elfFileOffset(elfFile, entryVA, true)
 	if err != nil {
 		return usdtTarget{}, fmt.Errorf("symbol %q: %w", function, err)
 	}
@@ -353,20 +334,12 @@ func lookupFunctionTarget(
 		Spec:    spec,
 		SpecKey: fmt.Sprintf("%s:func:%s", elfFile.Machine, function),
 	}
-	// Per-RET uprobes (vs. a kernel uretprobe) are required in two cases:
-	//   - Go binaries: the uretprobe trampoline rewrites the on-stack
-	//     return address and Go's stack scanner mistakes it for a heap
-	//     pointer.
-	//   - Pre-5.15 kernels without bpf_get_attach_cookie: BPF resolves
-	//     the spec via the IP map keyed on PT_REGS_IP. At a uretprobe
-	//     fire, PT_REGS_IP is the caller's return address (not the
-	//     function), so no IP-map entry can resolve it. A regular
-	//     uprobe at each RET instruction keeps PT_REGS_IP inside the
-	//     function and we can register every RET site upfront.
-	needPerRET := sym.Size > 0 && (DetectFunctionLang(elfFile) == FunctionLangGo || !ebpfcommon.HasAttachCookie())
+	// Per-RET uprobes: Go (uretprobe corrupts GC stack) and pre-5.15 (uretprobe
+	// IP isn't in the IP map).
+	needPerRET := size > 0 && (DetectFunctionLang(elfFile) == FunctionLangGo || !ebpfcommon.HasAttachCookie())
 	if needPerRET {
-		buf := make([]byte, sym.Size)
-		if _, err := elfReadFunctionBytes(elfFile, sym.Value, buf); err == nil {
+		buf := make([]byte, size)
+		if _, err := elfReadFunctionBytes(elfFile, entryVA, buf); err == nil {
 			rets, ferr := goexec.FindReturnOffsets(relIP, buf)
 			if ferr == nil {
 				target.ReturnRelIPs = rets
@@ -374,6 +347,47 @@ func lookupFunctionTarget(
 		}
 	}
 	return target, nil
+}
+
+// resolveFunctionSymbol returns the entry VA + size of a named function.
+// Falls back to .gopclntab on stripped Go binaries.
+func resolveFunctionSymbol(elfFile *elf.File, function string) (entryVA, size uint64, err error) {
+	if va, sz, ok := lookupElfFunctionSym(elfFile, function); ok {
+		return va, sz, nil
+	}
+	if DetectFunctionLang(elfFile) == FunctionLangGo {
+		if va, sz, ok := lookupGopclntabFunc(elfFile, function); ok {
+			return va, sz, nil
+		}
+	}
+	return 0, 0, fmt.Errorf("symbol %q not found in executable", function)
+}
+
+func lookupElfFunctionSym(elfFile *elf.File, function string) (uint64, uint64, bool) {
+	syms, _ := elfFile.Symbols()
+	dynsyms, _ := elfFile.DynamicSymbols()
+	for _, set := range [][]elf.Symbol{syms, dynsyms} {
+		for i := range set {
+			s := &set[i]
+			if s.Name != function || elf.ST_TYPE(s.Info) != elf.STT_FUNC || s.Value == 0 {
+				continue
+			}
+			return s.Value, s.Size, true
+		}
+	}
+	return 0, 0, false
+}
+
+func lookupGopclntabFunc(elfFile *elf.File, function string) (uint64, uint64, bool) {
+	tab, err := goexec.GoSymbolTable(elfFile)
+	if err != nil || tab == nil {
+		return 0, 0, false
+	}
+	f := tab.LookupFunc(function)
+	if f == nil || f.End < f.Entry {
+		return 0, 0, false
+	}
+	return f.Entry, f.End - f.Entry, true
 }
 
 // elfReadFunctionBytes copies the function's instructions starting at vaddr
@@ -464,147 +478,118 @@ func parseUSDTArg(machine elf.Machine, arg string) (obiUSDTArgSpec, int, error) 
 	}
 }
 
+// regResolver maps an ELF arg's register name (e.g. `%rsi`, `x1`) to its
+// byte offset inside `struct pt_regs`.
+type regResolver func(string) (int16, error)
+
 func parseX86USDTArg(arg string) (obiUSDTArgSpec, int, error) {
-	if match := x86RegDerefArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildX86RegDerefArg(arg, match)
+	if m := x86RegDerefArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildRegDerefArg(arg, m, x86RegisterOffset, 6, 4)
 	}
-	if match := x86RegArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildX86RegArg(arg, match)
+	if m := x86RegArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildRegArg(arg, m, x86RegisterOffset)
 	}
-	if match := x86ConstArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildConstArg(arg, match)
+	if m := x86ConstArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildConstArg(arg, m)
 	}
 	return obiUSDTArgSpec{}, 0, fmt.Errorf("unrecognized x86_64 USDT argument %q", arg)
 }
 
 func parseArm64USDTArg(arg string) (obiUSDTArgSpec, int, error) {
-	if match := arm64RegDerefArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildArm64RegDerefArg(arg, match)
+	if m := arm64RegDerefArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildRegDerefArg(arg, m, arm64RegisterOffset, 4, 6)
 	}
-	if match := arm64ConstArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildConstArg(arg, match)
+	if m := arm64ConstArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildConstArg(arg, m)
 	}
-	if match := arm64RegArgRE.FindStringSubmatchIndex(arg); match != nil {
-		return buildArm64RegArg(arg, match)
+	if m := arm64RegArgRE.FindStringSubmatchIndex(arg); m != nil {
+		return buildRegArg(arg, m, arm64RegisterOffset)
 	}
 	return obiUSDTArgSpec{}, 0, fmt.Errorf("unrecognized arm64 USDT argument %q", arg)
 }
 
-func buildX86RegDerefArg(arg string, match []int) (obiUSDTArgSpec, int, error) {
-	size, err := parseUSDTArgSize(arg[match[2]:match[3]])
+// buildRegDerefArg consumes a `<size>@<offset>(%reg)` (x86) or
+// `<size>@[reg, offset]` (arm64) capture. `regGroup` and `offGroup` are the
+// regexp submatch indices for the register name and the (optional) memory
+// offset — the two arches encode them in opposite order.
+func buildRegDerefArg(arg string, m []int, resolveReg regResolver, regGroup, offGroup int) (obiUSDTArgSpec, int, error) {
+	size, err := parseUSDTArgSize(arg[m[2]:m[3]])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-	offset, err := parseOptionalInt64(arg, match[4], match[5])
+	offset, err := parseOptionalInt64(arg, m[offGroup], m[offGroup+1])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-	regOff, err := x86RegisterOffset(arg[match[6]:match[7]])
+	regOff, err := resolveReg(arg[m[regGroup]:m[regGroup+1]])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-
 	spec := sizedUSDTArg(size)
 	spec.ArgType = obiUSDTArgRegDeref
 	spec.ValOff = uint64(offset)
 	spec.RegOff = regOff
-	return spec, match[1], nil
+	return spec, m[1], nil
 }
 
-func buildX86RegArg(arg string, match []int) (obiUSDTArgSpec, int, error) {
-	size, err := parseUSDTArgSize(arg[match[2]:match[3]])
+func buildRegArg(arg string, m []int, resolveReg regResolver) (obiUSDTArgSpec, int, error) {
+	size, err := parseUSDTArgSize(arg[m[2]:m[3]])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-	regOff, err := x86RegisterOffset(arg[match[4]:match[5]])
+	regOff, err := resolveReg(arg[m[4]:m[5]])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-
 	spec := sizedUSDTArg(size)
 	spec.ArgType = obiUSDTArgReg
 	spec.RegOff = regOff
-	return spec, match[1], nil
+	return spec, m[1], nil
 }
 
-func buildArm64RegDerefArg(arg string, match []int) (obiUSDTArgSpec, int, error) {
-	size, err := parseUSDTArgSize(arg[match[2]:match[3]])
+func buildConstArg(arg string, m []int) (obiUSDTArgSpec, int, error) {
+	size, err := parseUSDTArgSize(arg[m[2]:m[3]])
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-	regOff, err := arm64RegisterOffset(arg[match[4]:match[5]])
+	value, err := strconv.ParseInt(arg[m[4]:m[5]], 0, 64)
 	if err != nil {
 		return obiUSDTArgSpec{}, 0, err
 	}
-	offset, err := parseOptionalInt64(arg, match[6], match[7])
-	if err != nil {
-		return obiUSDTArgSpec{}, 0, err
-	}
-
-	spec := sizedUSDTArg(size)
-	spec.ArgType = obiUSDTArgRegDeref
-	spec.ValOff = uint64(offset)
-	spec.RegOff = regOff
-	return spec, match[1], nil
-}
-
-func buildArm64RegArg(arg string, match []int) (obiUSDTArgSpec, int, error) {
-	size, err := parseUSDTArgSize(arg[match[2]:match[3]])
-	if err != nil {
-		return obiUSDTArgSpec{}, 0, err
-	}
-	regOff, err := arm64RegisterOffset(arg[match[4]:match[5]])
-	if err != nil {
-		return obiUSDTArgSpec{}, 0, err
-	}
-
-	spec := sizedUSDTArg(size)
-	spec.ArgType = obiUSDTArgReg
-	spec.RegOff = regOff
-	return spec, match[1], nil
-}
-
-func buildConstArg(arg string, match []int) (obiUSDTArgSpec, int, error) {
-	size, err := parseUSDTArgSize(arg[match[2]:match[3]])
-	if err != nil {
-		return obiUSDTArgSpec{}, 0, err
-	}
-	value, err := strconv.ParseInt(arg[match[4]:match[5]], 0, 64)
-	if err != nil {
-		return obiUSDTArgSpec{}, 0, err
-	}
-
 	spec := sizedUSDTArg(size)
 	spec.ArgType = obiUSDTArgConst
 	spec.ValOff = uint64(value)
-	return spec, match[1], nil
+	return spec, m[1], nil
 }
 
+// parseUSDTArgSize parses the `<width>` field of a stapsdt arg spec. The
+// width is signed (negative ⇒ sign-extend on read). Valid magnitudes are
+// 1, 2, 4, 8 bytes.
 func parseUSDTArgSize(raw string) (int, error) {
 	size, err := strconv.Atoi(raw)
 	if err != nil {
 		return 0, err
 	}
-	absSize := size
-	if absSize < 0 {
-		absSize = -absSize
-	}
-	switch absSize {
-	case 1, 2, 4, 8:
+	switch size {
+	case 1, 2, 4, 8, -1, -2, -4, -8:
 		return size, nil
-	default:
-		return 0, fmt.Errorf("unsupported USDT argument size %d", size)
 	}
+	return 0, fmt.Errorf("unsupported USDT argument size %d", size)
 }
 
+// sizedUSDTArg seeds an arg spec with the bit-shift encoding of `size`
+// (negative ⇒ signed). BPF uses the shift to widen sub-64-bit ELF values.
 func sizedUSDTArg(size int) obiUSDTArgSpec {
-	if size < 0 {
-		return obiUSDTArgSpec{
-			ArgSigned:   1,
-			ArgBitshift: uint8(64 - (-size * 8)),
-		}
+	bytes := size
+	signed := uint8(0)
+	if bytes < 0 {
+		bytes = -bytes
+		signed = 1
 	}
-	return obiUSDTArgSpec{ArgBitshift: uint8(64 - (size * 8))}
+	return obiUSDTArgSpec{
+		ArgSigned:   signed,
+		ArgBitshift: uint8(64 - bytes*8),
+	}
 }
 
 func parseOptionalInt64(src string, start, end int) (int64, error) {
@@ -614,28 +599,33 @@ func parseOptionalInt64(src string, start, end int) (int64, error) {
 	return strconv.ParseInt(src[start:end], 0, 64)
 }
 
+// x86RegisterOffsets maps every recognized x86_64 register name (any
+// width: r/e/16/8-bit aliases) to its byte offset inside the kernel's
+// `struct pt_regs`. Built once at package init so parsing N stapsdt arg
+// specs doesn't allocate N copies of the table.
+var x86RegisterOffsets = map[string]int16{
+	"rip": 128, "eip": 128,
+	"rax": 80, "eax": 80, "ax": 80, "al": 80,
+	"rbx": 40, "ebx": 40, "bx": 40, "bl": 40,
+	"rcx": 88, "ecx": 88, "cx": 88, "cl": 88,
+	"rdx": 96, "edx": 96, "dx": 96, "dl": 96,
+	"rsi": 104, "esi": 104, "si": 104, "sil": 104,
+	"rdi": 112, "edi": 112, "di": 112, "dil": 112,
+	"rbp": 32, "ebp": 32, "bp": 32, "bpl": 32,
+	"rsp": 152, "esp": 152, "sp": 152, "spl": 152,
+	"r8": 72, "r8d": 72, "r8w": 72, "r8b": 72,
+	"r9": 64, "r9d": 64, "r9w": 64, "r9b": 64,
+	"r10": 56, "r10d": 56, "r10w": 56, "r10b": 56,
+	"r11": 48, "r11d": 48, "r11w": 48, "r11b": 48,
+	"r12": 24, "r12d": 24, "r12w": 24, "r12b": 24,
+	"r13": 16, "r13d": 16, "r13w": 16, "r13b": 16,
+	"r14": 8, "r14d": 8, "r14w": 8, "r14b": 8,
+	"r15": 0, "r15d": 0, "r15w": 0, "r15b": 0,
+}
+
 func x86RegisterOffset(reg string) (int16, error) {
 	reg = strings.TrimPrefix(strings.ToLower(reg), "%")
-	offsets := map[string]int16{
-		"rip": 128, "eip": 128,
-		"rax": 80, "eax": 80, "ax": 80, "al": 80,
-		"rbx": 40, "ebx": 40, "bx": 40, "bl": 40,
-		"rcx": 88, "ecx": 88, "cx": 88, "cl": 88,
-		"rdx": 96, "edx": 96, "dx": 96, "dl": 96,
-		"rsi": 104, "esi": 104, "si": 104, "sil": 104,
-		"rdi": 112, "edi": 112, "di": 112, "dil": 112,
-		"rbp": 32, "ebp": 32, "bp": 32, "bpl": 32,
-		"rsp": 152, "esp": 152, "sp": 152, "spl": 152,
-		"r8": 72, "r8d": 72, "r8w": 72, "r8b": 72,
-		"r9": 64, "r9d": 64, "r9w": 64, "r9b": 64,
-		"r10": 56, "r10d": 56, "r10w": 56, "r10b": 56,
-		"r11": 48, "r11d": 48, "r11w": 48, "r11b": 48,
-		"r12": 24, "r12d": 24, "r12w": 24, "r12b": 24,
-		"r13": 16, "r13d": 16, "r13w": 16, "r13b": 16,
-		"r14": 8, "r14d": 8, "r14w": 8, "r14b": 8,
-		"r15": 0, "r15d": 0, "r15w": 0, "r15b": 0,
-	}
-	offset, ok := offsets[reg]
+	offset, ok := x86RegisterOffsets[reg]
 	if !ok {
 		return 0, fmt.Errorf("unsupported x86_64 USDT register %q", reg)
 	}

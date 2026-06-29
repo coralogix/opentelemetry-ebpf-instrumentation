@@ -23,8 +23,11 @@ enum obi_usdt_arg_type {
     k_obi_usdt_arg_reg_deref = 2,
     // reg value is a user-space pointer; read NUL-terminated string from it.
     k_obi_usdt_arg_reg_deref_str = 3,
-    // Go-style string: ptr in pt_regs[reg_off], len in pt_regs[reg_off+8].
-    // val_off caps the read length.
+    // Go-style string: ptr in pt_regs[reg_off]. The length lives in a
+    // separate register whose pt_regs offset is encoded in val_off (low
+    // 16 bits). Go regabi spreads scalars across non-consecutive
+    // registers on amd64 (AX, BX, CX, DI, SI, R8, ...), so the {ptr,
+    // len} pair is generally NOT at reg_off and reg_off+8.
     k_obi_usdt_arg_go_string = 4,
 };
 

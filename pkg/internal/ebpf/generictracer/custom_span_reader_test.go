@@ -72,7 +72,7 @@ func TestCustomSpanBuilder_PairingMatches(t *testing.T) {
 		Attrs: map[string]config.CustomSpanAttr{
 			"order_id": {Arg: 0, Type: config.CustomSpanAttrU64},
 		},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 7})
+	}, 7)
 	reg.Register(def)
 
 	start := makeRawEvent(7, obiebpf.CustomSpanKindStart, 999, 1000)
@@ -102,7 +102,7 @@ func TestCustomSpanBuilder_PairingMismatchedKeyIsOrphan(t *testing.T) {
 
 	reg.Register(NewCustomSpanDef(&config.CustomSpanSpec{
 		Name: "n", On: config.CustomSpanTarget{USDTSpan: "a:b"},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 1}))
+	}, 1))
 
 	start := makeRawEvent(1, obiebpf.CustomSpanKindStart, 111, 1000)
 	_, ready, err := b.Build(&start)
@@ -128,7 +128,7 @@ func TestCustomSpanBuilder_SingleShotEmitsImmediately(t *testing.T) {
 		Attrs: map[string]config.CustomSpanAttr{
 			"key": {Arg: 0, Type: config.CustomSpanAttrString},
 		},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 42}))
+	}, 42))
 
 	ev := makeRawEvent(42, obiebpf.CustomSpanKindSingle, 0, 5000)
 	ev.ArgKind[0] = uint8(obiebpf.CustomSpanArgStr)
@@ -162,7 +162,7 @@ func TestCustomSpanBuilder_PairingByDistinctArg0(t *testing.T) {
 	b := NewCustomSpanBuilder(reg, pairer)
 	reg.Register(NewCustomSpanDef(&config.CustomSpanSpec{
 		Name: "n", On: config.CustomSpanTarget{USDTSpan: "a:b"},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 1}))
+	}, 1))
 
 	for _, arg0 := range []uint64{10, 20} {
 		s := makeRawEvent(1, obiebpf.CustomSpanKindStart, arg0, 1000+arg0)
@@ -206,7 +206,7 @@ func TestCustomSpanBuilder_TraceCtxInheritance(t *testing.T) {
 	b := NewCustomSpanBuilder(reg, pairer)
 	reg.Register(NewCustomSpanDef(&config.CustomSpanSpec{
 		Name: "n", On: config.CustomSpanTarget{USDTSpan: "a:b"},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 1}))
+	}, 1))
 
 	start := makeRawEvent(1, obiebpf.CustomSpanKindStart, 5, 1000)
 	start.HasTraceCtx = 1
@@ -238,7 +238,7 @@ func TestCustomSpanBuilder_EndOverridesAttr(t *testing.T) {
 			"id":     {Arg: 0, Type: config.CustomSpanAttrU64},
 			"status": {Arg: 1, Type: config.CustomSpanAttrI32},
 		},
-	}, obiebpf.CompiledCustomSpanSpec{Cookie: 11}))
+	}, 11))
 
 	start := makeRawEvent(11, obiebpf.CustomSpanKindStart, 7, 1000)
 	start.ArgCnt = 2
