@@ -140,12 +140,20 @@ The span name follows the OTel database convention `{operation} {target}`, e.g.
 
 ### User key (opt-in)
 
-When the client was configured with `sendKey`, the request carries the user key
-(field type 2). `db.query.text` carries **only that primary key** — the
-identifier the application used to address the record (e.g. `k_put`) — not the
-bin names/values or any record payload. This differs from a protocol like
-Couchbase KV where the document body is on the wire; Aerospike record/bin values
-are not captured (see Limitations).
+Capturing `db.query.text` **requires the client to enable the send-key write
+policy** (the "Send Key" section of the
+[Aerospike policies docs](https://aerospike.com/docs/server/guide/policies) —
+`AS_POLICY_KEY_SEND`, exposed as `sendKey` in the clients, e.g.
+`WritePolicy.sendKey = true` in the Java client). By default Aerospike clients
+send only the key's RIPEMD-160 digest on the wire, not the key itself, so without
+send-key there is nothing for OBI to read and `db.query.text` is absent.
+
+When `sendKey` is set, the request carries the user key (field type 2).
+`db.query.text` carries **only that primary key** — the identifier the
+application used to address the record (e.g. `k_put`) — not the bin names/values
+or any record payload. This differs from a protocol like Couchbase KV where the
+document body is on the wire; Aerospike record/bin values are not captured (see
+Limitations).
 
 OBI decodes the key only when its particle type is string (integer/blob keys are
 binary and high-cardinality, so they are skipped), and emits it **only when the
