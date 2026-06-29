@@ -156,33 +156,100 @@ func TestStripDollarBrackets(t *testing.T) {
 	}
 }
 
-func TestRustDemangle_TokioSymbols(t *testing.T) {
-	cases := []struct{ raw, wantPrefix string }{
-		// LocalOwnedTasks::bind — debug build, 24-char ident with $LT$S$GT$
-		{"_ZN5tokio7runtime4task4list24LocalOwnedTasks$LT$S$GT$4bind17he45315048f19b0faE",
+func TestRustDemangle_Legacy(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string // exact expected demangled prefix path
+	}{
+		// Real samples (debug build) with $LT$S$GT$ generics + 17h<hash> build hash.
+		{"LocalOwnedTasks::bind",
+			"_ZN5tokio7runtime4task4list24LocalOwnedTasks$LT$S$GT$4bind17he45315048f19b0faE",
 			"tokio::runtime::task::list::LocalOwnedTasks::bind"},
-		// OwnedTasks::bind_inner — debug build
-		{"_ZN5tokio7runtime4task4list19OwnedTasks$LT$S$GT$10bind_inner17h69552d27e517e78cE",
+		{"OwnedTasks::bind_inner",
+			"_ZN5tokio7runtime4task4list19OwnedTasks$LT$S$GT$10bind_inner17h69552d27e517e78cE",
 			"tokio::runtime::task::list::OwnedTasks::bind_inner"},
+		// Non-generic methods (no $LT$): RawTask::poll and the spawn_blocking free fn.
+		{"RawTask::poll",
+			"_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE",
+			"tokio::runtime::task::raw::RawTask::poll"},
+		{"pool::spawn_blocking",
+			"_ZN5tokio7runtime8blocking4pool14spawn_blocking17hfedcba9876543210E",
+			"tokio::runtime::blocking::pool::spawn_blocking"},
+		// A trailing Itanium template block (…IiEE) does not occur in real Rust
+		// legacy symbols; the bare 'I' is a non-digit that just terminates the
+		// scan, leaving the already-collected prefix intact.
+		{"trailing template block terminates scan",
+			"_ZN3foo3barIiEE",
+			"foo::bar"},
 	}
 	for _, c := range cases {
-		got := rustDemangle(c.raw)
-		assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, rustDemangle(c.raw))
+		})
 	}
 }
 
-func TestRustDemangleV0_TokioSymbols(t *testing.T) {
-	cases := []struct{ raw, wantPrefix string }{
-		// LocalOwnedTasks::bind — v0 debug
-		{"_RINvMs_NtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB5_15LocalOwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtBb_4task5local6SharedEE4bindINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtB1e_5boxed3BoxDNtNtNtB2k_6future6future6Futurep6OutputuNtNtB2k_6marker4SendEL_EEECsjqY7L67gDVE_8actix_rt",
+func TestRustDemangle_BuildHashStripped(t *testing.T) {
+	// The trailing 17h<16 hex> component must never appear in the output.
+	got := rustDemangle("_ZN3foo3bar17h0123456789abcdefE")
+	assert.Equal(t, "foo::bar", got)
+	assert.NotContains(t, got, "h0123456789abcdef")
+}
+
+func TestRustDemangle_NonLegacyReturnsEmpty(t *testing.T) {
+	// rustDemangle only handles the legacy _ZN…E scheme; everything else returns "".
+	for _, in := range []string{
+		"",
+		"main.someGoSymbol",
+		"plain_c_symbol",
+		// a v0 (_R) symbol must NOT be parsed by the legacy demangler
+		"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksE10bind_inner",
+	} {
+		assert.Empty(t, rustDemangle(in), "input %q", in)
+	}
+}
+
+func TestRustDemangleV0_Tokio(t *testing.T) {
+	cases := []struct {
+		name       string
+		raw        string
+		wantPrefix string
+	}{
+		// Real v0 samples (RUSTFLAGS="-C symbol-mangling-version=v0" build).
+		{"LocalOwnedTasks::bind",
+			"_RINvMs_NtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB5_15LocalOwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtBb_4task5local6SharedEE4bindINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtB1e_5boxed3BoxDNtNtNtB2k_6future6future6Futurep6OutputuNtNtB2k_6marker4SendEL_EEECsjqY7L67gDVE_8actix_rt",
 			"tokio::runtime::task::list::LocalOwnedTasks::bind"},
-		// OwnedTasks::bind_inner — v0 debug
-		{"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
+		{"OwnedTasks::bind_inner",
+			"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner"},
+		// pool::spawn_blocking — Real v0 sample (free fn, instantiated with the multi-thread worker Launch closure).
+		// Generic args (I…E) and the trailing instantiation are dropped by the parser.
+		{"pool::spawn_blocking",
+			"_RINvNtNtNtCshFZRMeAqrSd_5tokio7runtime8blocking4pool14spawn_blockingNCNvMNtNtNtB6_9scheduler12multi_thread6workerNtB19_6Launch6launch0uEB8_",
+			"tokio::runtime::blocking::pool::spawn_blocking"},
+		// macOS prepends an extra leading underscore (__R…); rustDemangleV0 strips it
+		// and must produce the same result as the _R… form above.
+		{"OwnedTasks::bind_inner (macOS __R)",
+			"__RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
 			"tokio::runtime::task::list::OwnedTasks::bind_inner"},
 	}
 	for _, c := range cases {
-		got := rustDemangleV0(c.raw)
-		assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+		t.Run(c.name, func(t *testing.T) {
+			got := rustDemangleV0(c.raw)
+			assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+		})
+	}
+}
+
+func TestRustDemangleV0_NonV0ReturnsEmpty(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"main.someGoSymbol",
+		// a legacy (_ZN) symbol must NOT be parsed by the v0 demangler
+		"_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE",
+	} {
+		assert.Empty(t, rustDemangleV0(in), "input %q", in)
 	}
 }
 
