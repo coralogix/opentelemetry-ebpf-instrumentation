@@ -168,3 +168,20 @@ func TestMatchAerospikeNonAerospike(t *testing.T) {
 		largebuf.NewLargeBufferFrom([]byte("HTTP/1.1 200 OK\r\n\r\n")))
 	assert.False(t, matched, "HTTP must not be misclassified as Aerospike")
 }
+
+// TestMatchAerospikeServerSideSkipped ensures a valid Aerospike exchange observed
+// from the server process (IsServer) does not produce a span, so an operation
+// instrumented on both peers is reported only once (client-side).
+func TestMatchAerospikeServerSideSkipped(t *testing.T) {
+	req := largebuf.NewLargeBufferFrom(mustHex(t, fixtureHex(t, "put")))
+	resp := largebuf.NewLargeBufferFrom(mustHex(t, aerospikeWriteOKResp))
+
+	_, _, matched, err := matchAerospike(&TCPRequestInfo{IsServer: true}, req, resp)
+	require.NoError(t, err)
+	assert.False(t, matched, "server-side Aerospike exchange must not produce a client span")
+
+	// the same exchange on the client side still matches
+	_, _, matched, err = matchAerospike(&TCPRequestInfo{IsServer: false}, req, resp)
+	require.NoError(t, err)
+	assert.True(t, matched, "client-side Aerospike exchange must still match")
+}
