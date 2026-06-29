@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -139,6 +140,102 @@ func TestFindExeSymbolsByNameAndSubstring(t *testing.T) {
 	assert.NotZero(t, substringSym.Off)
 	assert.NotZero(t, substringSym.Len)
 	assert.NotNil(t, substringSym.Prog)
+}
+
+func TestStripDollarBrackets(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"LocalOwnedTasks$LT$S$GT$", "LocalOwnedTasks"},
+		{"OwnedTasks$LT$S$GT$", "OwnedTasks"},
+		{"Foo$LT$Bar$LT$X$GT$$GT$", "Foo"},        // nested
+		{"noGenerics", "noGenerics"},              // no-op
+		{"prefix$LT$X$GT$suffix", "prefixsuffix"}, // mid-ident
+		{"$LT$unclosed", "$LT$unclosed"},          // malformed — unchanged
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, stripDollarBrackets(c.in), c.in)
+	}
+}
+
+func TestRustDemangle_TokioSymbols(t *testing.T) {
+	cases := []struct{ raw, wantPrefix string }{
+		// LocalOwnedTasks::bind — debug build, 24-char ident with $LT$S$GT$
+		{"_ZN5tokio7runtime4task4list24LocalOwnedTasks$LT$S$GT$4bind17he45315048f19b0faE",
+			"tokio::runtime::task::list::LocalOwnedTasks::bind"},
+		// OwnedTasks::bind_inner — debug build
+		{"_ZN5tokio7runtime4task4list19OwnedTasks$LT$S$GT$10bind_inner17h69552d27e517e78cE",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner"},
+	}
+	for _, c := range cases {
+		got := rustDemangle(c.raw)
+		assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+	}
+}
+
+func TestRustDemangleV0_TokioSymbols(t *testing.T) {
+	cases := []struct{ raw, wantPrefix string }{
+		// LocalOwnedTasks::bind — v0 debug
+		{"_RINvMs_NtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB5_15LocalOwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtBb_4task5local6SharedEE4bindINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtB1e_5boxed3BoxDNtNtNtB2k_6future6future6Futurep6OutputuNtNtB2k_6marker4SendEL_EEECsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::LocalOwnedTasks::bind"},
+		// OwnedTasks::bind_inner — v0 debug
+		{"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner"},
+	}
+	for _, c := range cases {
+		got := rustDemangleV0(c.raw)
+		assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+	}
+}
+
+// TestV0Base62StopsWithoutConsuming locks the base62 terminator fix: a non-base62
+// byte must end the number WITHOUT being consumed. (A plain `break` inside the
+// switch previously only left the switch and then swallowed the byte as a 0 digit.)
+func TestV0Base62StopsWithoutConsuming(t *testing.T) {
+	p := &v0Parser{sym: "5x"}
+	got := p.base62()
+	assert.Equal(t, 6, got, "raw value 5, encoded +1")
+	assert.Equal(t, 1, p.pos, "must stop at 'x' without consuming it")
+}
+
+// TestV0Base62DoesNotOverflowNegative locks a crash fix: a base62 run long enough
+// to overflow int would wrap n negative, defeating the ">= len(p.sym)" bounds
+// checks callers (path's back-reference handling, ident's length check) rely on,
+// and panicking on a negative index/slice bound. A base62 value here is always a
+// string length or byte position, so it can never legitimately exceed len(p.sym);
+// the fix bails out once n crosses that bound.
+func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
+	sym := strings.Repeat("Z", 20) + "_" // 20 base62 digits, well past int64 overflow if uncapped
+	p := &v0Parser{sym: sym}
+	got := p.base62()
+	assert.GreaterOrEqual(t, got, 0, "must not overflow negative")
+	assert.Less(t, p.pos, len(sym)-1, "must bail out before consuming the whole pathological run")
+}
+
+// TestRustPrefix_SelectsPollNotRawTaskPoll validates the v0.2.0 probe re-target: the
+// prefix must match the monomorphized vtable free fn raw::poll but NOT the
+// RawTask::poll thunk (whose demangled name has "RawTask::" between "raw::" and
+// "poll"). Matching RawTask::poll would probe the inlinable thunk (the original bug)
+// or double-fire.
+func TestRustPrefix_SelectsPollNotRawTaskPoll(t *testing.T) {
+	const prefix = "tokio::runtime::task::raw::poll"
+	rawPoll := rustDemangle("_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE")
+	rawTaskPoll := rustDemangle("_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE")
+
+	assert.Equal(t, "tokio::runtime::task::raw::poll", rawPoll)
+	assert.Equal(t, "tokio::runtime::task::raw::RawTask::poll", rawTaskPoll)
+	assert.True(t, strings.HasPrefix(rawPoll, prefix), "raw::poll (vtable target) must match the probe prefix")
+	assert.False(t, strings.HasPrefix(rawTaskPoll, prefix), "RawTask::poll (thunk) must NOT match the probe prefix")
+}
+
+// TestFindExeSymbolsByPrefix_NoFalseMatchOnNonRust confirms a Rust prefix matches
+// nothing in a non-Rust (Go) binary — symbols that don't demangle as Rust are
+// skipped, so the prefix machinery never produces spurious attachments.
+func TestFindExeSymbolsByPrefix_NoFalseMatchOnNonRust(t *testing.T) {
+	f := openSymbolFixtureELF(t)
+	defer f.Close()
+
+	out, err := FindExeSymbolsByPrefix(f, []string{"tokio::runtime::task::raw::poll"})
+	require.NoError(t, err)
+	assert.Empty(t, out["tokio::runtime::task::raw::poll"])
 }
 
 func openSymbolFixtureELF(t *testing.T) *elf.File {

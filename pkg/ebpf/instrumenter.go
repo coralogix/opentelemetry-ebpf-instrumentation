@@ -914,7 +914,6 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 			probe.Skip = false
 			probe.StartOffset = sym.Off
 			progData := readSymbolData(&sym)
-
 			if progData == nil {
 				if err := handleSymbolDataReadFailure(probe, symbolName, instrPath, log); err != nil {
 					return err
@@ -932,6 +931,61 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 				"offset_hex", fmt.Sprintf("0x%x", sym.Off),
 				"size", sym.Len,
 			)
+		}
+	}
+
+	var prefixNames []string
+	for name := range probes {
+		if strings.Contains(name, "::") {
+			prefixNames = append(prefixNames, name)
+		}
+	}
+	if len(prefixNames) > 0 {
+		prefixSyms, err := procs.FindExeSymbolsByPrefix(elfFile, prefixNames)
+		if err != nil {
+			return fmt.Errorf("failed to lookup Rust prefix symbols for %s: %w", instrPath, err)
+		}
+		for _, symbolName := range prefixNames {
+			matched, ok := prefixSyms[symbolName]
+			if !ok || len(matched) == 0 {
+				log.Debug("rust prefix not found in binary", "prefix", symbolName, "binary", instrPath)
+				continue
+			}
+			log.Debug("rust prefix resolved", "prefix", symbolName, "copies", len(matched), "binary", instrPath)
+			template := probes[symbolName][0]
+			expanded := make([]*ebpfcommon.ProbeDesc, 0, len(matched))
+			for i := range matched {
+				sym := matched[i]
+				log.Debug("rust monomorphized copy", "prefix", symbolName, "copy", i, "offset", fmt.Sprintf("0x%x", sym.Off))
+				progData := readSymbolData(&sym)
+
+				if progData == nil {
+					continue
+				}
+				returns, err := goexec.FindReturnOffsets(sym.Off, progData)
+				if err != nil {
+					log.Debug("Error finding return offsets for Rust symbol", "prefix", symbolName)
+					continue
+				}
+				endProg := template.End
+				if len(returns) == 0 && endProg != nil {
+					// Rust release builds often use indirect tail-calls instead of RET,
+					// preventing uretprobe placement. We attach the entry probe only.
+					// The tokio_thread_state remains accurate during poll execution when HTTP probes fire.
+					log.Debug("rust tail-call function, skipping uretprobe", "prefix", symbolName)
+					endProg = nil
+				}
+				expanded = append(expanded, &ebpfcommon.ProbeDesc{
+					Required:      template.Required,
+					Start:         template.Start,
+					End:           endProg,
+					StartOffset:   sym.Off,
+					ReturnOffsets: returns,
+				})
+			}
+			if len(expanded) > 0 {
+				probes[symbolName] = expanded
+			}
 		}
 	}
 

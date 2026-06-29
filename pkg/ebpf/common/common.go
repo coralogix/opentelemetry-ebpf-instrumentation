@@ -107,6 +107,10 @@ const (
 	SymbolMatcherContains
 )
 
+// SelfLibKey is the UProbes() library-map key meaning "instrument the executable
+// itself" rather than a shared library
+const SelfLibKey = "self"
+
 // ProbeDesc holds the information of the instrumentation points of a given
 // function/symbol
 type ProbeDesc struct {

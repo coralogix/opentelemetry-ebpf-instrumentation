@@ -481,6 +481,80 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				End:      p.bpfObjects.ObiUprobeTaskStepRet,
 			}},
 		},
+		// Tokio async runtime — statically linked into the Rust binary, so the probes
+		// target the executable itself and not a shared library.
+		// Symbol keys use the demangled prefix form (without the per-build hash
+		// suffix and without generic type parameters).
+		ebpfcommon.SelfLibKey: {
+			// Poll tracking. We probe the monomorphized free fn
+			// tokio::runtime::task::raw::poll::<T,S> — the function whose ADDRESS is
+			// stored in each task's vtable and which the scheduler reaches via an
+			// indirect call (blr) on every poll. Verified on Linux release: ~23
+			// copies, 0 direct callers (reached purely via the vtable), so it fires
+			// for EVERY task type and EVERY scheduler — async workers AND the
+			// blocking pool — in both debug and release.
+			//
+			// We deliberately do NOT probe tokio::runtime::task::raw::RawTask::poll:
+			// it is a 3-instruction thunk (ldr vtable; ldr vtable.poll; br) that the
+			// optimiser INLINES into the scheduler's run_task in release, so its
+			// symbol is bypassed on multi-thread workers and the probe never fires
+			// there. That was the v0.1.0 release multi-thread gap — the task-walk was
+			// inert in release MT.
+			// raw::poll is address-taken for the vtable and therefore cannot be
+			// inlined, which is why it is the correct universal probe point.
+			//
+			// PARM1 = ptr: NonNull<Header> — the same Header pointer the handlers
+			// already expect, so the BPF programs are unchanged. The copies are
+			// generic over <T,S>; the Go-side instrumenter attaches to every
+			// monomorphization via demangled-prefix matching. In release builds each
+			// copy tail-calls the harness (br, no ret) so the uretprobe finds no RET
+			// and is skipped; in debug builds it has real RETs and does attach. Either
+			// way correctness does not depend on it — obi_ctx is refreshed at poll
+			// ENTRY, not exit (see tokio.c).
+			"tokio::runtime::task::raw::poll": {{
+				Required:      false,
+				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
+				Start:         p.bpfObjects.ObiUprobeTokioPoll,
+				End:           p.bpfObjects.ObiUretprobeTokioPoll,
+			}},
+			// Multi-thread scheduler: OwnedTasks<S>::bind_inner fires when a task
+			// is spawned into the work-stealing pool (tokio::spawn).
+			// OwnedTasks::bind is never emitted as its own symbol; bind_inner is the
+			// inner locked-list helper that survives both debug and release builds.
+			// Symbols use $LT$S$GT$ dollar-encoding for the generic param; rustDemangle
+			// strips this so prefix matching finds all monomorphised copies.
+			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiUprobeTokioTaskNew,
+			}},
+			// Current-thread scheduler: LocalOwnedTasks<S>::bind fires when a task
+			// is spawned on a single-threaded runtime (tokio::task::spawn_local,
+			// used by actix-web and similar frameworks). Survives both debug and
+			// release builds. Same $LT$S$GT$ dollar-encoding as bind_inner above.
+			"tokio::runtime::task::list::LocalOwnedTasks::bind": {{
+				Required: false,
+				Start:    p.bpfObjects.ObiUprobeTokioTaskNew,
+			}},
+			// spawn_blocking is a regular fn (not async) that synchronously allocates
+			// a blocking pool task and returns JoinHandle<R> (= NonNull<Header> = 8 bytes,
+			// returned in rax).  The uretprobe reads the blocking task ptr from rax,
+			// looks up the handler task's inbound connection (set by Fix 1), and
+			// registers the blocking task in tokio_task_state with conn_valid=1.
+			// This eliminates the racy process-level fallback for concurrent
+			// spawn_blocking calls: find_tokio_parent_trace resolves at depth 0.
+			//
+			// We target the inner free fn tokio::runtime::blocking::pool::spawn_blocking<F,R>,
+			// NOT the public wrapper tokio::task::blocking::spawn_blocking. The wrapper is
+			// inlined away in release; the inner fn survives in BOTH debug and release and
+			// returns the same JoinHandle<R> in rax, so it alone covers every build.
+			// Prefix matching is exact enough here: the sibling symbols pool::Spawner::
+			// spawn_blocking and pool::Spawner::spawn_blocking_inner have "Spawner::" after
+			// "pool::", so this prefix matches only the free fn's monomorphizations.
+			"tokio::runtime::blocking::pool::spawn_blocking": {{
+				Required: false,
+				End:      p.bpfObjects.ObiUretprobeTokioSpawnBlocking,
+			}},
+		},
 	}
 	if p.cfg.JVMRuntimeMetrics.Enabled {
 		m["libjvm.so"] = map[string][]*ebpfcommon.ProbeDesc{
