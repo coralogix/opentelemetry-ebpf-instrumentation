@@ -1,0 +1,53 @@
+services:
+  # One container running BOTH server (8092) and backend (8093) so the server can
+  # reach its backend over 127.0.0.1. OBI shares this container's network + pid
+  # namespace, so it instruments both processes.
+  tokioserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/rusttokiotest/Dockerfile
+    image: hatest-rust-tokio
+    ports:
+      - "8092:8092" # server (the backend on 8093 stays internal)
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    command:
+      - --config=/configs/obi-config-rust-tokio.yml
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security:/sys/kernel/security
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-rust-tokio:/var/run/obi
+    image: hatest-obi
+    privileged: true # in some environments you can drop this and use cap_add: [ SYS_ADMIN ]
+    network_mode: "service:tokioserver"
+    pid: "service:tokioserver"
+    # eBPF settings (open_port, context_propagation, track_request_headers, bpf_debug,
+    # trace_printer) live in obi-config-rust-tokio.yml — mirroring the hand-validated
+    # config — so there is a single authoritative source. Only operational knobs here.
+    environment:
+      GOCOVERDIR: "/coverage"
+      OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms
+      OTEL_EBPF_SERVICE_NAMESPACE: "integration-test"
+      OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT: "1ms"
+      OTEL_EBPF_BPF_BATCH_TIMEOUT: "10ms"
+      OTEL_EBPF_HOSTNAME: "obi"
+    depends_on:
+      tokioserver:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60@sha256:4fd2d70fa347d6a47e79fcb06b1c177e6079f92cba88b083153d56263082135e
+    ports:
+      - "16686:16686" # query frontend (the test reads traces from here)
+      - "4317"        # OTLP gRPC
+      - "4318"        # OTLP HTTP (OBI exports here)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug

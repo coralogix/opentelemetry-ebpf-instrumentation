@@ -1,25 +1,30 @@
-// Simple backend server that acts as the downstream service.
-// The frontend server (server/) makes async outgoing HTTP calls to this process.
-// OBI should produce a client span (from server) whose parentSpanID matches
-// the server span of whichever /direct, /spawn, or /nested endpoint triggered it.
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
+// backend: downstream service for server (work-stealing test).
+// Echoes the traceparent header so the test can verify propagation from logs.
+use axum::{Router, routing::get, http::HeaderMap, response::IntoResponse};
 
-async fn ping(req: HttpRequest) -> HttpResponse {
-    // Echo back any traceparent header so we can verify propagation from logs.
-    let traceparent = req
-        .headers()
+async fn ping(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
         .get("traceparent")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("(none)");
     println!("backend /ping  traceparent={}", traceparent);
-    HttpResponse::Ok().body(format!("pong traceparent={}", traceparent))
+    format!("pong traceparent={}", traceparent)
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    println!("backend listening on http://0.0.0.0:8091");
-    HttpServer::new(|| App::new().service(web::resource("/ping").route(web::get().to(ping))))
-        .bind(("0.0.0.0", 8091))?
-        .run()
+async fn health() -> impl IntoResponse {
+    "ok\n"
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/ping", get(ping));
+
+    println!("backend listening on http://0.0.0.0:8093");
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8093")
         .await
+        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }

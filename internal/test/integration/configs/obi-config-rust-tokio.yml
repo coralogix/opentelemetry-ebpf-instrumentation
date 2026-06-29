@@ -1,0 +1,17 @@
+# OBI config for the Rust/Tokio context-propagation integration test.
+log_level: debug
+open_port: "8092,8093" # server (8092) + backend (8093)
+
+otel_traces_export:
+  endpoint: "http://jaeger:4318"
+
+ebpf:
+  track_request_headers: true
+  context_propagation: all
+  bpf_debug: true
+
+attributes:
+  kubernetes:
+    enable: false
+
+trace_printer: "json_indent"
