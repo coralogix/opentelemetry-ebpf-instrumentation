@@ -11,6 +11,7 @@
 #include <common/lw_thread.h>
 #include <common/python_task.h>
 #include <common/runtime.h>
+#include <common/tokio_task.h>
 #include <common/trace_helpers.h>
 
 #include <pid/pid_helpers.h>
@@ -27,6 +28,7 @@
 #include <maps/nodejs_fd_map.h>
 #include <maps/puma_tasks.h>
 #include <maps/python_thread_state.h>
+#include <maps/tokio_thread_state.h>
 #include <maps/server_traces.h>
 #include <maps/tp_info_mem.h>
 
@@ -175,6 +177,66 @@ static __always_inline u64 resolve_python_current_task(const trace_key_t *t_key,
     return 0;
 }
 
+static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(u64 pid_tgid) {
+    const tokio_thread_state_t *thread_state =
+        (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
+
+    // Primary path + thread-level fallback: only meaningful when this thread is
+    // currently polling a task.  NOTE: blocking-pool threads (spawn_blocking) have
+    // NO current_task in release builds — the blocking task's poll is inlined, so
+    // RawTask::poll never fires there.  We must therefore NOT return early here, or
+    // Fallback 2 below (which exists precisely for those threads) is unreachable.
+    if (thread_state && thread_state->current_task) {
+        bpf_dbg_printk("tid=%d task=%llx", (u32)pid_tgid, thread_state->current_task);
+
+        tp_info_pid_t *tp = find_tokio_parent_trace(thread_state->current_task);
+        if (tp) {
+            return tp;
+        }
+
+        // Fallback 1: when the ancestry walk fails because the reqwest/hyper
+        // connection pool task predates OBI or sits in a disconnected subtree
+        // (e.g., actix-web + reqwest client), use the last inbound conn that
+        // was recorded on this specific thread by server_or_client_trace.
+        const connection_info_part_t *inbound = (const connection_info_part_t *)bpf_map_lookup_elem(
+            &tokio_thread_inbound_conn, &pid_tgid);
+        bpf_dbg_printk("thread-level fallback check tid=%d inbound=%p", (u32)pid_tgid, inbound);
+        if (inbound) {
+            bpf_dbg_printk("fallback key port=%d pid=%d", inbound->port, inbound->pid);
+            tp_info_pid_t *fb_tp =
+                (tp_info_pid_t *)bpf_map_lookup_elem(&server_traces_aux, inbound);
+            bpf_dbg_printk("fallback server_traces_aux result=%p", fb_tp);
+            // Return fb_tp even if NULL: we DID identify this thread's inbound conn,
+            // so it is the authoritative answer. Do NOT fall through to the racy
+            // process-level Fallback 2 — under concurrency it would resolve a
+            // different request's trace (misattribution). Fail closed instead.
+            return fb_tp;
+        }
+    }
+
+    // Fallback 2: for tasks on tokio blocking-pool threads (spawn_blocking),
+    // which run on a different OS thread than the handler that detected the
+    // inbound request, neither the ancestry walk nor the thread-level fallback
+    // can reach the inbound conn.  Use the process-level record written by
+    // server_or_client_trace as a last resort.  Reachable even when current_task
+    // is unset (the release blocking-pool case — see note above).
+    // Caveat: racy with concurrent requests from different clients.
+    const u32 tgid = (u32)(pid_tgid >> 32);
+    const connection_info_part_t *proc_inbound =
+        (const connection_info_part_t *)bpf_map_lookup_elem(&tokio_process_inbound_conn, &tgid);
+    bpf_dbg_printk("process-level fallback check tgid=%d inbound=%p", tgid, proc_inbound);
+    if (proc_inbound) {
+        bpf_dbg_printk(
+            " process fallback key port=%d pid=%d", proc_inbound->port, proc_inbound->pid);
+        tp_info_pid_t *proc_tp =
+            (tp_info_pid_t *)bpf_map_lookup_elem(&server_traces_aux, proc_inbound);
+        bpf_dbg_printk(" process fallback server_traces_aux result=%p", proc_tp);
+        return proc_tp;
+    }
+
+    return NULL;
+}
+
 static __always_inline tp_info_pid_t *find_python_parent_trace(const trace_key_t *t_key,
                                                                u64 pid_tgid) {
     const u64 task_id = resolve_python_current_task(t_key, pid_tgid);
@@ -301,6 +363,11 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
     tp_info_pid_t *python_parent = find_python_parent_trace(t_key, pid_tgid);
     if (python_parent) {
         return python_parent;
+    }
+
+    tp_info_pid_t *tokio_parent = find_tokio_parent_trace_for_thread(pid_tgid);
+    if (tokio_parent && tokio_parent->valid) {
+        return tokio_parent;
     }
 
     tp_info_pid_t *nginx_parent = find_nginx_parent_trace(p_conn, orig_dport);

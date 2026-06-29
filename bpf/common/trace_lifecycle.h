@@ -16,6 +16,8 @@
 #include <maps/java_vt_threads.h>
 #include <maps/outgoing_trace_map.h>
 #include <maps/server_traces.h>
+#include <maps/tokio_task_state.h>
+#include <maps/tokio_thread_state.h>
 
 #include <gotracer/go_common.h>
 
@@ -129,8 +131,61 @@ static __always_inline void server_or_client_trace(const u8 type,
                        t_key.p_key.pid,
                        t_key.p_key.tid,
                        conn_part.port);
+        bpf_dbg_printk("server_traces_aux WRITE: ip_hi=%llx ip_lo=%llx port=%d pid=%d",
+                       *(const u64 *)(&conn_part.addr[0]),
+                       *(const u64 *)(&conn_part.addr[8]),
+                       conn_part.port,
+                       conn_part.pid);
 
         bpf_map_update_elem(&server_traces_aux, &conn_part, tp_p, BPF_ANY);
+
+        // Only touch the Tokio-specific maps when this thread has actually
+        // polled a Tokio task (tokio_thread_state is set) — i.e. this is a Tokio
+        // process.  Non-Tokio servers (Go, Java, Python, nginx, …) reach this path
+        // on every HTTP request and must not pay for these writes / LRU churn.
+        const tokio_thread_state_t *ts =
+            (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
+        if (ts && ts->current_task) {
+            // Record inbound conn for Tokio ancestry-walk fallbacks.  This fires on
+            // the handler thread even when accept4 happened on a different thread
+            // (e.g., actix-web's tokio-rt-worker), so poll-refresh alone can't set it.
+            bpf_map_update_elem(&tokio_thread_inbound_conn, &id, &conn_part, BPF_ANY);
+            // Process-level record: enables the last-resort fallback for tasks on
+            // tokio blocking-pool threads (spawn_blocking), which run on a different
+            // OS thread than the handler, making both ancestry walk and thread-level
+            // fallback fail.
+            const u32 tgid = (u32)(id >> 32);
+            bpf_map_update_elem(&tokio_process_inbound_conn, &tgid, &conn_part, BPF_ANY);
+            bpf_dbg_printk(
+                "tokio process inbound conn WRITE: tgid=%d port=%d", tgid, conn_part.port);
+            // Fix 1: mark the currently-running handler task conn_valid so that any
+            // descendant that reaches it via the ancestry walk (including spawn_blocking
+            // tasks if registered in tokio_task_state) finds conn_valid=1 directly.
+            //
+            // Lazy-registration extension: if the task is NOT yet in tokio_task_state
+            // (pre-OBI handler — created before OBI attached, never seen by
+            // obi_uprobe_tokio_task_new), CREATE the entry here.  This ensures that
+            // the spawn_blocking uretprobe's Try-1 lookup succeeds for these tasks
+            // instead of falling through to racy thread- or process-level fallbacks.
+            tokio_task_state_t *task_state =
+                (tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &ts->current_task);
+            if (task_state) {
+                task_state->conn = conn_part;
+                task_state->conn_valid = 1;
+                bpf_dbg_printk("tokio handler task conn_valid SET: task=%llx port=%d",
+                               ts->current_task,
+                               conn_part.port);
+            } else {
+                tokio_task_state_t new_state = {};
+                new_state.conn = conn_part;
+                new_state.conn_valid = 1;
+                new_state.version = 1;
+                bpf_map_update_elem(&tokio_task_state, &ts->current_task, &new_state, BPF_ANY);
+                bpf_dbg_printk("tokio handler task LAZY REG: task=%llx port=%d",
+                               ts->current_task,
+                               conn_part.port);
+            }
+        }
 
         tp_info_pid_t *existing = bpf_map_lookup_elem(&server_traces, &t_key);
         if (existing && (existing->req_type == tp_p->req_type) &&

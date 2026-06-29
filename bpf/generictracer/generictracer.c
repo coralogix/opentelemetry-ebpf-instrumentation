@@ -10,6 +10,7 @@
 #include "nginx.c"
 #include "nodejs.c"
 #include "python.c"
+#include "tokio.c"
 #include "protocol_handler.c"
 #include "ruby.c"
 
