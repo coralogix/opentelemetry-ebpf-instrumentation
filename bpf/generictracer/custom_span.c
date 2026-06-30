@@ -146,6 +146,33 @@ static __always_inline int custom_span_str_from_spec(
         *out_len = n + 1;
         return 0;
     }
+    if (arg->arg_type == k_obi_usdt_arg_ptr_field_go_string) {
+        // reg holds *struct; val_off is field offset within that struct.
+        // String header: {data ptr at struct+val_off, len at +8}.
+        unsigned long sdata = 0;
+        unsigned long slen = 0;
+        if ((err =
+                 bpf_probe_read_user(&sdata, sizeof(sdata), (const void *)(ptr + arg->val_off)))) {
+            return err;
+        }
+        if ((err = bpf_probe_read_user(
+                 &slen, sizeof(slen), (const void *)(ptr + arg->val_off + 8)))) {
+            return err;
+        }
+        if (!sdata || slen == 0) {
+            return 0;
+        }
+        u32 n = (u32)slen;
+        if (n >= dst_max) {
+            n = dst_max - 1;
+        }
+        if ((err = bpf_probe_read_user(dst, n, (const void *)sdata))) {
+            return err;
+        }
+        ((u8 *)dst)[n] = 0;
+        *out_len = n + 1;
+        return 0;
+    }
     if (arg->arg_type != k_obi_usdt_arg_reg_deref_str) {
         return k_obi_usdt_arg_err_bad_type;
     }
@@ -178,7 +205,8 @@ static __always_inline void custom_span_fill_args(struct pt_regs *ctx,
         }
 
         u8 t = spec->args[i].arg_type;
-        if (t == k_obi_usdt_arg_reg_deref_str || t == k_obi_usdt_arg_go_string) {
+        if (t == k_obi_usdt_arg_reg_deref_str || t == k_obi_usdt_arg_go_string ||
+            t == k_obi_usdt_arg_ptr_field_go_string) {
             u32 out_len = 0;
             int err = custom_span_str_from_spec(
                 ctx, &spec->args[i], e->arg_str[i], k_custom_span_str_len, &out_len);

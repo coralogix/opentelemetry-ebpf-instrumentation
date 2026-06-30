@@ -30,6 +30,10 @@ enum obi_usdt_arg_type {
     // registers on amd64 (AX, BX, CX, DI, SI, R8, ...), so the {ptr,
     // len} pair is generally NOT at reg_off and reg_off+8.
     k_obi_usdt_arg_go_string = 4,
+    // Go string field of a struct: pt_regs[reg_off] is a *struct; val_off
+    // is the field byte offset. String header: {data at struct+val_off,
+    // len at struct+val_off+8}. Produced by auto_attrs.
+    k_obi_usdt_arg_ptr_field_go_string = 5,
 };
 
 enum obi_usdt_arg_error {

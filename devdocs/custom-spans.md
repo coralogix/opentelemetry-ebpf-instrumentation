@@ -112,6 +112,73 @@ attrs:
 
 String attributes are read up to 128 bytes per fire.
 
+### Automatic argument extraction (Go function-mode)
+
+For `function_span:` and `function_noret:` targets on Go binaries, OBI
+automatically discovers and extracts every primitive scalar and string
+argument of the target method — no `attrs:` block needed. Works on
+stripped binaries (`-ldflags="-s -w"`, no DWARF, no `.symtab`) by walking
+the runtime type tables (`.typelink` → `_type` → `funcType`) the Go
+linker keeps for the runtime's own reflect support.
+
+```yaml
+- name: order.place
+  on:
+    function_span: "main.(*Order).Place"
+```
+
+That's it. No `attrs:` block needed for the common case.
+
+At attach time OBI resolves the receiver type, decodes the method's
+signature, and emits one BPF spec entry per primitive argument. The
+emitted span carries:
+
+- `arg0`, `arg1`, … for top-level scalar and string args
+- `argN.<FieldName>` for primitive fields reachable through a struct-
+  pointer arg (Go's idiomatic `*Request` handler pattern)
+
+#### Covered
+
+- Scalars in registers: `bool`, signed/unsigned ints ≤ 8 bytes, `uintptr`,
+  `unsafe.Pointer`
+- Go strings in registers (`{ptr, len}`)
+- Primitive **scalar** fields of a `*struct` argument
+- Primitive **string** fields of a `*struct` argument
+
+#### Skipped silently
+
+- Floats — Go regabi passes them in float registers (XMM/V), which are
+  not in the standard `pt_regs` snapshot a uprobe receives
+- Slices, maps, channels, interfaces, func values — consume register
+  slots for ordering, no attr emitted
+- Nested struct pointers — only one level of indirection is followed
+- Arrays-by-value and stack-spilled args (after 9 int regs amd64 / 16
+  arm64)
+- Unexported struct fields — most are codegen-internal (protoc-gen-go
+  `state`, `sizeCache`, `unknownFields`) and would be noise
+- Value-receiver methods, plain top-level functions — only the
+  `pkg.(*Type).Method` symbol form is supported
+- Methods on types not reached via `reflect.TypeOf` — the linker dead-
+  codes the funcType. The probe attaches and the span fires; only the
+  auto attrs are missing. A warning is logged once per span.
+
+#### Enriching with a manual `attrs:` block
+
+A manual `attrs:` block layers on top. On argument-index collision
+(`attrs.<name>.arg == K` where auto already produced a slot for function
+arg K), the manual declaration **replaces** the auto slot — user-supplied
+name + type win. On non-colliding indices, manual extends auto. Both
+lists appear on the emitted span.
+
+Use this to:
+- rename a noisy `arg1.UserId` to `user_id`
+- override an inferred type (`u64` instead of auto-derived `i64`)
+- extract an extra value auto missed (e.g. a register-level scalar not
+  reachable via the funcType walk)
+
+On non-Go binaries (no `.typelink`), auto extraction is a no-op; only
+the manual `attrs:` block runs and the probe still attaches for timing.
+
 ### `ttl`
 
 `ttl` controls how long the pairer holds a start event while waiting for
@@ -549,6 +616,19 @@ ebpf:
 OBI detects Go from the binary's ELF, reads `tenant` as a Go `{ptr, len}`
 string, and emits a span whose duration is the entry-to-return time.
 
+The same target without a manual `attrs:` block:
+
+```yaml
+- name: billing.charge
+  on:
+    function_span: billing.(*Service).Charge
+```
+
+attaches the same probe, emits the same span shape, and additionally
+populates `arg0`, `arg1`, … (plus `arg2.Field` for any `*Request`-style
+argument) from the receiver type's runtime metadata at attach time. No
+DWARF required; works on stripped binaries.
+
 ### Surface a specific Python function
 
 ```yaml
@@ -591,6 +671,18 @@ exactly. Requires Python built with `--enable-pydtrace`.
   to a NUL-terminated read; integers keep the ELF-declared
   sign/width. The match modifier installs `MatchName` + `MatchArgIdx`
   + the `match_enabled` flag.
+- **Auto-attribute extraction** (`pkg/ebpf/auto_attrs.go` +
+  `pkg/internal/gometa/`). On a Go function-mode target, OBI
+  parses `.typelink`, resolves the receiver of `pkg.(*Type).Method`,
+  walks `uncommonType.methods[]` for the method name, and decodes its
+  `funcType.In[]`. A regabi-1.17+ register allocator (amd64 + arm64)
+  maps each input to a `pt_regs` slot; the per-recipe encoding
+  (`reg-scalar`, `reg-gostring`, `ptr-field-scalar`,
+  `ptr-field-gostring`) becomes one `obi_usdt_arg_spec` entry. The
+  `k_obi_usdt_arg_ptr_field_go_string` BPF arg type reads a Go string
+  header at `*(struct_ptr + field_off)`. The userspace span reader
+  pairs the same recipe (as `[]AutoAttrSlot`) with each event and
+  labels attributes `arg0`, `arg1`, …, `argN.FieldName` at decode time.
 - **Attach** is handled in `pkg/ebpf/instrumenter.go`. Each uprobe
   attach carries a cookie that BPF reads via
   `bpf_get_attach_cookie()` (kernel ≥5.15). On older kernels we fall

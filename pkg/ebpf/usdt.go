@@ -33,6 +33,10 @@ const (
 	obiUSDTArgRegDeref    = uint8(2)
 	obiUSDTArgRegDerefStr = uint8(3)
 	obiUSDTArgGoString    = uint8(4)
+	// obiUSDTArgPtrFieldGoString: reg holds a *struct; val_off is the
+	// field offset within that struct. The string header lives at
+	// {struct+val_off, struct+val_off+8}. Produced by gometa auto-attrs.
+	obiUSDTArgPtrFieldGoString = uint8(5)
 )
 
 // TODO: Reevaluate github.com/parca-dev/usdt if it exposes target-ELF-driven

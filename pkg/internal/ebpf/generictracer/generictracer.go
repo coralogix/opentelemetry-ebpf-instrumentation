@@ -676,7 +676,35 @@ func (p *Tracer) functionModeProbe(span *config.CustomSpanSpec, cookie uint64,
 		if ef != nil {
 			lang = obiebpf.DetectFunctionLang(ef)
 		}
-		compiled, err := obiebpf.BuildFunctionABISpec(span, cookie, runtime.GOARCH, lang)
+		var (
+			compiled obiebpf.CompiledCustomSpanSpec
+			err      error
+		)
+		autoOK := false
+		if lang == obiebpf.FunctionLangGo && ef != nil {
+			var slots []obiebpf.AutoAttrSlot
+			compiled, slots, err = obiebpf.BuildFunctionAutoSpec(ef, span, cookie, runtime.GOARCH)
+			if err != nil {
+				p.log.Debug("custom_span: auto attr extraction unavailable",
+					"span", span.Name, "error", err)
+			} else {
+				autoOK = true
+				if len(span.Attrs) > 0 {
+					manual, mErr := obiebpf.BuildFunctionABISpec(span, cookie, runtime.GOARCH, lang)
+					if mErr != nil {
+						err = mErr
+					} else {
+						compiled, slots = obiebpf.MergeManualOverAuto(compiled, manual, slots)
+					}
+				}
+				if err == nil && p.customSpan != nil {
+					p.customSpan.registry.SetAutoSlots(cookie, slots)
+				}
+			}
+		}
+		if !autoOK {
+			compiled, err = obiebpf.BuildFunctionABISpec(span, cookie, runtime.GOARCH, lang)
+		}
 		if err != nil {
 			return nil, err
 		}

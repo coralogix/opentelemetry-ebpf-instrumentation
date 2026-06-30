@@ -32,6 +32,7 @@ type customSpanAttrSlot struct {
 	ArgIdx uint8
 	Name   string
 	Type   config.CustomSpanAttrType
+	Auto   bool
 }
 
 func NewCustomSpanDef(span *config.CustomSpanSpec, cookie uint64) *CustomSpanDef {
@@ -67,6 +68,32 @@ func (r *CustomSpanRegistry) Register(def *CustomSpanDef) {
 	r.mu.Lock()
 	r.defs[def.Cookie] = def
 	r.mu.Unlock()
+}
+
+// SetAutoSlots replaces the def's auto-installed slots while preserving any
+// config-declared ones. Idempotent — last write wins.
+func (r *CustomSpanRegistry) SetAutoSlots(cookie uint64, slots []obiebpf.AutoAttrSlot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	def, ok := r.defs[cookie]
+	if !ok {
+		return
+	}
+	kept := def.usedSlots[:0]
+	for _, s := range def.usedSlots {
+		if !s.Auto {
+			kept = append(kept, s)
+		}
+	}
+	def.usedSlots = kept
+	for _, s := range slots {
+		def.usedSlots = append(def.usedSlots, customSpanAttrSlot{
+			ArgIdx: s.ArgIdx,
+			Name:   s.Name,
+			Type:   s.Type,
+			Auto:   true,
+		})
+	}
 }
 
 func (r *CustomSpanRegistry) Lookup(cookie uint64) (*CustomSpanDef, bool) {
