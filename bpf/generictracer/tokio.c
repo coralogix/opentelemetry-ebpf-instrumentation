@@ -57,22 +57,22 @@ static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u64 task_id) {
 // SEC target is "self" because Tokio is statically linked into the application
 // binary — there is no separate shared library to target.
 //
-// This handler is attached to TWO probe points with the same BPF program
-// (the Go-side UProbes() map lists both):
+// This handler is attached (via demangled-prefix matching in generictracer.go) to
+// every monomorphized copy of the vtable poll function:
 //
-//   tokio::runtime::task::harness::poll_future<T,S>  (debug builds)
-//     PARM1 = header: NonNull<Header>
-//     Present in debug; inlined away by the optimiser in release builds.
-//     Many monomorphized copies exist (one per T×S pair); the Go-side
-//     instrumenter attaches to all of them via demangled-prefix matching.
+//   tokio::runtime::task::raw::poll<T,S>(ptr: NonNull<Header>)
+//     PARM1 = ptr (the task Header pointer).
+//     This is the free fn whose ADDRESS is stored in each task's vtable; the
+//     scheduler reaches it via an indirect call on every poll, for every task type
+//     and every scheduler (multi-thread workers, current-thread, AND the blocking
+//     pool), in both debug and release. Because its address is taken for the
+//     vtable it cannot be inlined.
 //
-//   tokio::runtime::task::raw::RawTask::poll(self)   (release builds)
-//     PARM1 = self.ptr (NonNull<Header>) — same layout as poll_future PARM1
-//     because RawTask is a transparent newtype over NonNull<Header>.
-//     Single non-generic copy; survives release optimisation because it
-//     dispatches through an indirect vtable function pointer (no inlining).
-//
-// In both cases PARM1 is the Header pointer; no per-symbol BPF difference.
+// We do NOT probe tokio::runtime::task::raw::RawTask::poll: that is the thin
+// thunk (ldr vtable; ldr vtable.poll; br) that performs the indirect call, and the
+// optimiser inlines it into the scheduler's run_task in release — so a probe on it
+// never fires on multi-thread workers in release. Probing raw::poll (the vtable
+// target) is what makes the feature work in release MT and on the blocking pool.
 SEC("uprobe/self:tokio_poll")
 int obi_uprobe_tokio_poll(struct pt_regs *ctx) {
     const u64 id = bpf_get_current_pid_tgid();

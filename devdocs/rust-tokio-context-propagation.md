@@ -61,7 +61,7 @@ The end result is the same two-stage lookup used by the Python async path:
 
 The design depends on a few Tokio behaviors:
 
-1. Every task poll on the multi-thread runtime dispatches through `RawTask::poll`, an indirect vtable call that the optimiser cannot inline, so it is observable in both debug and release builds.
+1. Every task poll dispatches through the task's vtable to the monomorphized free fn `tokio::runtime::task::raw::poll::<T,S>`. That function's address is stored in the vtable, so it cannot be inlined and is reached via an indirect call on every poll — for every task type and every scheduler (multi-thread workers, current-thread, and the blocking pool) — in both debug and release.
 2. Spawning a task binds it into an owned-tasks list (`OwnedTasks::bind` / `bind_inner` for the multi-thread scheduler, `LocalOwnedTasks::bind` for the current-thread scheduler) before it can run — the earliest point at which both the new task pointer and the spawning task are simultaneously observable.
 3. `spawn_blocking` is a regular synchronous function: it allocates the blocking task and returns its `JoinHandle` to the caller without an intervening context switch, so the spawning (handler) task is still "current" on the thread when the function returns.
 
@@ -71,14 +71,14 @@ Tokio is **statically linked** into the application binary, so all probes target
 
 The implementation is built around four BPF programs. Because Tokio's internal symbols are generic and monomorphized — and are emitted under two different Rust mangling schemes — the Go-side instrumenter attaches each program to *every* matching symbol via demangled-prefix matching (`FindExeSymbolsByPrefix`).
 
-### `RawTask::poll` (poll entry/exit) — `tokio_poll`
+### `raw::poll` (poll entry/exit) — `tokio_poll`
 
-`tokio::runtime::task::raw::RawTask::poll` fires when the executor polls a task.
+`tokio::runtime::task::raw::poll::<T,S>` fires when the executor polls a task. It is the function whose address sits in each task's vtable, reached via the scheduler's indirect call.
 
 - **Entry** (`obi_uprobe_tokio_poll`): records `current_task = PARM1` (the `Header*`) in `tokio_thread_state`, lazily (re)registers the task's inbound connection when this thread is serving a confirmed inbound request, and refreshes `obi_ctx` for the task now running here.
-- **Exit** (`obi_uretprobe_tokio_poll`): clears `current_task` and removes the thread entry so a later task on the same thread never sees stale state.
+- **Exit** (`obi_uretprobe_tokio_poll`): clears `current_task`. Each `raw::poll` copy tail-calls the harness (`br`, no `ret`), so in practice the uretprobe is skipped; `current_task` is overwritten on the next entry and `obi_ctx` is managed at entry, so this is safe.
 
-`RawTask::poll` is the non-generic, single-copy vtable dispatcher; it survives release optimisation. In debug builds `harness::poll_future` also exists but is intentionally **not** probed — `RawTask::poll` already covers every poll, and probing both would double-fire. The `PARM1` `Header*` layout is identical for both symbols (`RawTask` is a transparent newtype over `NonNull<Header>`).
+We probe `raw::poll` rather than the thin `RawTask::poll` thunk that performs the indirect call: that thunk (`ldr vtable; ldr vtable.poll; br`) is inlined into the scheduler's `run_task` in release, so a probe on it never fires on multi-thread workers in release — which made the feature inert in release multi-thread. The vtable target `raw::poll` cannot be inlined (its address is taken), so it is the correct universal probe point; its monomorphized copies are attached via prefix matching. `harness::poll_future` is also not probed (it would double-fire). PARM1 is the `Header*` in all cases.
 
 ### `OwnedTasks::bind_inner` / `LocalOwnedTasks::bind` (task creation) — `tokio_task_new`
 
@@ -107,8 +107,8 @@ When a Tokio client request needs a trace parent (at egress, via `find_tokio_par
 
 Read `tokio_thread_state[pid_tgid].current_task`. If the thread is actively polling a task, that pointer is the entry point for the ancestry walk.
 
-Note: blocking-pool threads in **release** builds have no `current_task` — the blocking task's poll is inlined, so `RawTask::poll` never fires there. 
-The lookup must therefore not return early when `current_task` is unset, or Fallback 2 (which exists precisely for those threads) becomes unreachable.
+Because `raw::poll` (the vtable target) fires on every poll for every scheduler — including the blocking pool — `current_task` is set on blocking-pool threads in both debug and release, so `spawn_blocking` tasks resolve through the normal walk. 
+The fallbacks below remain for tasks that predate OBI or sit in a structurally disconnected subtree. (The lookup also does not return early when `current_task` is unset, so the fallbacks stay reachable.)
 
 ### Phase 2: walk task ancestry until a request owner is found
 
@@ -153,14 +153,12 @@ The poll-entry refresh writes a task's connection only when it does **not** alre
 
 `obi_ctx` (the pinned, OTEP-shared `traces_ctx_v1` map) is re-established for the running task on every poll **entry** (`tokio_refresh_obi_ctx`), and deliberately not touched on poll exit:
 
-- **Release safety** — `RawTask::poll` can end in a tail call with no `RET`, so the poll uretprobe may be skipped. An exit-time `obi_ctx__del` would never run.
-  The entry uprobe always fires, so entry-time refresh is reliable.
-- **No flicker** — deleting `obi_ctx` on every poll exit would drop the context at the first `await` suspension of a still-in-flight request. 
-  Refreshing to the task's own owning trace on each entry keeps the context correct for the whole request, follows a migrated task, and overwrites any stale context left by a different task that previously ran on this thread.
+- **Release safety** — each `raw::poll` copy tail-calls the harness with no `RET`, so the poll uretprobe may be skipped. An exit-time `obi_ctx__del` would never run. The entry uprobe always fires, so entry-time refresh is reliable.
+- **No flicker** — deleting `obi_ctx` on every poll exit would drop the context at the first `await` suspension of a still-in-flight request. Refreshing to the task's own owning trace on each entry keeps the context correct for the whole request, follows a migrated task, and overwrites any stale context left by a different task that previously ran on this thread.
 
 ### Task pointer reuse is versioned
 
-Tokio can reuse the same `Header*` address for a later task. To prevent a stale parent link from resolving to the wrong task, each `tokio_task_state` carries a `version` counter, bumped on detected pointer reuse. 
+Tokio can reuse the same `Header*` address for a later task. To prevent a stale parent link from resolving to the wrong task, each `tokio_task_state` carries a `version` counter, bumped on detected pointer reuse.
 A child records its parent's version at spawn time (`parent_version`); the ancestry walk aborts the link if the parent's current version no longer matches. 
 Only a positive mismatch aborts — an unset (`0`) `parent_version` is trusted, to avoid false-aborting a real but unversioned lineage.
 
@@ -178,23 +176,17 @@ The userspace instrumenter resolves Tokio symbols from the executable's own symb
 
 ## Known Limitations
 
-- **Release + `spawn_blocking` + concurrency.** Under concurrent load on a release build, blocking-pool tasks can fall through to the process-level fallback (`tokio_process_inbound_conn`), which is last-write-wins. 
-Context can be misattributed when multiple clients hit `spawn_blocking` endpoints simultaneously (~10–50% in stress tests). 
-A precise fix requires per-request blocking-task identity (probing `BlockingTask::poll` with the `Header` offset), which is fragile across Tokio versions and not yet implemented.
+- **Keep-alive connection-overwrite tail.** Under heavy concurrent load on a reused keep-alive connection, the connection-keyed `server_traces_aux` entry can be overwritten before egress resolves it, dropping or occasionally misattributing a small fraction of chains. This is a connection-level limitation independent of the Tokio task-walk (it affects the generic path too).
 
 - **Requires Tokio symbols in the binary (fully-stripped binaries are unsupported).** The probes attach to internal, non-exported symbols (`tokio::runtime::task::raw::poll`, `Cell::new`) resolved from `.symtab` by demangled-prefix matching. A fully-stripped release binary has no `.symtab`, so nothing attaches and Tokio propagation is **silently unavailable** — and OBI cannot even flag it, because its "is this Rust?" detection keys on the `rust_panic` symbol, which the same strip removes. There is no runtime recovery; ship with symbols retained. (A *partial* resolution — some monomorphized copies present, others not — is surfaced as a `Warn` by the instrumenter; only the fully-stripped case is undetectable.)
 
 All Tokio patterns — `await`, `tokio::spawn` with work-stealing, nested spawn, and `spawn_blocking` — are correct in **both debug and release**, including under concurrency, because `raw::poll` (the vtable target) fires on every poll for every scheduler so each task carries its own request's connection by per-task identity.
 
-  | Build | Sequential requests | Concurrent requests |
-  |-------|---------------------|---------------------|
-  | Debug | ✅ correct | ✅ correct |
-  | Release | ✅ correct | ❌ ~10–50% misattribution |
+> Note: an earlier revision probed `RawTask::poll`, the thin thunk that the
+> optimiser inlines in release. That left the task-walk inert on multi-thread
+> workers and the blocking pool in release, so release `spawn_blocking` under
+> concurrency mis-/under-attributed (~10–50%). Re-targeting the probe to the
+> vtable function `raw::poll` (which cannot be inlined) resolved this — see the
+> `tokio_poll` probe description above.
 
-Only the release + concurrent cell is affected. The reason is build-specific: indebug the blocking task is polled through `RawTask::poll` on the blocking-poolthread, so it carries its own request's connection (per-request identity, set bythe `spawn_blocking` return probe) and concurrency is safe. 
-In release that pollis inlined away, so the egress walk cannot start from the blocking task and mustuse the single per-process fallback slot — which is correct when only one requestis in flight (sequential) but cannot distinguish racing requests (concurrent).
-All other patterns (`await`, `tokio::spawn` with work-stealing, nested spawn) arecorrect in both build modes regardless of load.
-
-- **Keep-alive connection-overwrite tail.** Under heavy concurrent load on a reused keep-alive connection, the connection-keyed `server_traces_aux` entry can be overwritten before egress resolves it, dropping a small fraction of chains.
-
-The integration test (`internal/test/integration/red_test_rust_tokio_test.go`) asserts at least one complete `server -> backend` chain per pattern rather than a hard 100%, reflecting these documented tails.
+The integration tests cover both: `TestRustTokioContextPropagation` asserts at least one complete `server -> backend` chain per pattern, and m`TestRustTokioProbeDiscrimination` drives concurrent A/B `spawn_blocking` load and requires many cleanly-attributed chains — a test that fails on the generic path alone and passes only when the Tokio probes correlate.

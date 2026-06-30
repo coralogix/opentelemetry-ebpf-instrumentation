@@ -130,6 +130,44 @@ async fn blocking() -> impl IntoResponse {
     respond(result)
 }
 
+// Same as call_backend_blocking but to an explicit URL — used by the A/B
+// probe-discrimination endpoints (/blocking-a -> /ping-a, /blocking-b -> /ping-b).
+fn call_backend_blocking_url(url: &str) -> Result<String, String> {
+    ureq::get(url)
+        .call()
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.into_string().map_err(|e| e.to_string()))
+}
+
+const BACKEND_A: &str = "http://127.0.0.1:8093/ping-a";
+const BACKEND_B: &str = "http://127.0.0.1:8093/ping-b";
+
+// /blocking-a and /blocking-b are the probe-discrimination endpoints. Each
+// dispatches a spawn_blocking closure that calls a DISTINCT backend path.
+// spawn_blocking always runs on a blocking-pool thread that never handled the
+// inbound request, so the generic thread=request assumption cannot correlate it —
+// under concurrent A/B load the generic process-level fallback (last-write-wins)
+// misattributes, producing traces where a /blocking-a server span contains a
+// /ping-b backend span (or vice versa). The Tokio bridge attributes per task
+// identity, so cross-contamination stays low. The integration test asserts that
+// each side produces at least `minClean` cleanly-attributed chains (not that
+// contamination is zero — a small keep-alive tail is tolerated); that clean-chain
+// floor collapses with the Tokio probes detached and is met with them attached
+// (when they actually fire — debug always; release after the raw::poll re-target).
+async fn blocking_a() -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(|| call_backend_blocking_url(BACKEND_A))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    respond(result)
+}
+
+async fn blocking_b() -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(|| call_backend_blocking_url(BACKEND_B))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
+    respond(result)
+}
+
 // /blocking-nested — async spawn -> spawn_blocking -> ureq. Adds a level of async
 // task ancestry before the blocking boundary.
 async fn blocking_nested() -> impl IntoResponse {
@@ -160,7 +198,9 @@ async fn main() {
         .route("/ws-spawn", get(ws_spawn))
         .route("/ws-nested", get(ws_nested))
         .route("/blocking", get(blocking))
-        .route("/blocking-nested", get(blocking_nested));
+        .route("/blocking-nested", get(blocking_nested))
+        .route("/blocking-a", get(blocking_a))
+        .route("/blocking-b", get(blocking_b));
 
     println!("server (work-stealing) listening on http://0.0.0.0:8092");
     println!("  backend expected at http://127.0.0.1:8093/ping");
@@ -170,6 +210,8 @@ async fn main() {
     println!("  GET /ws-nested       — two nested spawns; each may migrate");
     println!("  GET /blocking        — spawn_blocking -> ureq (blocking pool)");
     println!("  GET /blocking-nested — spawn -> spawn_blocking -> ureq");
+    println!("  GET /blocking-a      — spawn_blocking -> ureq /ping-a (discrimination A)");
+    println!("  GET /blocking-b      — spawn_blocking -> ureq /ping-b (discrimination B)");
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8092")
         .await
