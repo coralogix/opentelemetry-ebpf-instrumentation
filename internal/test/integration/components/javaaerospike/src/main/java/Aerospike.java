@@ -6,6 +6,7 @@ import com.aerospike.client.Bin;
 import com.aerospike.client.Host;
 import com.aerospike.client.Key;
 import com.aerospike.client.policy.ClientPolicy;
+import com.aerospike.client.policy.RecordExistsAction;
 import com.aerospike.client.policy.WritePolicy;
 import com.sun.net.httpserver.HttpServer;
 
@@ -60,6 +61,22 @@ public class Aerospike {
             }
             respondOK(exchange);
         });
+        // /error pre-seeds a key, then issues a CREATE_ONLY put on the same key,
+        // which the server rejects with KEY_EXISTS_ERROR (result_code 5). This
+        // exercises the response result_code -> db.response.status_code path.
+        server.createContext("/error", exchange -> {
+            try {
+                Key key = new Key(NAMESPACE, SET, "obi-err");
+                as.put(sendKey, key, new Bin("product", "seeded")); // ensure the key exists
+                WritePolicy createOnly = new WritePolicy(sendKey);
+                createOnly.recordExistsAction = RecordExistsAction.CREATE_ONLY;
+                as.put(createOnly, key, new Bin("product", "again")); // -> KEY_EXISTS_ERROR
+            } catch (Exception e) {
+                System.out.println("expected error op: " + e.getMessage());
+            }
+            respondOK(exchange);
+        });
+
         server.setExecutor(null);
         System.out.println("starting HTTP server on :8080");
         server.start();

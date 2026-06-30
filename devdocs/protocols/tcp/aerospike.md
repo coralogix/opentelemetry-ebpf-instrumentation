@@ -12,6 +12,13 @@ request and response payloads of an unclassified TCP connection are handed to
 the Aerospike parser. The protocol is **one-request-one-response per connection
 (FIFO)**, so the generic per-connection direction-flip correlation is exact.
 
+Aerospike clients read each response in two steps (an 8-byte proto-header read,
+then a separate read for the body), so the body — which carries `result_code` —
+can arrive in a later recv. A small kernel-side reassembly step (see
+`bpf/generictracer/protocol_aerospike.h`) accumulates response segments until the
+first full frame is present before the event is emitted, so `db.response.status_code`
+is captured regardless of the client's read pattern.
+
 ### proto header (8 bytes, every message)
 
 All multi-byte integers are big-endian.
@@ -170,20 +177,10 @@ the decrypted payloads, so the AS_MSG frames are parsed the same as cleartext.
   in the clients).
 - **Multi-record data**: only operation metadata is captured, not returned
   record/bin values.
-- **Response status codes are client/SDK-dependent**: `db.response.status_code`
-  is parsed from the response `result_code`, which lives in the `as_msg` body. It
-  is only populated when the captured response buffer includes that body. Whether
-  it does depends on how the client SDK reads the response from the socket:
-  - The **Java client** (`aerospike-client-jdk21`) reads each response in two
-    steps — an 8-byte proto-header read, then a separate read for the body — so
-    on the generic TCP path only the header is captured and the `result_code` is
-    not observed (error status stays unset).
-  - SDKs that read the whole response in a single recv leave the full first frame
-    in the captured buffer, so the `result_code` is read and error status is
-    emitted.
-
-  Capturing the body regardless of the client's read pattern would require
-  kernel-side response reassembly (an eBPF change outside this parser's scope).
+- **Response status codes**: `db.response.status_code` is parsed from the
+  response `result_code`. The kernel-side response reassembly (see Overview)
+  captures the `as_msg` body regardless of how the client SDK reads the response,
+  so error status is emitted reliably.
 
 ## Configuration
 

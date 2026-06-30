@@ -87,8 +87,9 @@ const (
 	ProtocolTypeMQTT // placeholder for future kernel-space detection
 	ProtocolTypeMSSQL
 	ProtocolTypeSunRPC
-	ProtocolTypeNATS // placeholder for future kernel-space detection
-	ProtocolTypeAMQP // placeholder for future kernel-space detection
+	ProtocolTypeAerospike // must match k_protocol_type_aerospike (8) in connection_info.h
+	ProtocolTypeNATS      // placeholder for future kernel-space detection
+	ProtocolTypeAMQP      // placeholder for future kernel-space detection
 )
 
 const (
