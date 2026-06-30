@@ -128,10 +128,13 @@ aerospike_response_accumulate(tcp_req_t *req, const void *u_buf, u32 bytes_len) 
     // offset and the copy length bounded by k_tcp_res_len/2 lets the verifier
     // prove off + to_copy <= k_tcp_res_len (the rbuf size).
     if (req->resp_len < (k_tcp_res_len / 2)) {
-        u32 off = req->resp_len;
-        bpf_clamp_umax(off, (k_tcp_res_len / 2));
-        u32 to_copy = bytes_len;
-        bpf_clamp_umax(to_copy, (k_tcp_res_len / 2));
+        // Mask (not clamp) so older-kernel verifiers (e.g. 5.15) can prove the
+        // write stays within rbuf: off and to_copy are each in
+        // [0, k_tcp_res_len/2 - 1], so off + to_copy < k_tcp_res_len (the rbuf
+        // size). Aerospike response segments (8-byte header, then body) are
+        // small, so the mask never truncates a real segment.
+        u32 off = req->resp_len & (k_tcp_res_len / 2 - 1);
+        u32 to_copy = bytes_len & (k_tcp_res_len / 2 - 1);
         bpf_probe_read(req->rbuf + off, to_copy, u_buf);
     }
 
