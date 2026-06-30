@@ -25,6 +25,7 @@
 #include <generictracer/protocol_kafka.h>
 #include <generictracer/protocol_mysql.h>
 #include <generictracer/protocol_postgres.h>
+#include <generictracer/protocol_aerospike.h>
 #include <generictracer/protocol_mssql.h>
 
 #include <generictracer/maps/tcp_req_mem.h>
@@ -217,6 +218,11 @@ static __always_inline int tcp_send_large_buffer(tcp_req_t *req,
             return mssql_response_eom(req, u_buf, bytes_len);
         }
         return 0;
+    case k_protocol_type_aerospike:
+        if (packet_type == PACKET_TYPE_RESPONSE) {
+            return aerospike_response_accumulate(req, u_buf, bytes_len);
+        }
+        return 0;
     case k_protocol_type_http:
     case k_protocol_type_mqtt:
         break;
@@ -363,9 +369,17 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
         }
 
         if (existing->end_monotime_ns == 0) {
-            bpf_clamp_umax(bytes_len, k_tcp_res_len);
+            const bool is_aerospike = (protocol_type == k_protocol_type_aerospike);
             existing->end_monotime_ns = bpf_ktime_get_ns();
-            existing->resp_len = bytes_len;
+            if (is_aerospike) {
+                // rbuf was already filled incrementally by
+                // aerospike_response_accumulate; keep the accumulated response
+                // instead of overwriting it with only the last recv segment.
+                bpf_clamp_umax(existing->resp_len, k_tcp_res_len);
+            } else {
+                bpf_clamp_umax(bytes_len, k_tcp_res_len);
+                existing->resp_len = bytes_len;
+            }
             tcp_req_t *trace = bpf_ringbuf_reserve(&events, sizeof(tcp_req_t), 0);
             if (trace) {
                 bpf_dbg_printk("Sending TCP trace: existing=%lx, resp_length=%d",
@@ -373,7 +387,9 @@ static __always_inline void handle_unknown_tcp_connection(pid_connection_info_t 
                                existing->resp_len);
 
                 __builtin_memcpy(trace, existing, sizeof(tcp_req_t));
-                bpf_probe_read(trace->rbuf, bytes_len, u_buf);
+                if (!is_aerospike) {
+                    bpf_probe_read(trace->rbuf, bytes_len, u_buf);
+                }
 
                 bpf_ringbuf_submit(trace, get_flags());
             } else {
