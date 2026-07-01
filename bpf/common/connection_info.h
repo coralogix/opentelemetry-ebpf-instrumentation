@@ -23,6 +23,7 @@ enum protocol_type : u8 {
     k_protocol_type_mqtt = 5,
     k_protocol_type_mssql = 6,
     k_protocol_type_sunrpc = 7,
+    k_protocol_type_aerospike = 8,
 };
 
 // Struct to keep information on the connections in flight
