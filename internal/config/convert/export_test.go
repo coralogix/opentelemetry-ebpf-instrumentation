@@ -23,7 +23,6 @@ import (
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
 	"go.opentelemetry.io/obi/pkg/export/instrumentations"
 	"go.opentelemetry.io/obi/pkg/filter"
-	"go.opentelemetry.io/obi/pkg/kube/kubeflags"
 	"go.opentelemetry.io/obi/pkg/obi"
 	"go.opentelemetry.io/obi/pkg/transform"
 )
@@ -104,7 +103,7 @@ func TestRuntimeToV2DefaultConfig(t *testing.T) {
 	require.Equal(t, 256, value(t, ext.Capture.Telemetry, "metrics", "reporters_cache_len"))
 	require.Equal(t, schema.Duration(5*time.Minute), value(t, ext.Capture.Telemetry, "metrics", "ttl"))
 
-	require.Equal(t, kubeflags.EnabledAutodetect, value(t, ext.Enrich, "enrichers", "kubernetes", "mode"))
+	require.Equal(t, schema.KubernetesModeAutodetect, value(t, ext.Enrich, "enrichers", "kubernetes", "mode"))
 	require.Equal(t, schema.Duration(30*time.Second), value(t, ext.Enrich, "enrichers", "kubernetes", "informers", "initial_sync_timeout"))
 	require.Equal(t, schema.Duration(30*time.Minute), value(t, ext.Enrich, "enrichers", "kubernetes", "informers", "resync_period"))
 	require.Equal(t, []transform.Source{transform.SourceK8s}, value(t, ext.Enrich, "service_name", "sources"))
@@ -118,6 +117,8 @@ func TestRuntimeToV2DefaultConfig(t *testing.T) {
 	require.Equal(t, 8, value(t, ext.Correlation, "log_trace_annotation", "async_writer", "workers"))
 
 	require.Equal(t, schema.LogLevelInfo, value(t, ext.Daemon, "logging", "level"))
+	require.Equal(t, schema.LogFormatText, value(t, ext.Daemon, "logging", "format"))
+	require.Equal(t, schema.ConfigFormatUnset, value(t, ext.Daemon, "logging", "config_format"))
 	require.Equal(t, debug.TracePrinterDisabled, value(t, ext.Daemon, "logging", "debug_trace_output"))
 	require.Equal(t, schema.Duration(10*time.Second), value(t, ext.Daemon, "shutdown", "timeout"))
 	require.Equal(t, imetrics.InternalMetricsExporterDisabled, value(t, ext.Daemon, "internal_metrics", "exporter"))
@@ -166,7 +167,8 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 	cfg.ChannelSendTimeoutPanic = true
 	cfg.EnforceSysCaps = true
 	cfg.LogLevel = obi.LogLevelDebug
-	cfg.LogConfig = obi.LogConfigOptionJSON
+	cfg.LogFormat = obi.LogFormatJSON
+	cfg.LogConfig = obi.LogConfigOptionYAML
 	cfg.TracePrinter = debug.TracePrinterJSON
 	cfg.ShutdownTimeout = 3 * time.Second
 	cfg.ProfilePort = 6060
@@ -393,7 +395,7 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 	require.Equal(t, schema.Duration(15*time.Second), value(t, ext.Capture.Network, "capture", "flow_lifecycle", "deduplication", "first_come_ttl"))
 	require.Equal(t, true, value(t, ext.Capture.Network, "capture", "diagnostics", "print_flows"))
 
-	require.Equal(t, kubeflags.EnabledTrue, value(t, ext.Enrich, "enrichers", "kubernetes", "mode"))
+	require.Equal(t, schema.KubernetesModeEnabled, value(t, ext.Enrich, "enrichers", "kubernetes", "mode"))
 	require.Equal(t, "cluster-a", value(t, ext.Enrich, "enrichers", "kubernetes", "cluster_name"))
 	require.Equal(t, "/etc/kube/config", value(t, ext.Enrich, "enrichers", "kubernetes", "auth", "kubeconfig_path"))
 	require.Equal(t, schema.Duration(42*time.Second), value(t, ext.Enrich, "enrichers", "kubernetes", "informers", "initial_sync_timeout"))
@@ -424,6 +426,7 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 
 	require.Equal(t, schema.LogLevelDebug, value(t, ext.Daemon, "logging", "level"))
 	require.Equal(t, schema.LogFormatJSON, value(t, ext.Daemon, "logging", "format"))
+	require.Equal(t, schema.ConfigFormatYAML, value(t, ext.Daemon, "logging", "config_format"))
 	require.Equal(t, debug.TracePrinterJSON, value(t, ext.Daemon, "logging", "debug_trace_output"))
 	require.Equal(t, 6060, value(t, ext.Daemon, "profiling", "port"))
 	require.Equal(t, schema.Duration(3*time.Second), value(t, ext.Daemon, "shutdown", "timeout"))
@@ -434,6 +437,30 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 	require.Equal(t, 918, value(t, ext.Daemon, "telemetry", "metrics", "prometheus", "span_metrics_service_cache_size"))
 	require.Equal(t, []string{"cloud.region"}, value(t, ext.Daemon, "telemetry", "metrics", "prometheus", "extra_resource_attributes"))
 	require.Equal(t, []string{"service.version", "k8s.cluster.name", "deployment.environment"}, value(t, ext.Daemon, "telemetry", "metrics", "prometheus", "extra_span_resource_attributes"))
+}
+
+func TestRuntimeToV2NormalizesLogFormat(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultRuntimeConfig()
+	cfg.LogFormat = obi.LogFormat("JSON")
+
+	_, ext := RuntimeToV2(&cfg)
+
+	require.Equal(t, schema.LogFormatJSON, value(t, ext.Daemon, "logging", "format"))
+}
+
+func TestRuntimeToV2FallsBackOnUnsupportedLogFormats(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultRuntimeConfig()
+	cfg.LogFormat = obi.LogFormat("console")
+	cfg.LogConfig = obi.LogConfigOption("text")
+
+	_, ext := RuntimeToV2(&cfg)
+
+	require.Equal(t, schema.LogFormatText, value(t, ext.Daemon, "logging", "format"))
+	require.Equal(t, schema.ConfigFormatUnset, value(t, ext.Daemon, "logging", "config_format"))
 }
 
 func TestRuntimeToV2AdvancedCaptureParity(t *testing.T) {
@@ -625,7 +652,9 @@ func TestRuntimeToV2AdvancedCaptureParity(t *testing.T) {
 	require.Equal(t, []string{"payments"}, value(t, ext.Capture.Rules[3].Match, "kubernetes", "pod_annotations", "team"))
 	require.NotNil(t, ext.Capture.Rules[3].Refine.Exports)
 	require.Equal(t, schema.ExportModeRefinement{Traces: false, Metrics: true}, *ext.Capture.Rules[3].Refine.Exports)
-	require.Nil(t, ext.Capture.Rules[3].Refine.HTTP)
+	require.NotNil(t, ext.Capture.Rules[3].Refine.HTTP)
+	require.Equal(t, []string{"/orders/{id}"}, ext.Capture.Rules[3].Refine.HTTP.Routes.Incoming.Patterns)
+	require.Equal(t, []string{"/inventory/{id}"}, ext.Capture.Rules[3].Refine.HTTP.Routes.Outgoing.Patterns)
 }
 
 func TestRuntimeToV2EffectiveDiscoveryCriteria(t *testing.T) {

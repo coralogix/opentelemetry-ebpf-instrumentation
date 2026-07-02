@@ -4,6 +4,7 @@
 package convert // import "go.opentelemetry.io/obi/internal/config/convert"
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"go.opentelemetry.io/obi/pkg/appolly/services"
 	obiconfig "go.opentelemetry.io/obi/pkg/config"
 	"go.opentelemetry.io/obi/pkg/export"
+	"go.opentelemetry.io/obi/pkg/export/attributes"
 	"go.opentelemetry.io/obi/pkg/export/debug"
 	"go.opentelemetry.io/obi/pkg/export/instrumentations"
 	"go.opentelemetry.io/obi/pkg/filter"
@@ -37,6 +39,12 @@ func V2ToRuntime(src *schema.Extension) (*obi.Config, error) {
 		return nil, err
 	}
 	if err := validateV2RulePatterns(src.Capture.Rules); err != nil {
+		return nil, err
+	}
+	if err := validateV2HTTPFilters(src.Capture.Instrumentation.HTTP.Filters); err != nil {
+		return nil, err
+	}
+	if err := validateV2HTTPPayloadExtraction(src.Capture.Instrumentation.HTTP.PayloadExtraction); err != nil {
 		return nil, err
 	}
 
@@ -185,6 +193,52 @@ func validateV2RulePatterns(rules []schema.Rule) error {
 		}
 	}
 	return nil
+}
+
+func validateV2HTTPFilters(filters schema.SignalFilters) error {
+	if len(filters.Traces) == 0 || len(filters.Metrics) == 0 {
+		return nil
+	}
+	if reflect.DeepEqual(filters.Traces, filters.Metrics) {
+		return nil
+	}
+	return errors.New("capture.instrumentation.http.filters: trace and metric filters cannot differ")
+}
+
+func validateV2HTTPPayloadExtraction(payload schema.PayloadExtraction) error {
+	for i, extractor := range payload.Enabled {
+		if !validV2HTTPPayloadExtractor(extractor) {
+			return fmt.Errorf(
+				"capture.instrumentation.http.payload_extraction.enabled[%d]: unknown payload extractor %q",
+				i,
+				extractor,
+			)
+		}
+	}
+	return nil
+}
+
+func validV2HTTPPayloadExtractor(extractor string) bool {
+	switch extractor {
+	case payloadExtractorGraphQL,
+		payloadExtractorElasticsearch,
+		payloadExtractorAWS,
+		payloadExtractorSQLPP,
+		payloadExtractorOpenAI,
+		payloadExtractorAnthropic,
+		payloadExtractorGemini,
+		payloadExtractorQwen,
+		payloadExtractorBedrock,
+		payloadExtractorMCP,
+		payloadExtractorEmbedding,
+		payloadExtractorRerank,
+		payloadExtractorRetrieval,
+		payloadExtractorJSONRPC,
+		payloadExtractorEnrichment:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateV2RuleProcessGlobPatterns(path string, match schema.RuleProcessMatch) error {
@@ -623,9 +677,7 @@ func applyV2Instrumentation(cfg *obi.Config, instrumentation schema.Instrumentat
 }
 
 func applyFullV2Instrumentation(cfg *obi.Config, instrumentation schema.Instrumentation) {
-	cfg.EBPF.TrackRequestHeaders = instrumentation.HTTP.TrackRequestHeaders
-	cfg.EBPF.HTTPRequestTimeout = instrumentation.HTTP.RequestTimeout.TimeDuration()
-	cfg.EBPF.BufferSizes.HTTP = instrumentation.HTTP.BufferSize
+	applyFullV2HTTPInstrumentation(cfg, instrumentation.HTTP)
 
 	cfg.EBPF.HeuristicSQLDetect = instrumentation.SQL.HeuristicDetect
 	cfg.EBPF.BufferSizes.MySQL = instrumentation.SQL.MySQL.BufferSize
@@ -649,15 +701,7 @@ func applyFullV2Instrumentation(cfg *obi.Config, instrumentation schema.Instrume
 
 func applyPartialV2Instrumentation(cfg *obi.Config, instrumentation schema.Instrumentation) {
 	if !zeroValue(instrumentation.HTTP) {
-		if instrumentation.HTTP.TrackRequestHeaders {
-			cfg.EBPF.TrackRequestHeaders = true
-		}
-		if !zeroValue(instrumentation.HTTP.RequestTimeout) {
-			cfg.EBPF.HTTPRequestTimeout = instrumentation.HTTP.RequestTimeout.TimeDuration()
-		}
-		if instrumentation.HTTP.BufferSize != 0 {
-			cfg.EBPF.BufferSizes.HTTP = instrumentation.HTTP.BufferSize
-		}
+		applyPartialV2HTTPInstrumentation(cfg, instrumentation.HTTP)
 	}
 
 	if !zeroValue(instrumentation.SQL) {
@@ -710,6 +754,214 @@ func applyPartialV2Instrumentation(cfg *obi.Config, instrumentation schema.Instr
 	}
 	if !zeroValue(instrumentation.GPU.EnabledMode) {
 		cfg.EBPF.InstrumentCuda = instrumentation.GPU.EnabledMode
+	}
+}
+
+func applyFullV2HTTPInstrumentation(cfg *obi.Config, http schema.HTTPInstrumentation) {
+	cfg.EBPF.TrackRequestHeaders = http.TrackRequestHeaders
+	cfg.EBPF.HTTPRequestTimeout = http.RequestTimeout.TimeDuration()
+	cfg.EBPF.BufferSizes.HTTP = http.BufferSize
+
+	applyV2HTTPFilters(cfg, http.Filters, true)
+	applyFullV2HTTPRoutes(cfg, http.Routes)
+	applyFullV2HTTPPayloadExtraction(cfg, http.PayloadExtraction)
+}
+
+func applyPartialV2HTTPInstrumentation(cfg *obi.Config, http schema.HTTPInstrumentation) {
+	if http.TrackRequestHeaders {
+		cfg.EBPF.TrackRequestHeaders = true
+	}
+	if !zeroValue(http.RequestTimeout) {
+		cfg.EBPF.HTTPRequestTimeout = http.RequestTimeout.TimeDuration()
+	}
+	if http.BufferSize != 0 {
+		cfg.EBPF.BufferSizes.HTTP = http.BufferSize
+	}
+	applyV2HTTPFilters(cfg, http.Filters, false)
+	applyPartialV2HTTPRoutes(cfg, http.Routes)
+	applyPartialV2HTTPPayloadExtraction(cfg, http.PayloadExtraction)
+}
+
+func applyV2HTTPFilters(cfg *obi.Config, filters schema.SignalFilters, complete bool) {
+	if zeroValue(filters) && !complete {
+		return
+	}
+	cfg.Filters.Application = attributeFilterMap(v2HTTPFilterMap(filters))
+}
+
+func v2HTTPFilterMap(filters schema.SignalFilters) schema.AttributeFilters {
+	if len(filters.Traces) != 0 {
+		return filters.Traces
+	}
+	return filters.Metrics
+}
+
+func applyFullV2HTTPRoutes(cfg *obi.Config, routes schema.HTTPRoutes) {
+	applyV2HTTPRouteDiscovery(cfg, routes.Discovery, true)
+	if !hasV2HTTPRouteConfig(routes) {
+		cfg.Routes = nil
+		return
+	}
+
+	cfg.Routes = &transform.RoutesConfig{}
+	applyV2HTTPRouteConfig(cfg.Routes, routes)
+}
+
+func applyPartialV2HTTPRoutes(cfg *obi.Config, routes schema.HTTPRoutes) {
+	if zeroValue(routes) {
+		return
+	}
+	applyV2HTTPRouteDiscovery(cfg, routes.Discovery, false)
+	if !hasV2HTTPRouteConfig(routes) {
+		return
+	}
+	if cfg.Routes == nil {
+		cfg.Routes = &transform.RoutesConfig{}
+	}
+	applyV2HTTPRouteConfig(cfg.Routes, routes)
+}
+
+func applyV2HTTPRouteDiscovery(cfg *obi.Config, discovery schema.HTTPRouteDiscovery, complete bool) {
+	if zeroValue(discovery) && !complete {
+		return
+	}
+	if complete || !zeroValue(discovery.Timeout) {
+		cfg.Discovery.RouteHarvesterTimeout = discovery.Timeout.TimeDuration()
+	}
+	if complete || discovery.DisabledLanguages != nil {
+		cfg.Discovery.DisabledRouteHarvesters = cloneRouteHarvesterLanguages(discovery.DisabledLanguages)
+	}
+	if complete || !zeroValue(discovery.Java.Delay) {
+		cfg.Discovery.RouteHarvestConfig.JavaHarvestDelay = discovery.Java.Delay.TimeDuration()
+	}
+}
+
+func hasV2HTTPRouteConfig(routes schema.HTTPRoutes) bool {
+	return routes.Unmatched != nil ||
+		routes.Patterns != nil ||
+		routes.IgnoredPatterns != nil ||
+		routes.IgnoreMode != nil ||
+		routes.WildcardChar != nil ||
+		routes.MaxPathSegmentCardinality != nil
+}
+
+func applyV2HTTPRouteConfig(dst *transform.RoutesConfig, routes schema.HTTPRoutes) {
+	if routes.Unmatched != nil {
+		dst.Unmatch = *routes.Unmatched
+	}
+	if routes.Patterns != nil {
+		dst.Patterns = cloneStrings(*routes.Patterns)
+	}
+	if routes.IgnoredPatterns != nil {
+		dst.IgnorePatterns = cloneStrings(*routes.IgnoredPatterns)
+	}
+	if routes.IgnoreMode != nil {
+		dst.IgnoredEvents = *routes.IgnoreMode
+	}
+	if routes.WildcardChar != nil {
+		dst.WildcardChar = *routes.WildcardChar
+	}
+	if routes.MaxPathSegmentCardinality != nil {
+		dst.MaxPathSegmentCardinality = *routes.MaxPathSegmentCardinality
+	}
+}
+
+func applyFullV2HTTPPayloadExtraction(cfg *obi.Config, payload schema.PayloadExtraction) {
+	http := &cfg.EBPF.PayloadExtraction.HTTP
+	applyV2HTTPPayloadExtractorMembership(http, payload.Enabled)
+	http.SQLPP.EndpointPatterns = cloneStrings(payload.SQLPP.EndpointPatterns)
+	applyFullV2HTTPEnrichment(http, payload.Enrichment)
+}
+
+func applyPartialV2HTTPPayloadExtraction(cfg *obi.Config, payload schema.PayloadExtraction) {
+	if zeroValue(payload) {
+		return
+	}
+
+	http := &cfg.EBPF.PayloadExtraction.HTTP
+	if payload.Enabled != nil {
+		applyV2HTTPPayloadExtractorMembership(http, payload.Enabled)
+	}
+	if payload.SQLPP.EndpointPatterns != nil {
+		http.SQLPP.EndpointPatterns = cloneStrings(payload.SQLPP.EndpointPatterns)
+	}
+	if !zeroValue(payload.Enrichment) {
+		applyPartialV2HTTPEnrichment(http, payload.Enrichment)
+	}
+}
+
+func applyV2HTTPPayloadExtractorMembership(http *obiconfig.HTTPConfig, enabled []string) {
+	http.GraphQL.Enabled = false
+	http.Elasticsearch.Enabled = false
+	http.AWS.Enabled = false
+	http.SQLPP.Enabled = false
+	http.GenAI.OpenAI.Enabled = false
+	http.GenAI.Anthropic.Enabled = false
+	http.GenAI.Gemini.Enabled = false
+	http.GenAI.Qwen.Enabled = false
+	http.GenAI.Bedrock.Enabled = false
+	http.GenAI.MCP.Enabled = false
+	http.GenAI.Embedding.Enabled = false
+	http.GenAI.Rerank.Enabled = false
+	http.GenAI.Retrieval.Enabled = false
+	http.JSONRPC.Enabled = false
+	http.Enrichment.Enabled = false
+
+	for _, extractor := range enabled {
+		switch extractor {
+		case payloadExtractorGraphQL:
+			http.GraphQL.Enabled = true
+		case payloadExtractorElasticsearch:
+			http.Elasticsearch.Enabled = true
+		case payloadExtractorAWS:
+			http.AWS.Enabled = true
+		case payloadExtractorSQLPP:
+			http.SQLPP.Enabled = true
+		case payloadExtractorOpenAI:
+			http.GenAI.OpenAI.Enabled = true
+		case payloadExtractorAnthropic:
+			http.GenAI.Anthropic.Enabled = true
+		case payloadExtractorGemini:
+			http.GenAI.Gemini.Enabled = true
+		case payloadExtractorQwen:
+			http.GenAI.Qwen.Enabled = true
+		case payloadExtractorBedrock:
+			http.GenAI.Bedrock.Enabled = true
+		case payloadExtractorMCP:
+			http.GenAI.MCP.Enabled = true
+		case payloadExtractorEmbedding:
+			http.GenAI.Embedding.Enabled = true
+		case payloadExtractorRerank:
+			http.GenAI.Rerank.Enabled = true
+		case payloadExtractorRetrieval:
+			http.GenAI.Retrieval.Enabled = true
+		case payloadExtractorJSONRPC:
+			http.JSONRPC.Enabled = true
+		case payloadExtractorEnrichment:
+			http.Enrichment.Enabled = true
+		}
+	}
+}
+
+func applyFullV2HTTPEnrichment(http *obiconfig.HTTPConfig, enrichment schema.HTTPEnrichment) {
+	http.Enrichment.Policy.DefaultAction.Headers = enrichment.Policy.DefaultAction.Headers
+	http.Enrichment.Policy.DefaultAction.Body = enrichment.Policy.DefaultAction.Body
+	http.Enrichment.Policy.ObfuscationString = enrichment.Policy.ObfuscationString
+	http.Enrichment.Rules = cloneHTTPParsingRules(enrichment.Rules)
+}
+
+func applyPartialV2HTTPEnrichment(http *obiconfig.HTTPConfig, enrichment schema.HTTPEnrichment) {
+	if !zeroValue(enrichment.Policy.DefaultAction.Headers) {
+		http.Enrichment.Policy.DefaultAction.Headers = enrichment.Policy.DefaultAction.Headers
+	}
+	if !zeroValue(enrichment.Policy.DefaultAction.Body) {
+		http.Enrichment.Policy.DefaultAction.Body = enrichment.Policy.DefaultAction.Body
+	}
+	if enrichment.Policy.ObfuscationString != "" {
+		http.Enrichment.Policy.ObfuscationString = enrichment.Policy.ObfuscationString
+	}
+	if enrichment.Rules != nil {
+		http.Enrichment.Rules = cloneHTTPParsingRules(enrichment.Rules)
 	}
 }
 
@@ -792,6 +1044,10 @@ func applyFullV2NetworkCapture(cfg *obi.Config, capture schema.NetworkCapture) {
 	cfg.NetworkFlows.Protocols = cloneStrings(capture.Selection.Protocols.Include)
 	cfg.NetworkFlows.ExcludeProtocols = cloneStrings(capture.Selection.Protocols.Exclude)
 	cfg.NetworkFlows.Direction = string(capture.Selection.Direction)
+	cfg.NetworkFlows.CIDRs = cloneRuntimeCIDRDefinitions(cfg.NetworkFlows.CIDRs, capture.Selection.CIDRs)
+	if filters, ok := networkFilterMap(capture.Filters); ok {
+		cfg.Filters.Network = filters
+	}
 	cfg.NetworkFlows.CacheMaxFlows = capture.FlowLifecycle.MaxTrackedFlows
 	cfg.NetworkFlows.CacheActiveTimeout = capture.FlowLifecycle.ActiveTimeout.TimeDuration()
 	cfg.NetworkFlows.Deduper = string(capture.FlowLifecycle.Deduplication.Strategy)
@@ -800,6 +1056,7 @@ func applyFullV2NetworkCapture(cfg *obi.Config, capture schema.NetworkCapture) {
 	cfg.NetworkFlows.GuessPorts = capture.FlowLifecycle.GuessPorts
 	cfg.NetworkFlows.ListenInterfaces = string(capture.InterfaceDiscovery.Mode)
 	cfg.NetworkFlows.ListenPollPeriod = capture.InterfaceDiscovery.PollInterval.TimeDuration()
+	applyFullV2NetworkEnrichment(cfg, capture.Enrichment)
 	cfg.NetworkFlows.Print = capture.Diagnostics.PrintFlows
 }
 
@@ -837,6 +1094,14 @@ func applyPartialV2NetworkCapture(cfg *obi.Config, capture schema.NetworkCapture
 	if capture.Selection.Direction != "" {
 		cfg.NetworkFlows.Direction = string(capture.Selection.Direction)
 	}
+	if capture.Selection.CIDRs != nil {
+		cfg.NetworkFlows.CIDRs = cloneRuntimeCIDRDefinitions(cfg.NetworkFlows.CIDRs, capture.Selection.CIDRs)
+	}
+	if !zeroValue(capture.Filters) {
+		if filters, ok := networkFilterMap(capture.Filters); ok {
+			cfg.Filters.Network = filters
+		}
+	}
 	if capture.FlowLifecycle.MaxTrackedFlows != 0 {
 		cfg.NetworkFlows.CacheMaxFlows = capture.FlowLifecycle.MaxTrackedFlows
 	}
@@ -861,8 +1126,49 @@ func applyPartialV2NetworkCapture(cfg *obi.Config, capture schema.NetworkCapture
 	if !zeroValue(capture.InterfaceDiscovery.PollInterval) {
 		cfg.NetworkFlows.ListenPollPeriod = capture.InterfaceDiscovery.PollInterval.TimeDuration()
 	}
+	if !zeroValue(capture.Enrichment) {
+		applyPartialV2NetworkEnrichment(cfg, capture.Enrichment)
+	}
 	if capture.Diagnostics.PrintFlows {
 		cfg.NetworkFlows.Print = true
+	}
+}
+
+func applyFullV2NetworkEnrichment(cfg *obi.Config, enrichment schema.NetworkEnrichment) {
+	cfg.NetworkFlows.GeoIP.IPInfo.Path = enrichment.GeoIP.IPInfo.Path
+	cfg.NetworkFlows.GeoIP.MaxMindInfo.CountryPath = enrichment.GeoIP.MaxMind.CountryPath
+	cfg.NetworkFlows.GeoIP.MaxMindInfo.ASNPath = enrichment.GeoIP.MaxMind.ASNPath
+	cfg.NetworkFlows.GeoIP.CacheLen = enrichment.GeoIP.Cache.Size
+	cfg.NetworkFlows.GeoIP.CacheTTL = enrichment.GeoIP.Cache.TTL.TimeDuration()
+	cfg.NetworkFlows.ReverseDNS.Type = string(enrichment.ReverseDNS.Mode)
+	cfg.NetworkFlows.ReverseDNS.CacheLen = enrichment.ReverseDNS.Cache.Size
+	cfg.NetworkFlows.ReverseDNS.CacheTTL = enrichment.ReverseDNS.Cache.TTL.TimeDuration()
+}
+
+func applyPartialV2NetworkEnrichment(cfg *obi.Config, enrichment schema.NetworkEnrichment) {
+	if enrichment.GeoIP.IPInfo.Path != "" {
+		cfg.NetworkFlows.GeoIP.IPInfo.Path = enrichment.GeoIP.IPInfo.Path
+	}
+	if enrichment.GeoIP.MaxMind.CountryPath != "" {
+		cfg.NetworkFlows.GeoIP.MaxMindInfo.CountryPath = enrichment.GeoIP.MaxMind.CountryPath
+	}
+	if enrichment.GeoIP.MaxMind.ASNPath != "" {
+		cfg.NetworkFlows.GeoIP.MaxMindInfo.ASNPath = enrichment.GeoIP.MaxMind.ASNPath
+	}
+	if enrichment.GeoIP.Cache.Size != 0 {
+		cfg.NetworkFlows.GeoIP.CacheLen = enrichment.GeoIP.Cache.Size
+	}
+	if !zeroValue(enrichment.GeoIP.Cache.TTL) {
+		cfg.NetworkFlows.GeoIP.CacheTTL = enrichment.GeoIP.Cache.TTL.TimeDuration()
+	}
+	if enrichment.ReverseDNS.Mode != "" {
+		cfg.NetworkFlows.ReverseDNS.Type = string(enrichment.ReverseDNS.Mode)
+	}
+	if enrichment.ReverseDNS.Cache.Size != 0 {
+		cfg.NetworkFlows.ReverseDNS.CacheLen = enrichment.ReverseDNS.Cache.Size
+	}
+	if !zeroValue(enrichment.ReverseDNS.Cache.TTL) {
+		cfg.NetworkFlows.ReverseDNS.CacheTTL = enrichment.ReverseDNS.Cache.TTL.TimeDuration()
 	}
 }
 
@@ -1026,9 +1332,127 @@ func applyPartialV2CaptureTelemetry(cfg *obi.Config, telemetry schema.CaptureTel
 }
 
 func applyV2Standalone(cfg *obi.Config, src *schema.Extension) {
+	applyV2EnrichAttributes(cfg, src.Enrich)
+	applyV2KubernetesEnricher(cfg, src.Enrich)
 	applyV2EnrichServiceName(cfg, src.Enrich)
 	applyV2Correlation(cfg, src.Correlation)
 	applyV2Daemon(cfg, src.Daemon)
+}
+
+func applyV2EnrichAttributes(cfg *obi.Config, enrich *schema.Enrich) {
+	if enrich == nil || zeroValue(enrich.Attributes) {
+		return
+	}
+
+	attrs := enrich.Attributes
+	if completeEnrichmentAttributes(attrs) {
+		applyFullV2EnrichAttributes(cfg, attrs)
+		return
+	}
+
+	applyPartialV2EnrichAttributes(cfg, attrs)
+}
+
+func applyFullV2EnrichAttributes(cfg *obi.Config, attrs schema.EnrichmentAttributes) {
+	cfg.Attributes.Select = cloneAttributeSelection(attrs.Select)
+	cfg.Attributes.ExtraGroupAttributes = cloneExtraGroupAttributes(attrs.ExtraGroupAttributes)
+	cfg.Attributes.MetadataRetry.Timeout = attrs.MetadataRetry.Timeout.TimeDuration()
+	cfg.Attributes.MetadataRetry.StartInterval = attrs.MetadataRetry.StartInterval.TimeDuration()
+	cfg.Attributes.MetadataRetry.MaxInterval = attrs.MetadataRetry.MaxInterval.TimeDuration()
+}
+
+func applyPartialV2EnrichAttributes(cfg *obi.Config, attrs schema.EnrichmentAttributes) {
+	if attrs.Select != nil {
+		cfg.Attributes.Select = cloneAttributeSelection(attrs.Select)
+	}
+	if attrs.ExtraGroupAttributes != nil {
+		cfg.Attributes.ExtraGroupAttributes = cloneExtraGroupAttributes(attrs.ExtraGroupAttributes)
+	}
+	if !zeroValue(attrs.MetadataRetry.Timeout) {
+		cfg.Attributes.MetadataRetry.Timeout = attrs.MetadataRetry.Timeout.TimeDuration()
+	}
+	if !zeroValue(attrs.MetadataRetry.StartInterval) {
+		cfg.Attributes.MetadataRetry.StartInterval = attrs.MetadataRetry.StartInterval.TimeDuration()
+	}
+	if !zeroValue(attrs.MetadataRetry.MaxInterval) {
+		cfg.Attributes.MetadataRetry.MaxInterval = attrs.MetadataRetry.MaxInterval.TimeDuration()
+	}
+}
+
+func applyV2KubernetesEnricher(cfg *obi.Config, enrich *schema.Enrich) {
+	if enrich == nil || zeroValue(enrich.Enrichers.Kubernetes) {
+		return
+	}
+
+	kubernetes := enrich.Enrichers.Kubernetes
+	if completeKubernetesEnricher(kubernetes) {
+		applyFullV2KubernetesEnricher(cfg, kubernetes)
+		return
+	}
+
+	applyPartialV2KubernetesEnricher(cfg, kubernetes)
+}
+
+func applyFullV2KubernetesEnricher(cfg *obi.Config, kubernetes schema.KubernetesEnricher) {
+	cfg.Attributes.Kubernetes.Enable = runtimeKubernetesMode(kubernetes.Mode)
+	cfg.Attributes.Kubernetes.ClusterName = kubernetes.ClusterName
+	cfg.Attributes.Kubernetes.KubeconfigPath = kubernetes.Auth.KubeconfigPath
+	cfg.Attributes.Kubernetes.InformersSyncTimeout = kubernetes.Informers.InitialSyncTimeout.TimeDuration()
+	cfg.Attributes.Kubernetes.ReconnectInitialInterval = kubernetes.Informers.ReconnectInitialInterval.TimeDuration()
+	cfg.Attributes.Kubernetes.InformersResyncPeriod = kubernetes.Informers.ResyncPeriod.TimeDuration()
+	cfg.Attributes.Kubernetes.DropExternal = kubernetes.DropExternal
+	cfg.Attributes.Kubernetes.DisableInformers = cloneStrings(kubernetes.Informers.Disabled)
+	cfg.Attributes.Kubernetes.MetaCacheAddress = kubernetes.MetadataCache.Address
+	cfg.Attributes.Kubernetes.MetaRestrictLocalNode = kubernetes.MetadataCache.RestrictLocalNode
+	cfg.Attributes.Kubernetes.MetaSourceLabels.ServiceName = kubernetes.MetadataCache.SourceLabels.ServiceName
+	cfg.Attributes.Kubernetes.MetaSourceLabels.ServiceNamespace = kubernetes.MetadataCache.SourceLabels.ServiceNamespace
+	cfg.Attributes.Kubernetes.ResourceLabels = cloneStringMap(kubernetes.ResourceLabels)
+	cfg.Attributes.Kubernetes.ServiceNameTemplate = kubernetes.ServiceNameTemplate
+}
+
+func applyPartialV2KubernetesEnricher(cfg *obi.Config, kubernetes schema.KubernetesEnricher) {
+	if kubernetes.Mode != "" {
+		cfg.Attributes.Kubernetes.Enable = runtimeKubernetesMode(kubernetes.Mode)
+	}
+	if kubernetes.ClusterName != "" {
+		cfg.Attributes.Kubernetes.ClusterName = kubernetes.ClusterName
+	}
+	if kubernetes.ServiceNameTemplate != "" {
+		cfg.Attributes.Kubernetes.ServiceNameTemplate = kubernetes.ServiceNameTemplate
+	}
+	if kubernetes.Auth.KubeconfigPath != "" {
+		cfg.Attributes.Kubernetes.KubeconfigPath = kubernetes.Auth.KubeconfigPath
+	}
+	if !zeroValue(kubernetes.Informers.InitialSyncTimeout) {
+		cfg.Attributes.Kubernetes.InformersSyncTimeout = kubernetes.Informers.InitialSyncTimeout.TimeDuration()
+	}
+	if !zeroValue(kubernetes.Informers.ReconnectInitialInterval) {
+		cfg.Attributes.Kubernetes.ReconnectInitialInterval = kubernetes.Informers.ReconnectInitialInterval.TimeDuration()
+	}
+	if !zeroValue(kubernetes.Informers.ResyncPeriod) {
+		cfg.Attributes.Kubernetes.InformersResyncPeriod = kubernetes.Informers.ResyncPeriod.TimeDuration()
+	}
+	if kubernetes.Informers.Disabled != nil {
+		cfg.Attributes.Kubernetes.DisableInformers = cloneStrings(kubernetes.Informers.Disabled)
+	}
+	if kubernetes.DropExternal {
+		cfg.Attributes.Kubernetes.DropExternal = kubernetes.DropExternal
+	}
+	if kubernetes.ResourceLabels != nil {
+		cfg.Attributes.Kubernetes.ResourceLabels = cloneStringMap(kubernetes.ResourceLabels)
+	}
+	if kubernetes.MetadataCache.Address != "" {
+		cfg.Attributes.Kubernetes.MetaCacheAddress = kubernetes.MetadataCache.Address
+	}
+	if kubernetes.MetadataCache.RestrictLocalNode {
+		cfg.Attributes.Kubernetes.MetaRestrictLocalNode = kubernetes.MetadataCache.RestrictLocalNode
+	}
+	if kubernetes.MetadataCache.SourceLabels.ServiceName != "" {
+		cfg.Attributes.Kubernetes.MetaSourceLabels.ServiceName = kubernetes.MetadataCache.SourceLabels.ServiceName
+	}
+	if kubernetes.MetadataCache.SourceLabels.ServiceNamespace != "" {
+		cfg.Attributes.Kubernetes.MetaSourceLabels.ServiceNamespace = kubernetes.MetadataCache.SourceLabels.ServiceNamespace
+	}
 }
 
 func applyV2EnrichServiceName(cfg *obi.Config, enrich *schema.Enrich) {
@@ -1115,9 +1539,18 @@ func applyV2Daemon(cfg *obi.Config, daemon *schema.Daemon) {
 
 func applyFullV2Daemon(cfg *obi.Config, daemon schema.Daemon) {
 	if !zeroValue(daemon.Logging) {
-		cfg.LogLevel = obi.LogLevel(daemon.Logging.Level)
-		cfg.LogConfig = obi.LogConfigOption(daemon.Logging.Format)
-		cfg.TracePrinter = daemon.Logging.DebugTraceOutput
+		if daemon.Logging.Level != "" {
+			cfg.LogLevel = obi.LogLevel(daemon.Logging.Level)
+		}
+		if daemon.Logging.Format != "" {
+			cfg.LogFormat = obi.LogFormat(daemon.Logging.Format)
+		}
+		if daemon.Logging.ConfigFormat != "" {
+			cfg.LogConfig = obi.LogConfigOption(daemon.Logging.ConfigFormat)
+		}
+		if daemon.Logging.DebugTraceOutput != "" {
+			cfg.TracePrinter = daemon.Logging.DebugTraceOutput
+		}
 	}
 	if cfg.TracePrinter == "" {
 		cfg.TracePrinter = debug.TracePrinterDisabled
@@ -1143,7 +1576,10 @@ func applyPartialV2Daemon(cfg *obi.Config, daemon schema.Daemon) {
 			cfg.LogLevel = obi.LogLevel(daemon.Logging.Level)
 		}
 		if daemon.Logging.Format != "" {
-			cfg.LogConfig = obi.LogConfigOption(daemon.Logging.Format)
+			cfg.LogFormat = obi.LogFormat(daemon.Logging.Format)
+		}
+		if daemon.Logging.ConfigFormat != "" {
+			cfg.LogConfig = obi.LogConfigOption(daemon.Logging.ConfigFormat)
 		}
 		if daemon.Logging.DebugTraceOutput != "" {
 			cfg.TracePrinter = daemon.Logging.DebugTraceOutput
@@ -1186,10 +1622,26 @@ func applyPartialV2Daemon(cfg *obi.Config, daemon schema.Daemon) {
 }
 
 func completeDaemon(daemon schema.Daemon) bool {
-	return !zeroValue(daemon.Logging) &&
-		!zeroValue(daemon.Shutdown) &&
-		!zeroValue(daemon.InternalMetrics) &&
-		!zeroValue(daemon.Telemetry)
+	return completeDaemonLogging(daemon.Logging) &&
+		!zeroValue(daemon.Shutdown.Timeout) &&
+		completeInternalMetrics(daemon.InternalMetrics) &&
+		completeDaemonTelemetry(daemon.Telemetry)
+}
+
+func completeDaemonLogging(logging schema.Logging) bool {
+	return logging.Level != "" &&
+		logging.Format != "" &&
+		logging.DebugTraceOutput != ""
+}
+
+func completeInternalMetrics(metrics schema.InternalMetrics) bool {
+	return metrics.Exporter != "" &&
+		metrics.Prometheus.Path != "" &&
+		!zeroValue(metrics.BPF.ScrapeInterval)
+}
+
+func completeDaemonTelemetry(telemetry schema.DaemonTelemetry) bool {
+	return telemetry.Metrics.Prometheus.SpanMetricsServiceCacheSize != 0
 }
 
 func applyV2MetricsEnablement(cfg *obi.Config, src *schema.Extension) {
@@ -1274,17 +1726,22 @@ func completeEngine(engine schema.CaptureEngine) bool {
 }
 
 func completeNetworkCapture(capture schema.NetworkCapture) bool {
+	_, filtersOK := networkFilterMap(capture.Filters)
 	return !zeroValue(capture.Source) &&
 		!zeroValue(capture.EndpointIdentity) &&
 		!zeroValue(capture.Selection) &&
+		capture.Selection.CIDRs != nil &&
+		filtersOK &&
 		!zeroValue(capture.FlowLifecycle) &&
-		!zeroValue(capture.InterfaceDiscovery)
+		!zeroValue(capture.InterfaceDiscovery) &&
+		!zeroValue(capture.Enrichment)
 }
 
 func completeNetworkStats(stats schema.NetworkStats) bool {
 	return stats.Features != nil &&
 		!zeroValue(stats.EndpointIdentity) &&
 		stats.Selection.CIDRs != nil &&
+		stats.Filters.Metrics != nil &&
 		!zeroValue(stats.Enrichment)
 }
 
@@ -1299,6 +1756,54 @@ func completeRuntimes(runtimes schema.CaptureRuntimes) bool {
 func completeCaptureTelemetry(telemetry schema.CaptureTelemetry) bool {
 	return !zeroValue(telemetry.Traces) &&
 		!zeroValue(telemetry.Metrics)
+}
+
+func completeEnrichmentAttributes(attrs schema.EnrichmentAttributes) bool {
+	return !zeroValue(attrs.MetadataRetry.StartInterval) &&
+		!zeroValue(attrs.MetadataRetry.MaxInterval)
+}
+
+func completeKubernetesEnricher(kubernetes schema.KubernetesEnricher) bool {
+	return kubernetes.Mode != "" &&
+		!zeroValue(kubernetes.Informers.InitialSyncTimeout) &&
+		!zeroValue(kubernetes.Informers.ReconnectInitialInterval) &&
+		kubernetes.ResourceLabels != nil
+}
+
+func cloneStringMap(values map[string][]string) map[string][]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string][]string, len(values))
+	for key, value := range values {
+		out[key] = cloneStrings(value)
+	}
+	return out
+}
+
+func cloneAttributeSelection(values attributes.Selection) attributes.Selection {
+	if values == nil {
+		return nil
+	}
+	out := make(attributes.Selection, len(values))
+	for section, inclusionLists := range values {
+		out[section] = attributes.InclusionLists{
+			Include: cloneStrings(inclusionLists.Include),
+			Exclude: cloneStrings(inclusionLists.Exclude),
+		}
+	}
+	return out
+}
+
+func cloneExtraGroupAttributes(values schema.ExtraGroupAttributes) obi.ExtraGroupAttributesMap {
+	if values == nil {
+		return nil
+	}
+	out := make(obi.ExtraGroupAttributesMap, len(values))
+	for group, names := range values {
+		out[group] = append(out[group], names...)
+	}
+	return out
 }
 
 func protocolEnablement(instrumentation schema.Instrumentation, name protocolName) schema.ProtocolEnablement {
@@ -1378,6 +1883,20 @@ func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
 
+func cloneRouteHarvesterLanguages(values []services.RouteHarvesterLanguage) []services.RouteHarvesterLanguage {
+	if values == nil {
+		return nil
+	}
+	return append([]services.RouteHarvesterLanguage(nil), values...)
+}
+
+func cloneHTTPParsingRules(values []obiconfig.HTTPParsingRule) []obiconfig.HTTPParsingRule {
+	if values == nil {
+		return nil
+	}
+	return append([]obiconfig.HTTPParsingRule(nil), values...)
+}
+
 type runtimeCIDRDefinition interface {
 	~struct {
 		CIDR string `yaml:"cidr" json:"cidr"`
@@ -1402,6 +1921,16 @@ func cloneRuntimeCIDRDefinitions[T runtimeCIDRDefinition](_ []T, definitions sch
 		}))
 	}
 	return out
+}
+
+func networkFilterMap(filters schema.SignalFilters) (filter.AttributeFamilyConfig, bool) {
+	if filters.Traces == nil || filters.Metrics == nil {
+		return nil, false
+	}
+	if !reflect.DeepEqual(filters.Traces, filters.Metrics) {
+		return nil, false
+	}
+	return attributeFilterMap(filters.Traces), true
 }
 
 func attributeFilterMap(in schema.AttributeFilters) filter.AttributeFamilyConfig {
