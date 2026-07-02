@@ -65,9 +65,11 @@ func TestRustTokioContextPropagation(t *testing.T) {
 // assertTokioCrossServiceTrace drives a handful of sequential requests to urlPath
 // and asserts that at least one produced a complete server -> backend trace.
 //
-// Requests are sequential (not concurrent) to avoid the documented §4.4 keep-alive
-// connection-overwrite tail; we still require only ≥1 complete chain so the test is
-// robust to any single timing miss rather than asserting a hard 100%.
+// Requests are sequential (not concurrent) to avoid the keep-alive
+// connection-overwrite tail (a reused inbound connection can have its
+// server_traces_aux entry overwritten before egress resolves it); we require only
+// ≥1 complete chain so the test is robust to any single timing miss rather than
+// asserting a hard 100%.
 func assertTokioCrossServiceTrace(t *testing.T, urlPath string) {
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		// Drive one request per poll so load keeps flowing until OBI is attached
@@ -180,23 +182,37 @@ func childOfParent(s jaeger.Span) string {
 	return ""
 }
 
-// TestRustTokioProbeDiscrimination is the test that distinguishes the Tokio
-// implementation from OBI's generic context propagation. Unlike
-// TestRustTokioContextPropagation (which asserts ≥1 complete chain and therefore
-// passes on the generic path alone), this test FAILS with the Tokio probes
-// detached and PASSES with them attached — when they actually fire (debug builds
-// for all runtimes; release multi-thread only after the raw::poll re-target).
+// tokioABCase parameterizes one A/B discrimination scenario. The app wires each
+// server endpoint to a DISTINCT backend path, so app-wiring is the ground truth: a
+// single trace containing both an A-marker and a B-marker can only arise from
+// misattribution. Distinct backends per case also keep the subtests from
+// cross-classifying each other's traces.
+type tokioABCase struct {
+	serverA, serverB   string // e.g. "/blocking-a", "/blocking-b"
+	backendA, backendB string // e.g. "/ping-a", "/ping-b"
+	minClean           int    // required clean chains per side (hard gate)
+}
+
+// TestRustTokioProbeDiscrimination distinguishes the Tokio implementation from
+// OBI's generic context propagation. Unlike TestRustTokioContextPropagation (which
+// asserts ≥1 complete chain and so passes on the generic path alone), it drives
+// concurrent A/B load across distinct backends and counts how many chains are
+// cleanly attributed. With the Tokio probes attached each cross-thread call is
+// attributed by per-task identity -> many clean chains; with them detached the
+// generic path cannot follow the cross-thread boundary -> clean chains collapse.
 //
-// Mechanism: /blocking-a and /blocking-b each dispatch their outgoing call via
-// spawn_blocking, which ALWAYS runs on a blocking-pool thread that never handled
-// the inbound request. The generic "thread = request" assumption therefore cannot
-// correlate them and falls back to a process-level last-write-wins slot; under
-// concurrent A/B load that slot misattributes, so some traces end up mixing A and
-// B spans (e.g. a /blocking-a server span sharing a trace with a /ping-b backend
-// span). The Tokio bridge attributes by per-task identity, so A and B never mix.
-//
-// The discriminating assertion is: ZERO cross-contaminated traces, plus at least
-// one clean A chain and one clean B chain (so it can't pass vacuously).
+// Two scenarios:
+//   - spawn_blocking (/blocking-a->/ping-a, /blocking-b->/ping-b): the closure ALWAYS
+//     runs on a blocking-pool thread that never handled the inbound request, so the
+//     generic baseline is ~0 clean. This is a hard pass(probes)/fail(no-probes)
+//     discriminator (minClean=20; measured probes-on ≈ 60–140, probes-off ≈ 3–5).
+//   - async spawn (/ws-spawn-a->/ping-c, /ws-spawn-b->/ping-d): tokio::spawn +
+//     yield_now under load, so the child is frequently stolen by another worker
+//     (measured 57% migration). It also turns out the generic path can't correlate
+//     even NON-migrated async requests, because reqwest's async I/O egress runs on
+//     the runtime's I/O worker, decoupled from the handler thread. So the baseline
+//     collapses like spawn_blocking (measured probes-on ≈ 98/98, probes-off ≈ 2/4),
+//     and this is a hard discriminator too (minClean=20).
 func TestRustTokioProbeDiscrimination(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-rust-tokio-discrim.yml",
 		path.Join(pathOutput, "test-suite-rust-tokio-discrim.log"))
@@ -211,48 +227,67 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		require.Equal(ct, http.StatusOK, resp.StatusCode)
 	}, testTimeout, time.Second)
 
-	// Phase 1: drive light load until OBI is attached and server traces are flowing
-	// (do NOT require clean chains here — probes-off must reach Phase 3 so it logs
-	// its breakdown rather than timing out early).
+	t.Run("spawn_blocking", func(t *testing.T) {
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/blocking-a", serverB: "/blocking-b",
+			backendA: "/ping-a", backendB: "/ping-b",
+			minClean: 20,
+		})
+	})
+	t.Run("async_spawn", func(t *testing.T) {
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/ws-spawn-a", serverB: "/ws-spawn-b",
+			backendA: "/ping-c", backendB: "/ping-d",
+			// Lower bar than spawn_blocking: async HTTP egress runs on hyper's
+			// connection-driver task, which the ancestry walk often can't reach, so a
+			// large share of async egresses fall through to the racy process-level
+			// fallback (observed ~160 fallback hits under this A/B burst). That makes
+			// the clean-chain count genuinely variable run-to-run (measured 14–92 with
+			// probes on) — but still far above the probes-off baseline (~2–4, since the
+			// process-level fallback only exists WITH the Tokio probes). 10 stays below
+			// the observed floor yet ≥2.5× the baseline, so it still discriminates.
+			minClean: 10,
+		})
+	})
+}
+
+// tokioABDiscrimination drives case c and asserts ≥ c.minClean cleanly-attributed
+// chains on each side. It always logs the full breakdown so probes-on and
+// probes-off runs can be compared.
+func tokioABDiscrimination(t *testing.T, c tokioABCase) {
+	// Phase 1: drive light load until server traces are flowing (do NOT require
+	// clean chains — probes-off must reach Phase 3 so it logs its breakdown).
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		driveTokioAB(2)
-		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 200)), 10,
+		driveTokioAB(c.serverA, c.serverB, 2)
+		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 400)), 10,
 			"no server traces yet (OBI not attached?)")
 	}, testTimeout, time.Second)
 
 	// Phase 2: sustained concurrent A/B burst.
-	driveTokioABConcurrent(t, 150, 20)
+	driveTokioABConcurrent(t, c.serverA, c.serverB, 150, 20)
 
 	// Phase 3: wait for the burst traces to export, then classify once and assert.
-	//
-	// The discriminator is COMPLETENESS: with the Tokio probes firing (debug; or
-	// release after the raw::poll re-target) each spawn_blocking call is attributed
-	// by per-task identity, producing many clean A and B chains. With them detached,
-	// the generic path cannot attribute a blocking-pool call to its inbound request,
-	// so chains either don't form or are cross-contaminated (A+B mixed) — clean
-	// chains collapse toward zero. Measured: probes-on ≈ 76/76; probes-off ≈ 0/0.
-	const minCleanChains = 20
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 400)), 50,
+		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 600)), 50,
 			"waiting for burst traces to export")
 	}, testTimeout, time.Second)
 
-	cleanA, cleanB, contaminated, other := tokioClassifyAB(tokioQueryServerTracesT(t, 400))
-	t.Logf("A/B discrimination: cleanA=%d cleanB=%d contaminated=%d other(incomplete)=%d",
-		cleanA, cleanB, contaminated, other)
+	cleanA, cleanB, contaminated, other := tokioClassifyAB(tokioQueryServerTracesT(t, 600), c)
+	t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated=%d other(incomplete)=%d",
+		c.serverA, c.serverB, cleanA, cleanB, contaminated, other)
 
-	require.GreaterOrEqualf(t, cleanA, minCleanChains,
-		"only %d clean A chains (need ≥%d) — Tokio probes not correlating spawn_blocking; "+
-			"contaminated=%d other=%d", cleanA, minCleanChains, contaminated, other)
-	require.GreaterOrEqualf(t, cleanB, minCleanChains,
-		"only %d clean B chains (need ≥%d) — Tokio probes not correlating spawn_blocking; "+
-			"contaminated=%d other=%d", cleanB, minCleanChains, contaminated, other)
+	require.GreaterOrEqualf(t, cleanA, c.minClean,
+		"only %d clean A chains (need ≥%d) — Tokio probes not correlating %s; "+
+			"contaminated=%d other=%d", cleanA, c.minClean, c.serverA, contaminated, other)
+	require.GreaterOrEqualf(t, cleanB, c.minClean,
+		"only %d clean B chains (need ≥%d) — Tokio probes not correlating %s; "+
+			"contaminated=%d other=%d", cleanB, c.minClean, c.serverB, contaminated, other)
 }
 
-// driveTokioAB fires n sequential requests to each of /blocking-a and /blocking-b.
-func driveTokioAB(n int) {
+// driveTokioAB fires n sequential requests to each of serverA and serverB.
+func driveTokioAB(serverA, serverB string, n int) {
 	for i := 0; i < n; i++ {
-		for _, p := range []string{"/blocking-a", "/blocking-b"} {
+		for _, p := range []string{serverA, serverB} {
 			if resp, err := http.Get(tokioServerURL + p); err == nil {
 				_ = resp.Body.Close()
 			}
@@ -260,14 +295,14 @@ func driveTokioAB(n int) {
 	}
 }
 
-// driveTokioABConcurrent fires perEndpoint requests to each of /blocking-a and
-// /blocking-b, interleaved, with at most `concurrency` in flight at once.
-func driveTokioABConcurrent(t *testing.T, perEndpoint, concurrency int) {
+// driveTokioABConcurrent fires perEndpoint requests to each of serverA and serverB,
+// interleaved, with at most `concurrency` in flight at once.
+func driveTokioABConcurrent(t *testing.T, serverA, serverB string, perEndpoint, concurrency int) {
 	t.Helper()
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for i := 0; i < perEndpoint; i++ {
-		for _, p := range []string{"/blocking-a", "/blocking-b"} {
+		for _, p := range []string{serverA, serverB} {
 			wg.Add(1)
 			sem <- struct{}{}
 			go func(p string) {
@@ -308,18 +343,19 @@ func tokioQueryServerTracesT(t *testing.T, limit int) []jaeger.Trace {
 	return tq.Data
 }
 
-// tokioClassifyAB buckets each trace as a clean A chain, a clean B chain,
-// cross-contaminated (containing both A and B markers — only possible via
-// misattribution, since the app wires /blocking-a -> /ping-a and /blocking-b ->
-// /ping-b exclusively), or other (incomplete: a server span with no joined
-// backend span, i.e. the outgoing call was not correlated at all).
-func tokioClassifyAB(traces []jaeger.Trace) (cleanA, cleanB, contaminated, other int) {
+// tokioClassifyAB buckets each trace (for the given case c) as a clean A chain, a
+// clean B chain, cross-contaminated (containing both A and B markers — only
+// possible via misattribution, since each server endpoint is wired to a distinct
+// backend path), or other (incomplete: a server span with no joined backend span,
+// i.e. the outgoing call was not correlated at all). Traces belonging to the other
+// subtest's endpoints match none of c's markers and fall into `other` harmlessly.
+func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, contaminated, other int) {
 	for i := range traces {
 		tr := traces[i]
-		aServer := len(tokioFindSpans(tr, "server", "server", "/blocking-a")) > 0
-		bServer := len(tokioFindSpans(tr, "server", "server", "/blocking-b")) > 0
-		aBackend := len(tokioFindSpans(tr, "backend", "server", "/ping-a")) > 0
-		bBackend := len(tokioFindSpans(tr, "backend", "server", "/ping-b")) > 0
+		aServer := len(tokioFindSpans(tr, "server", "server", c.serverA)) > 0
+		bServer := len(tokioFindSpans(tr, "server", "server", c.serverB)) > 0
+		aBackend := len(tokioFindSpans(tr, "backend", "server", c.backendA)) > 0
+		bBackend := len(tokioFindSpans(tr, "backend", "server", c.backendB)) > 0
 
 		hasA := aServer || aBackend
 		hasB := bServer || bBackend

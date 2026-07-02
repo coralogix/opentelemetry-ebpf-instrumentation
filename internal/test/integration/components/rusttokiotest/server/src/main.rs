@@ -23,7 +23,13 @@ use axum::{Router, routing::get, http::StatusCode, response::IntoResponse};
 const BACKEND: &str = "http://127.0.0.1:8093/ping";
 
 async fn call_backend(label: &str) -> Result<String, String> {
-    reqwest::get(BACKEND)
+    call_backend_url(label, BACKEND).await
+}
+
+// Async backend call to an explicit URL — used by the async A/B discrimination
+// endpoints (/ws-spawn-a -> /ping-c, /ws-spawn-b -> /ping-d).
+async fn call_backend_url(label: &str, url: &str) -> Result<String, String> {
+    reqwest::get(url)
         .await
         .map_err(|e| format!("[{}] connect error: {}", label, e))?
         .text()
@@ -73,6 +79,46 @@ async fn ws_spawn() -> impl IntoResponse {
         call_backend("ws-spawn").await
     });
 
+    respond(handle.await.unwrap_or_else(|e| Err(e.to_string())))
+}
+
+// Distinct backend paths for the async A/B discriminator, kept separate from the
+// spawn_blocking A/B paths (/ping-a, /ping-b) so the two discrimination subtests
+// never cross-classify each other's traces.
+const BACKEND_C: &str = "http://127.0.0.1:8093/ping-c";
+const BACKEND_D: &str = "http://127.0.0.1:8093/ping-d";
+
+// /ws-spawn-a and /ws-spawn-b — the ASYNC work-stealing discriminator. Same shape
+// as /ws-spawn (tokio::spawn + yield_now to force the child onto the run queue so
+// an idle worker can steal it under concurrent load), but each calls a DISTINCT
+// backend path. Under migration the spawned task egresses on a worker that never
+// handled the inbound request; only the tokio_task_state ancestry walk can attribute
+// it. Non-migrated requests still resolve via the generic thread=request path, so —
+// unlike spawn_blocking — the probes-off baseline is not ~0; the two subtests are
+// calibrated from measured on/off numbers rather than a shared fixed threshold.
+async fn ws_spawn_a() -> impl IntoResponse {
+    let handler_tid = std::thread::current().id();
+    let handle = tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        let child_tid = std::thread::current().id();
+        // Prints migrated=true when the child resumed on a different worker than the
+        // handler — confirms work-stealing actually occurred so the discrimination
+        // numbers can be interpreted (a low gap with migrated=false everywhere would
+        // just mean nothing migrated).
+        println!("[ws-spawn-a] child={:?} migrated={}", child_tid, child_tid != handler_tid);
+        call_backend_url("ws-spawn-a", BACKEND_C).await
+    });
+    respond(handle.await.unwrap_or_else(|e| Err(e.to_string())))
+}
+
+async fn ws_spawn_b() -> impl IntoResponse {
+    let handler_tid = std::thread::current().id();
+    let handle = tokio::spawn(async move {
+        tokio::task::yield_now().await;
+        let child_tid = std::thread::current().id();
+        println!("[ws-spawn-b] child={:?} migrated={}", child_tid, child_tid != handler_tid);
+        call_backend_url("ws-spawn-b", BACKEND_D).await
+    });
     respond(handle.await.unwrap_or_else(|e| Err(e.to_string())))
 }
 
@@ -200,7 +246,9 @@ async fn main() {
         .route("/blocking", get(blocking))
         .route("/blocking-nested", get(blocking_nested))
         .route("/blocking-a", get(blocking_a))
-        .route("/blocking-b", get(blocking_b));
+        .route("/blocking-b", get(blocking_b))
+        .route("/ws-spawn-a", get(ws_spawn_a))
+        .route("/ws-spawn-b", get(ws_spawn_b));
 
     println!("server (work-stealing) listening on http://0.0.0.0:8092");
     println!("  backend expected at http://127.0.0.1:8093/ping");
@@ -210,8 +258,10 @@ async fn main() {
     println!("  GET /ws-nested       — two nested spawns; each may migrate");
     println!("  GET /blocking        — spawn_blocking -> ureq (blocking pool)");
     println!("  GET /blocking-nested — spawn -> spawn_blocking -> ureq");
-    println!("  GET /blocking-a      — spawn_blocking -> ureq /ping-a (discrimination A)");
-    println!("  GET /blocking-b      — spawn_blocking -> ureq /ping-b (discrimination B)");
+    println!("  GET /blocking-a      — spawn_blocking -> ureq /ping-a (blocking discrimination A)");
+    println!("  GET /blocking-b      — spawn_blocking -> ureq /ping-b (blocking discrimination B)");
+    println!("  GET /ws-spawn-a      — tokio::spawn -> reqwest /ping-c (async discrimination A)");
+    println!("  GET /ws-spawn-b      — tokio::spawn -> reqwest /ping-d (async discrimination B)");
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8092")
         .await

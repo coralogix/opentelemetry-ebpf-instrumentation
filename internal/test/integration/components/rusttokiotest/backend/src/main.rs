@@ -33,6 +33,27 @@ async fn ping_b(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-b traceparent={}", traceparent)
 }
 
+// /ping-c and /ping-d are the async A/B discriminator's backends (kept distinct
+// from /ping-a and /ping-b so the async and spawn_blocking subtests never
+// cross-classify each other's traces).
+async fn ping_c(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-c  traceparent={}", traceparent);
+    format!("pong-c traceparent={}", traceparent)
+}
+
+async fn ping_d(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-d  traceparent={}", traceparent);
+    format!("pong-d traceparent={}", traceparent)
+}
+
 async fn health() -> impl IntoResponse {
     "ok\n"
 }
@@ -43,7 +64,9 @@ async fn main() {
         .route("/health", get(health))
         .route("/ping", get(ping))
         .route("/ping-a", get(ping_a))
-        .route("/ping-b", get(ping_b));
+        .route("/ping-b", get(ping_b))
+        .route("/ping-c", get(ping_c))
+        .route("/ping-d", get(ping_d));
 
     println!("backend listening on http://0.0.0.0:8093");
 
