@@ -84,6 +84,11 @@ func runTestCase(c *model.TestCase, settings model.Settings) {
 	runner := oatsyaml.NewRunner(c, settings)
 	setRunnerEndpoint(runner, endpoint)
 	runner.ExecuteChecks()
+
+	// If this group wired a weaver live-check container in front of lgtm,
+	// stop it and log what it found (observe-only; never fails the test).
+	// Groups without weaver are detected and skipped inside.
+	validateWeaverObserve()
 }
 
 func setRunnerEndpoint(runner *oatsyaml.Runner, endpoint *remote.Endpoint) {

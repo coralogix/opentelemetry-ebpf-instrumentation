@@ -1,0 +1,101 @@
+# Weaver pod for multi-node / multi-zone weaver-wired suites. Identical to
+# 08-weaver.yml but pinned (nodeAffinity) to the `otel` zone node, which is the
+# node whose 00-kind*.yml entry carries the /obi-registry extraMount and the
+# 4320 -> 32320 admin port mapping.
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: obi-registry
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 10Mi
+  hostPath:
+    # Value set by the `obi-registry` extraMount in 00-kind*.yml
+    path: /obi-registry
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: obi-registry
+spec:
+  volumeName: obi-registry
+  accessModes:
+    - ReadOnlyMany
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weaver
+spec:
+  selector:
+    app: weaver
+  ports:
+    - port: 4317
+      name: otlp-grpc
+      targetPort: otlp-grpc
+    - port: 4320
+      name: admin
+      targetPort: admin
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: weaver
+  labels:
+    app: weaver
+spec:
+  volumes:
+    - name: obi-registry
+      persistentVolumeClaim:
+        claimName: obi-registry
+    - name: testoutput
+      persistentVolumeClaim:
+        claimName: testoutput
+  affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: deployment/zone
+              operator: In
+              values:
+              - otel
+  containers:
+    - name: weaver
+      image: otel/weaver:v0.24.1@sha256:263964a7d444e77812f7a2d654e17683c4760a968c91278acdb7a44c20ccd572
+      workingDir: /obi-registry
+      args:
+        - registry
+        - live-check
+        - --registry
+        - /obi-registry
+        - --include-unreferenced
+        - --inactivity-timeout
+        - "300"
+        - --admin-port
+        - "4320"
+        - --format
+        - json
+        - --diagnostic-format
+        - json
+        - --output
+        - /testoutput/weaver-out
+      volumeMounts:
+        - mountPath: /obi-registry
+          name: obi-registry
+          readOnly: true
+        - mountPath: /testoutput
+          name: testoutput
+      ports:
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4320
+          name: admin
+          hostPort: 4320

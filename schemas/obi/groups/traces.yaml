@@ -3,10 +3,12 @@ groups:
     type: attribute_group
     display_name: OBI Application Span Attributes
     brief: >
-      Attributes OBI emits on application spans that are not part of upstream
-      OpenTelemetry semantic conventions — captured HTTP request/response
-      bodies and ONC/Sun RPC auth flavor. Attributes already defined by
-      upstream semconv (`http.*`, …) are not redeclared here.
+      Attributes OBI emits on application spans (and the metrics derived from
+      them) that are not part of upstream OpenTelemetry semantic conventions:
+      captured HTTP request/response bodies, ONC/Sun RPC auth flavor, GPU
+      memcpy kind, and the Kubernetes decoration OBI attaches. Attributes
+      already defined by upstream semconv (`http.*`, `k8s.namespace.name`, …)
+      are not redeclared here.
     attributes:
       - id: http.request.body.content
         type: string
@@ -45,3 +47,34 @@ groups:
           semconv adds an official ONC RPC auth flavor attribute, at which
           point this key will be migrated to the semconv name.
         examples: ["AUTH_NONE", "AUTH_SYS"]
+      - id: cuda.memcpy.kind
+        type: string
+        stability: development
+        brief: >
+          CUDA memory-copy direction / kind on GPU spans and metrics
+          (e.g. host-to-device, device-to-host).
+        examples: ["cudaMemcpyHostToDevice", "cudaMemcpyDeviceToHost"]
+      - id: k8s.owner.name
+        type: string
+        stability: development
+        brief: >
+          Name of the top-level Kubernetes owner (Deployment, StatefulSet,
+          DaemonSet, …) of the workload OBI decorated the signal with.
+        examples: ["frontend"]
+      - id: k8s.kind
+        type: string
+        stability: development
+        brief: >
+          Kind of the top-level Kubernetes owner of the decorated workload.
+        examples: ["Deployment", "StatefulSet"]
+      - id: gen_ai.metadata
+        type: string
+        stability: development
+        brief: >
+          Provider- or request-specific GenAI metadata OBI captures that is not
+          covered by an existing `gen_ai.*` semconv attribute.
+        note: >
+          OBI extension attribute under the `gen_ai` namespace, emitted on GenAI
+          spans (and the derived metrics) until upstream semconv defines a
+          matching attribute.
+        examples: ['{"temperature":0.7}']

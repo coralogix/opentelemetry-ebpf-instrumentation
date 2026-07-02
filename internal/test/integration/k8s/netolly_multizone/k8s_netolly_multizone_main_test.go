@@ -43,9 +43,12 @@ func TestMain(m *testing.M) {
 		kube.Deploy(testpath.Manifests+"/01-volumes.yml"),
 		kube.Deploy(testpath.Manifests+"/01-serviceaccount.yml"),
 		kube.Deploy(testpath.Manifests+"/02-prometheus-otelscrape-multi-node.yml"),
-		kube.Deploy(testpath.Manifests+"/03-otelcol-multi-node.yml"),
+		// weaver-tapped otelcol + in-cluster weaver pod (both pinned to the
+		// `otel` zone node); validation runs in observe mode from z_weaver_test.go
+		kube.Deploy(testpath.Manifests+"/03-otelcol-weaver-multi-node.yml"),
 		kube.Deploy(testpath.Manifests+"/05-uninstrumented-multizone-client-server.yml"),
 		kube.Deploy(testpath.Manifests+"/06-obi-netolly-multizone.yml"),
+		kube.Deploy(testpath.Manifests+"/08-weaver-multi-node.yml"),
 	)
 
 	cluster.Run(m)

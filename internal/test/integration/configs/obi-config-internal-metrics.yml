@@ -1,0 +1,11 @@
+otel_metrics_export:
+  endpoint: http://otelcol:4318
+# Emit OBI's own internal/self metrics (obi.bpf.*, obi.queue.*, …) over OTLP so
+# they flow through the otelcol weaver tap and get semconv-validated. The
+# Prometheus variant is exercised separately by TestSuite_PrometheusScrape.
+internal_metrics:
+  exporter: otel
+attributes:
+  select:
+    "*":
+      include: ["*"]

@@ -1,0 +1,40 @@
+groups:
+  - id: registry.obi.enum_extensions
+    type: attribute_group
+    display_name: OBI enum extensions
+    brief: >
+      Values OBI emits for existing OpenTelemetry semantic-convention enum
+      attributes that are not (yet) documented members upstream. Declared here so
+      weaver's `undefined_enum_variant` advice does not flag OBI's intentional
+      extensions. Values that are actually bugs (wrong-typed or empty enum
+      values) are deliberately NOT declared here so they keep failing.
+    attributes:
+      - id: telemetry.sdk.language
+        type:
+          members:
+            - id: generic
+              value: "generic"
+              stability: development
+              brief: >
+                OBI's eBPF instrumentation is language-agnostic; it reports
+                `generic` rather than a specific SDK language.
+        stability: development
+        brief: The language of the telemetry SDK.
+      - id: messaging.system
+        type:
+          members:
+            - id: mqtt
+              value: "mqtt"
+              stability: development
+              brief: OBI instruments MQTT; not yet an upstream messaging.system member.
+        stability: development
+        brief: The messaging system as identified by the client library.
+      - id: rpc.system
+        type:
+          members:
+            - id: aws_api
+              value: "aws-api"
+              stability: development
+              brief: OBI reports AWS SDK API calls; not an upstream rpc.system member.
+        stability: development
+        brief: A string identifying the remoting system.

@@ -82,9 +82,50 @@ services:
       OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS: "true"
       OTEL_EBPF_METRICS_FEATURES: "application,application_process"
       OTEL_EBPF_PROMETHEUS_FEATURES: "application,application_process"
+      # Export OTLP metrics + traces to the otelcol weaver tap so weaver can
+      # validate the emitted telemetry. This is additive to the existing
+      # Prometheus/text-printer behaviour the #2046 contamination test relies
+      # on; the OTLP endpoints simply fan a copy of the data to otelcol over
+      # HTTP (the :4318 OTLP/HTTP port).
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://otelcol:4318/v1/metrics"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://otelcol:4318/v1/traces"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
     depends_on:
       testserver:
         condition: service_started
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.155.0@sha256:4935caa35e9a4cb387e35732e8fb22b2b5759af8d12e7043357f03837f6e8df5
+    container_name: otel-col
+    networks:
+      - shared
+    deploy:
+      resources:
+        limits:
+          memory: 125M
+    restart: unless-stopped
+    # no-jaeger variant: this compose has no jaeger service, so traces go only
+    # to the weaver tap.
+    command: ["--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"]
+    volumes:
+      - ./configs/:/etc/otelcol-config
+    ports:
+      - "4317"
+      - "4318:4318"
+      - "9464"
+      - "8888"
+    depends_on:
+      weaver:
+        condition: service_healthy
+
+  weaver:
+    extends:
+      file: components/weaver/service.yml
+      service: weaver
+    networks:
+      - shared
+    volumes:
+      - ../../../schemas/obi:/obi-registry:ro
 
 networks:
   shared:

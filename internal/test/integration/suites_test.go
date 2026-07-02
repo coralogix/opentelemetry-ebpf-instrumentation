@@ -557,6 +557,10 @@ func TestSuite_GoKafkaTraceparent(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, compose.Up())
 	t.Run("Go Kafka stale traceparent contamination (#2046)", testGoKafkaTraceparent)
+	// Observe-first: this suite is newly weaver-wired (weaver + otelcol services
+	// added to the compose); log advisories that would fail under enforce
+	// without failing the suite yet.
+	runWeaverValidationObserve(t)
 	require.NoError(t, compose.Close())
 }
 
@@ -579,6 +583,9 @@ func TestSuite_GoMQTT(t *testing.T) {
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`)
 	require.NoError(t, compose.Up())
 	t.Run("Go MQTT publish tests", testREDMetricsGoMQTT)
+	// Observe-first: this suite is newly weaver-wired; log advisories that
+	// would fail under enforce without failing the suite yet.
+	runWeaverValidationObserve(t)
 	require.NoError(t, compose.Close())
 }
 

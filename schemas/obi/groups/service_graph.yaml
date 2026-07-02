@@ -60,6 +60,30 @@ groups:
           `servicegraphconnector` when `service.namespace` is added to the
           connector's `dimensions` list.
         examples: ["integration-test"]
+      # Legacy underscored Kubernetes peer labels OBI attaches to
+      # service-graph metrics for backward compatibility with the older
+      # network-metrics naming. Distinct from the dotted `k8s.namespace.name`
+      # / `k8s.cluster.name` semconv attributes.
+      - id: client_k8s_namespace_name
+        type: string
+        stability: development
+        brief: Kubernetes namespace of the client (request-initiating) peer.
+        examples: ["integration-test"]
+      - id: server_k8s_namespace_name
+        type: string
+        stability: development
+        brief: Kubernetes namespace of the server (request-receiving) peer.
+        examples: ["integration-test"]
+      - id: client_k8s_cluster_name
+        type: string
+        stability: development
+        brief: Kubernetes cluster name of the client (request-initiating) peer.
+        examples: ["my-cluster"]
+      - id: server_k8s_cluster_name
+        type: string
+        stability: development
+        brief: Kubernetes cluster name of the server (request-receiving) peer.
+        examples: ["my-cluster"]
 
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
@@ -78,6 +102,10 @@ groups:
       - ref: client_service_namespace
       - ref: server_service_namespace
       - ref: source
+      - ref: client_k8s_namespace_name
+      - ref: server_k8s_namespace_name
+      - ref: client_k8s_cluster_name
+      - ref: server_k8s_cluster_name
 
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
@@ -97,6 +125,10 @@ groups:
       - ref: client_service_namespace
       - ref: server_service_namespace
       - ref: source
+      - ref: client_k8s_namespace_name
+      - ref: server_k8s_namespace_name
+      - ref: client_k8s_cluster_name
+      - ref: server_k8s_cluster_name
 
   - id: metric.traces_service_graph_request_server
     type: metric
@@ -113,6 +145,10 @@ groups:
       - ref: client_service_namespace
       - ref: server_service_namespace
       - ref: source
+      - ref: client_k8s_namespace_name
+      - ref: server_k8s_namespace_name
+      - ref: client_k8s_cluster_name
+      - ref: server_k8s_cluster_name
 
   - id: metric.traces_service_graph_request_client
     type: metric
@@ -129,3 +165,7 @@ groups:
       - ref: client_service_namespace
       - ref: server_service_namespace
       - ref: source
+      - ref: client_k8s_namespace_name
+      - ref: server_k8s_namespace_name
+      - ref: client_k8s_cluster_name
+      - ref: server_k8s_cluster_name
