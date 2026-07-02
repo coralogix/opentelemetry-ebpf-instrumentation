@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/obi/internal/test/integration/components/docker"
@@ -45,11 +44,13 @@ func TestInternalOTelMetrics(t *testing.T) {
 	// reads the report — otherwise weaver sees zero samples.
 	t.Run("generate probe activity", func(t *testing.T) {
 		require.Eventually(t, func() bool {
-			return pokeInternalMetricsServer(t) == nil
+			return pokeInternalMetricsServer() == nil
 		}, testTimeout, 500*time.Millisecond, "testserver never became reachable")
+		// Best-effort traffic after reachability is confirmed; a transient poke
+		// error must not abort the run.
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			assert.NoError(t, pokeInternalMetricsServer(t))
+			_ = pokeInternalMetricsServer()
 			time.Sleep(200 * time.Millisecond)
 		}
 	})
@@ -58,7 +59,7 @@ func TestInternalOTelMetrics(t *testing.T) {
 	require.NoError(t, compose.Close())
 }
 
-func pokeInternalMetricsServer(t require.TestingT) error {
+func pokeInternalMetricsServer() error {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", internalMetricsHostPort), 2*time.Second)
 	if err != nil {
 		return err
