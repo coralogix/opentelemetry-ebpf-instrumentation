@@ -105,6 +105,7 @@ type SymbolMatcher uint8
 const (
 	SymbolMatcherExact SymbolMatcher = iota
 	SymbolMatcherContains
+	SymbolMatcherPrefix
 )
 
 // SelfLibKey is the UProbes() library-map key meaning "instrument the executable

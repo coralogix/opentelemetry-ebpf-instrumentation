@@ -895,6 +895,10 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 
 	for symbolName, probeArray := range probes {
 		for _, probe := range probeArray {
+			if probe.SymbolMatcher == ebpfcommon.SymbolMatcherPrefix {
+				probe.Skip = true
+				continue
+			}
 			syms := exactSyms
 			if probe.SymbolMatcher == ebpfcommon.SymbolMatcherContains {
 				syms = substringSyms
@@ -935,8 +939,8 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 	}
 
 	var prefixNames []string
-	for name := range probes {
-		if strings.Contains(name, "::") {
+	for name, descs := range probes {
+		if len(descs) > 0 && descs[0].SymbolMatcher == ebpfcommon.SymbolMatcherPrefix {
 			prefixNames = append(prefixNames, name)
 		}
 	}

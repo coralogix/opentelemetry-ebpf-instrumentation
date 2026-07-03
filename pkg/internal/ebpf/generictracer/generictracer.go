@@ -524,16 +524,18 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// Symbols use $LT$S$GT$ dollar-encoding for the generic param; rustDemangle
 			// strips this so prefix matching finds all monomorphised copies.
 			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
-				Required: false,
-				Start:    p.bpfObjects.ObiUprobeTokioTaskNew,
+				Required:      false,
+				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
+				Start:         p.bpfObjects.ObiUprobeTokioTaskNew,
 			}},
 			// Current-thread scheduler: LocalOwnedTasks<S>::bind fires when a task
 			// is spawned on a single-threaded runtime (tokio::task::spawn_local,
 			// used by actix-web and similar frameworks). Survives both debug and
 			// release builds. Same $LT$S$GT$ dollar-encoding as bind_inner above.
 			"tokio::runtime::task::list::LocalOwnedTasks::bind": {{
-				Required: false,
-				Start:    p.bpfObjects.ObiUprobeTokioTaskNew,
+				Required:      false,
+				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
+				Start:         p.bpfObjects.ObiUprobeTokioTaskNew,
 			}},
 			// spawn_blocking is a regular fn (not async) that synchronously allocates
 			// a blocking pool task and returns JoinHandle<R> (= NonNull<Header> = 8 bytes,
@@ -551,8 +553,9 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// spawn_blocking and pool::Spawner::spawn_blocking_inner have "Spawner::" after
 			// "pool::", so this prefix matches only the free fn's monomorphizations.
 			"tokio::runtime::blocking::pool::spawn_blocking": {{
-				Required: false,
-				End:      p.bpfObjects.ObiUretprobeTokioSpawnBlocking,
+				Required:      false,
+				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
+				End:           p.bpfObjects.ObiUretprobeTokioSpawnBlocking,
 			}},
 		},
 	}
