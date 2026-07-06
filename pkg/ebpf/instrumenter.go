@@ -347,7 +347,11 @@ func resolveInstrPath(
 	exePath string,
 	exeIno uint64,
 ) (string, uint64, string, bool) {
-	if lib == "" {
+	// "" and the explicit "self" key both mean "instrument the executable itself"
+	// (statically-linked targets, e.g. Rust/Tokio). Handle "self" here by design rather
+	// than relying on procs.LibPath("self") returning nil — which not only mislabels it
+	// as "not linked" but could mis-resolve to any mapping whose path contains "/self".
+	if lib == "" || lib == ebpfcommon.SelfLibKey {
 		return exePath, exeIno, "", true
 	}
 
@@ -895,8 +899,9 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 
 	for symbolName, probeArray := range probes {
 		for _, probe := range probeArray {
+			// Prefix probes are resolved by expandRustPrefixProbes below (one probe
+			// per monomorphized copy), not by exact/substring name lookup.
 			if probe.SymbolMatcher == ebpfcommon.SymbolMatcherPrefix {
-				probe.Skip = true
 				continue
 			}
 			syms := exactSyms
@@ -938,62 +943,113 @@ func gatherOffsetsImpl(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeD
 		}
 	}
 
+	if err := expandRustPrefixProbes(elfFile, probes, instrPath, log); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// expandRustPrefixProbes resolves every SymbolMatcherPrefix probe against the
+// binary and replaces its single template entry with one concrete ProbeDesc per
+// monomorphized copy (Rust generics emit many copies of the same function). A
+// prefix that resolves to no usable copy is removed from the map so it is never
+// attached at offset 0 — unless it was Required, which is a hard error.
+func expandRustPrefixProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeDesc,
+	instrPath string, log *slog.Logger,
+) error {
 	var prefixNames []string
 	for name, descs := range probes {
 		if len(descs) > 0 && descs[0].SymbolMatcher == ebpfcommon.SymbolMatcherPrefix {
 			prefixNames = append(prefixNames, name)
 		}
 	}
-	if len(prefixNames) > 0 {
-		prefixSyms, err := procs.FindExeSymbolsByPrefix(elfFile, prefixNames)
-		if err != nil {
-			return fmt.Errorf("failed to lookup Rust prefix symbols for %s: %w", instrPath, err)
-		}
-		for _, symbolName := range prefixNames {
-			matched, ok := prefixSyms[symbolName]
-			if !ok || len(matched) == 0 {
-				log.Debug("rust prefix not found in binary", "prefix", symbolName, "binary", instrPath)
-				continue
-			}
-			log.Debug("rust prefix resolved", "prefix", symbolName, "copies", len(matched), "binary", instrPath)
-			template := probes[symbolName][0]
-			expanded := make([]*ebpfcommon.ProbeDesc, 0, len(matched))
-			for i := range matched {
-				sym := matched[i]
-				log.Debug("rust monomorphized copy", "prefix", symbolName, "copy", i, "offset", fmt.Sprintf("0x%x", sym.Off))
-				progData := readSymbolData(&sym)
+	if len(prefixNames) == 0 {
+		return nil
+	}
 
-				if progData == nil {
-					continue
-				}
-				returns, err := goexec.FindReturnOffsets(sym.Off, progData)
-				if err != nil {
-					log.Debug("Error finding return offsets for Rust symbol", "prefix", symbolName)
-					continue
-				}
-				endProg := template.End
-				if len(returns) == 0 && endProg != nil {
-					// Rust release builds often use indirect tail-calls instead of RET,
-					// preventing uretprobe placement. We attach the entry probe only.
-					// The tokio_thread_state remains accurate during poll execution when HTTP probes fire.
-					log.Debug("rust tail-call function, skipping uretprobe", "prefix", symbolName)
-					endProg = nil
-				}
-				expanded = append(expanded, &ebpfcommon.ProbeDesc{
-					Required:      template.Required,
-					Start:         template.Start,
-					End:           endProg,
-					StartOffset:   sym.Off,
-					ReturnOffsets: returns,
-				})
-			}
-			if len(expanded) > 0 {
-				probes[symbolName] = expanded
+	prefixSyms, err := procs.FindExeSymbolsByPrefix(elfFile, prefixNames)
+	if err != nil {
+		return fmt.Errorf("failed to lookup Rust prefix symbols for %s: %w", instrPath, err)
+	}
+
+	var resolved, unresolved []string
+	for _, symbolName := range prefixNames {
+		template := probes[symbolName][0]
+		matched := prefixSyms[symbolName]
+
+		expanded := make([]*ebpfcommon.ProbeDesc, 0, len(matched))
+		for i := range matched {
+			if desc := expandedProbeForSym(template, matched[i], symbolName, i, log); desc != nil {
+				expanded = append(expanded, desc)
 			}
 		}
+
+		if len(expanded) == 0 {
+			if template.Required {
+				return fmt.Errorf("required symbol %s not found in %s", symbolName, instrPath)
+			}
+			log.Debug("rust prefix not resolved to any usable copy", "prefix", symbolName, "binary", instrPath)
+			delete(probes, symbolName)
+			unresolved = append(unresolved, symbolName)
+			continue
+		}
+		log.Debug("rust prefix resolved", "prefix", symbolName, "copies", len(expanded), "binary", instrPath)
+		probes[symbolName] = expanded
+		resolved = append(resolved, symbolName)
+	}
+
+	// Tokio prefixes are universal (every poll/creation goes through raw::poll/Cell::new),
+	// so a Tokio binary resolves all of them and a non-Tokio binary resolves none.
+	// "Some but not all" means a probe was silently lost, so warn instead of just logging Debug.
+	if len(resolved) > 0 && len(unresolved) > 0 {
+		log.Warn("rust prefixes only partially resolved — some Tokio probes not attached "+
+			"(demangler gap or inlined/stripped symbol?); context propagation may be degraded",
+			"resolved", resolved, "unresolved", unresolved, "binary", instrPath)
 	}
 
 	return nil
+}
+
+// expandedProbeForSym builds one concrete ProbeDesc for a single monomorphized
+// copy of a prefix-matched Rust symbol, or nil if the copy's code can't be read,
+// or if it is a uretprobe-only probe (Start==nil) with no return offsets to attach.
+// A copy with an entry probe still attaches even when return offsets are missing.
+func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
+	symbolName string, copyIdx int, log *slog.Logger,
+) *ebpfcommon.ProbeDesc {
+	log.Debug("rust monomorphized copy", "prefix", symbolName, "copy", copyIdx, "offset", fmt.Sprintf("0x%x", sym.Off))
+
+	progData := readSymbolData(&sym)
+	if progData == nil {
+		return nil
+	}
+	returns, err := goexec.FindReturnOffsets(sym.Off, progData)
+	if err != nil {
+		// Return-offset decoding failed (an instruction the disassembler can't decode).
+		// Do NOT drop the whole copy: the entry uprobe needs no return offsets, so we
+		// still attach it and only skip the uretprobe (handled by the len==0 path below).
+		// Dropping everything here would silently lose poll tracking for this copy.
+		log.Debug("error finding return offsets for Rust symbol; attaching entry probe only", "prefix", symbolName)
+		returns = nil
+	}
+
+	end := template.End
+	if len(returns) == 0 && end != nil {
+		// No RET offsets — either a release tail-call (indirect br, no ret) or a decode
+		// failure above. Attach the entry probe only; tokio_thread_state stays accurate
+		// during poll execution when HTTP probes fire.
+		log.Debug("rust tail-call / undecodable function, skipping uretprobe", "prefix", symbolName)
+		end = nil
+	}
+
+	return &ebpfcommon.ProbeDesc{
+		Required:      template.Required,
+		Start:         template.Start,
+		End:           end,
+		StartOffset:   sym.Off,
+		ReturnOffsets: returns,
+	}
 }
 
 func applyResolvedSymbolOffsets(

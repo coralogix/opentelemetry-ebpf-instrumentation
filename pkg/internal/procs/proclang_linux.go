@@ -428,22 +428,6 @@ func contains(slice []string, value string) bool {
 	return slices.Contains(slice, value)
 }
 
-func symFileOffset(f *elf.File, s elf.Symbol) (uint64, *elf.Prog) {
-	address := s.Value
-	var p *elf.Prog
-	for _, prog := range f.Progs {
-		if prog.Type != elf.PT_LOAD || (prog.Flags&elf.PF_X) == 0 {
-			continue
-		}
-		if prog.Vaddr <= s.Value && s.Value < (prog.Vaddr+prog.Memsz) {
-			address = s.Value - prog.Vaddr + prog.Off
-			p = prog
-			break
-		}
-	}
-	return address, p
-}
-
 type symbolCollector struct {
 	addresses   map[string]Sym
 	symbolNames []string
@@ -560,17 +544,21 @@ func substringSymbolMatch(symbolName string, substrings []string) (string, bool)
 // monomorphized copy of that function (e.g. all ~23 copies of raw::poll).
 func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, error) {
 	out := map[string][]Sym{}
+	// Shared across both symbol tables: a function can appear in .symtab and .dynsym,
+	// and attaching a uprobe twice at one file offset would double-fire.
+	seen := map[uint64]struct{}{}
+
 	syms, err := f.Symbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
-	collectSymbolsByPrefix(f, syms, out, prefixes)
+	collectSymbolsByPrefix(f, syms, out, prefixes, seen)
 
 	dynsyms, err := f.DynamicSymbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
-	collectSymbolsByPrefix(f, dynsyms, out, prefixes)
+	collectSymbolsByPrefix(f, dynsyms, out, prefixes, seen)
 
 	return out, nil
 }
@@ -578,7 +566,7 @@ func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, e
 // collectSymbolsByPrefix fills `out` (prefix -> []Sym) for every ELF symbol whose
 // demangled Rust name starts with one of the requested prefixes.  Symbols that
 // do not demangle are silently skipped (they would be caught by collectSymbols).
-func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym, prefixes []string) {
+func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym, prefixes []string, seen map[uint64]struct{}) {
 	for _, s := range syms {
 		// Only STT_FUNC. Rust monomorphized generics (the Tokio copies) are always
 		// STT_FUNC; STT_NOTYPE function symbols only arise from ICF/LTO folding or
@@ -596,13 +584,19 @@ func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym
 		}
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(demangled, prefix) {
-				address, p := symFileOffset(f, s)
+				sym := resolveSymbol(f, s)
+				// Skip a file offset already recorded (e.g. the same function present
+				// in both .symtab and .dynsym) so it is not probed twice.
+				if _, dup := seen[sym.Off]; dup {
+					break
+				}
+				seen[sym.Off] = struct{}{}
 				slog.Debug("rust symbol matched",
 					"mangled", s.Name,
 					"demangled", demangled,
 					"prefix", prefix,
-					"offset", fmt.Sprintf("0x%x", address))
-				out[prefix] = append(out[prefix], Sym{Off: address, Len: s.Size, Prog: p})
+					"offset", fmt.Sprintf("0x%x", sym.Off))
+				out[prefix] = append(out[prefix], sym)
 				break
 			}
 		}
