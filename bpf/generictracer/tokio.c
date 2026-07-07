@@ -53,7 +53,7 @@ static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u64 task_id) {
 // Fires when the Tokio executor begins polling a task. Records the task's Header
 // pointer in tokio_thread_state so that later probes on the same OS thread can
 // resolve "which task is currently running here".
-//
+
 // SEC target is "self" because Tokio is statically linked into the application
 // binary — there is no separate shared library to target.
 //
@@ -94,7 +94,7 @@ int obi_uprobe_tokio_poll(struct pt_regs *ctx) {
     // Refresh (or lazily register) the task's inbound connection at every poll
     // while this thread is serving an inbound request.  This handles two cases:
     //
-    //   1. Pre-OBI tasks (never seen by obi_uprobe_tokio_task_new): register them
+    //   1. Pre-OBI tasks (never seen by obi_uretprobe_tokio_cell_new): register them
     //      for the first time so find_tokio_parent_trace can see them.
     //
     //   2. Long-lived tasks with a stale conn — e.g. a hyper/reqwest connection-pool
@@ -194,6 +194,14 @@ int obi_uretprobe_tokio_poll(struct pt_regs *ctx) {
     return 0;
 }
 
+// NOTE (v0.4.0): now largely REDUNDANT with Handler 4 (Cell::new).  The blocking
+// task's cell is allocated via Cell::<BlockingTask,BlockingSchedule>::new on the
+// handler thread while current_task = the handler (already conn_valid=1), so
+// Handler 4 already records parent=handler and inherits the conn.  Handler 3's
+// extra write is harmless (same parent/conn; a spurious version bump on a task
+// with no children yet).  Kept until the blocking A/B discrimination test confirms
+// Cell::new alone covers this path, then a candidate for removal.
+//
 // Fires when spawn_blocking returns to the caller. This is a regular fn (not
 // async), so no context switch happens between the handler's last poll and this
 // uretprobe — tokio_thread_state still holds the correct handler task H for this
@@ -242,7 +250,7 @@ int obi_uretprobe_tokio_spawn_blocking(struct pt_regs *ctx) {
         return 0;
     }
 
-    // Bump the version counter on pointer reuse, mirroring obi_uprobe_tokio_task_new,
+    // Bump the version counter on pointer reuse, mirroring obi_uretprobe_tokio_cell_new,
     // rather than hardcoding 1 (a blocking task pointer can be a reused address).
     const tokio_task_state_t *existing_b =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &blocking_task_ptr);
@@ -261,29 +269,25 @@ int obi_uretprobe_tokio_spawn_blocking(struct pt_regs *ctx) {
     return 0;
 }
 
-// Fires when a new Tokio task is bound into the owned-tasks list, which is the
-// earliest point at which both the new task pointer and the spawning task
-// (still "current" on this thread) are simultaneously observable.
+// Fires when a Tokio task cell is allocated, via a uretprobe on
+// tokio::runtime::task::core::Cell::<T,S>::new — the single constructor that EVERY
+// task-creation path funnels through (tokio::spawn / spawn_local / spawn_blocking,
+// all schedulers).  Cell::new returns Box<Cell<T,S>>; Cell is #[repr(C)] with
+// `header: Header` as its first field, so the returned pointer (PT_REGS_RC) IS the
+// task Header pointer used everywhere else — there is no argument-slot or
+// pre-vs-post-construction ambiguity.
 //
-// This handler is attached to TWO probe points with the same BPF program — one
-// per scheduler flavour:
+// This replaces the older two-probe scheme (OwnedTasks::bind_inner uprobe +
+// LocalOwnedTasks::bind uprobe), which was asymmetric: bind_inner receives the
+// built Task<S> (= Header) in PARM2, but LocalOwnedTasks::bind has no such inner
+// helper and its entry argument is the raw future, NOT the Header — so the old
+// task_new uprobe wrote a garbage key on the spawn_local / LocalSet path (e.g.
+// actix-web).  Cell::new sidesteps that entirely by reading the finished cell from
+// the return.
 //
-//   tokio::runtime::task::list::OwnedTasks<S>::bind_inner (multi-thread scheduler)
-//     The locked-list callee that the public OwnedTasks<S>::bind delegates to.
-//     We probe bind_inner — NOT bind — because bind is inlined away in release,
-//     whereas bind_inner survives and is executed in BOTH debug and release, so
-//     this single symbol covers both builds. (Used by tokio::spawn on a
-//     multi-thread / work-stealing runtime, e.g. Axum.)
-//
-//   tokio::runtime::task::list::LocalOwnedTasks<S>::bind  (current-thread scheduler)
-//     Survives both builds. (Used by spawn_local / current-thread runtimes,
-//     e.g. actix-web.)
-//
-// In both cases:
-//   PARM1 = &self — the OwnedTasks / LocalOwnedTasks receiver (NOT the new task).
-//   PARM2 = pointer to the new task's Header (new_task_ptr) — what we read below.
-//   bind_inner and bind are generic over S (the scheduler type); the Go-side
-//   instrumenter attaches to every monomorphized copy via demangled-prefix match.
+// Cell::new runs on the SPAWNING thread, synchronously during the parent's poll,
+// so current_task is still the spawner (the parent) — same timing as the previous
+// bind-time probe.
 //
 // Connection inheritance logic (mirrors python.c:_asyncio_Task___init__):
 //   1. If the spawning task already has conn_valid, inherit it directly — this
@@ -291,19 +295,18 @@ int obi_uretprobe_tokio_spawn_blocking(struct pt_regs *ctx) {
 //   2. Otherwise fall back to pid_tid_to_conn for the current thread — this
 //      covers the case where the very first task is spawned directly from the
 //      thread that received the inbound request.
-SEC("uprobe/self:tokio_task_new")
-int obi_uprobe_tokio_task_new(struct pt_regs *ctx) {
+SEC("uretprobe/self:tokio_cell_new")
+int obi_uretprobe_tokio_cell_new(struct pt_regs *ctx) {
+
     const u64 id = bpf_get_current_pid_tgid();
 
     if (!valid_pid(id)) {
         return 0;
     }
 
-    // PARM1 = &self — the OwnedTasks / LocalOwnedTasks receiver, a constant per-runtime
-    //          pointer that is the same for every task spawned into that pool.
-    // PARM2 = task: Task<S> — a pointer-sized transparent newtype over NonNull<Header>,
-    //          passed by value in a register (x86-64 SysV ABI), holding the raw Header ptr.
-    const u64 new_task_ptr = (u64)PT_REGS_PARM2(ctx);
+    // Cell::new returns Box<Cell<T,S>>; Cell is #[repr(C)] with `header` first, so
+    // RC (rax on x86-64, x0 on arm64) == &cell == &cell.header == the task Header ptr.
+    const u64 new_task_ptr = (u64)PT_REGS_RC(ctx);
     if (new_task_ptr == k_tokio_task_none) {
         return 0;
     }

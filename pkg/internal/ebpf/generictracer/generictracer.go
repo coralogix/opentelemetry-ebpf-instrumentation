@@ -517,25 +517,29 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				Start:         p.bpfObjects.ObiUprobeTokioPoll,
 				End:           p.bpfObjects.ObiUretprobeTokioPoll,
 			}},
-			// Multi-thread scheduler: OwnedTasks<S>::bind_inner fires when a task
-			// is spawned into the work-stealing pool (tokio::spawn).
-			// OwnedTasks::bind is never emitted as its own symbol; bind_inner is the
-			// inner locked-list helper that survives both debug and release builds.
-			// Symbols use $LT$S$GT$ dollar-encoding for the generic param; rustDemangle
-			// strips this so prefix matching finds all monomorphised copies.
-			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
+			// Task creation — universal. Every task-creation path funnels through
+			// tokio::runtime::task::core::Cell::<T,S>::new, which allocates the task
+			// cell and returns Box<Cell<T,S>>. Cell is #[repr(C)] with `header: Header`
+			// as its first field, so the returned pointer IS the task Header pointer.
+			//
+			// We probe Cell::new (uretprobe, reads the Header from the return register)
+			// rather than the *bind* functions because those are asymmetric across
+			// schedulers: OwnedTasks factors out bind_inner (which receives the built
+			// Task<S> = Header) but LocalOwnedTasks::bind builds the task inline and has
+			// no such helper — its argument at entry is the raw future, NOT the Header,
+			// so a task_new uprobe there wrote a garbage key (spawn_local / LocalSet,
+			// e.g. actix-web). Cell::new is the single point common to ALL paths — the
+			// multi-thread and current-thread runtimes, spawn_local/LocalSet, and the
+			// blocking pool — and it survives release (new_task / RawTask::new inline
+			// away, but Cell::new does the heap allocation and stays out-of-line).
+			//
+			// Generic over <T,S> -> many monomorphized copies; the instrumenter attaches
+			// to every one via demangled-prefix matching. The nested new_header fn is
+			// inlined (no symbol), so this prefix does not over-match.
+			"tokio::runtime::task::core::Cell::new": {{
 				Required:      false,
 				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
-				Start:         p.bpfObjects.ObiUprobeTokioTaskNew,
-			}},
-			// Current-thread scheduler: LocalOwnedTasks<S>::bind fires when a task
-			// is spawned on a single-threaded runtime (tokio::task::spawn_local,
-			// used by actix-web and similar frameworks). Survives both debug and
-			// release builds. Same $LT$S$GT$ dollar-encoding as bind_inner above.
-			"tokio::runtime::task::list::LocalOwnedTasks::bind": {{
-				Required:      false,
-				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
-				Start:         p.bpfObjects.ObiUprobeTokioTaskNew,
+				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
 			}},
 			// spawn_blocking is a regular fn (not async) that synchronously allocates
 			// a blocking pool task and returns JoinHandle<R> (= NonNull<Header> = 8 bytes,

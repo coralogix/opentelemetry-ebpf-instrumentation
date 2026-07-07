@@ -1043,6 +1043,13 @@ func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
 		end = nil
 	}
 
+	// A uretprobe-only template (e.g. Cell::new) whose copy has no return
+	// offsets would attach nothing — skip it
+	if template.Start == nil && end == nil {
+		log.Debug("rust prefix copy has no attachable probe, skipping", "prefix", symbolName)
+		return nil
+	}
+
 	return &ebpfcommon.ProbeDesc{
 		Required:      template.Required,
 		Start:         template.Start,

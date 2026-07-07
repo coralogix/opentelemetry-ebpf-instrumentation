@@ -17,8 +17,8 @@ It extends the existing context propagation mechanisms documented in [context-pr
 
 | Execution pattern | Tokio runtime behavior | OBI correlation path |
 |-------------------|------------------------|----------------------|
-| `await` in the handler task on a current-thread runtime (e.g. actix-web) | Each worker owns a single-threaded runtime, so a task never migrates between OS threads | Thread-local `pid_tid_to_conn` already resolves the request; the Tokio ancestry walk is not strictly required, but `LocalOwnedTasks::bind` still records lineage |
-| `tokio::spawn` on a multi-thread runtime (e.g. Axum) | The spawned task is enqueued in the global scheduler and may be **stolen by a different worker thread** before it runs | The child task inherits the parent's request connection at `OwnedTasks::bind_inner`; the egress walk resolves the request from `tokio_task_state` regardless of which thread runs the task |
+| `await` in the handler task on a current-thread runtime (e.g. actix-web) | Each worker owns a single-threaded runtime, so a task never migrates between OS threads | Thread-local `pid_tid_to_conn` already resolves the request; the Tokio ancestry walk is not strictly required, but `Cell::new` still records lineage |
+| `tokio::spawn` on a multi-thread runtime (e.g. Axum) | The spawned task is enqueued in the global scheduler and may be **stolen by a different worker thread** before it runs | The child task inherits the parent's request connection at `Cell::new`; the egress walk resolves the request from `tokio_task_state` regardless of which thread runs the task |
 | Nested `tokio::spawn` (depth ≥ 2) | Each spawn is a fresh task; each may migrate independently | `find_tokio_parent_trace` walks the stored parent chain (up to 8 levels) until it finds the task that owns the inbound request |
 | `tokio::task::spawn_blocking` | The closure runs on a dedicated **blocking-pool OS thread**, separate from the async workers | The `spawn_blocking` return probe copies the handler task's connection onto the new blocking task, so the egress walk resolves it at depth 0 |
 
@@ -62,7 +62,7 @@ The end result is the same two-stage lookup used by the Python async path:
 The design depends on a few Tokio behaviors:
 
 1. Every task poll dispatches through the task's vtable to the monomorphized free fn `tokio::runtime::task::raw::poll::<T,S>`. That function's address is stored in the vtable, so it cannot be inlined and is reached via an indirect call on every poll — for every task type and every scheduler (multi-thread workers, current-thread, and the blocking pool) — in both debug and release.
-2. Spawning a task binds it into an owned-tasks list (`OwnedTasks::bind` / `bind_inner` for the multi-thread scheduler, `LocalOwnedTasks::bind` for the current-thread scheduler) before it can run — the earliest point at which both the new task pointer and the spawning task are simultaneously observable.
+2. Every task-creation path allocates the task's cell through `tokio::runtime::task::core::Cell::<T,S>::new` (multi-thread scheduler, current-thread scheduler, and the blocking pool all bottom out here). It runs synchronously on the spawning thread while the spawning task is still "current", so the new task pointer and its parent are simultaneously observable. `Cell` is `#[repr(C)]` with `header` first and `Cell::new` returns `Box<Cell>`, so the returned pointer is the task `Header`.
 3. `spawn_blocking` is a regular synchronous function: it allocates the blocking task and returns its `JoinHandle` to the caller without an intervening context switch, so the spawning (handler) task is still "current" on the thread when the function returns.
 
 Tokio is **statically linked** into the application binary, so all probes target the executable itself (`SEC("uprobe/self:...")`) rather than a shared library.
@@ -80,17 +80,17 @@ The implementation is built around four BPF programs. Because Tokio's internal s
 
 We probe `raw::poll` rather than the thin `RawTask::poll` thunk that performs the indirect call: that thunk (`ldr vtable; ldr vtable.poll; br`) is inlined into the scheduler's `run_task` in release, so a probe on it never fires on multi-thread workers in release — which made the feature inert in release multi-thread. The vtable target `raw::poll` cannot be inlined (its address is taken), so it is the correct universal probe point; its monomorphized copies are attached via prefix matching. `harness::poll_future` is also not probed (it would double-fire). PARM1 is the `Header*` in all cases.
 
-### `OwnedTasks::bind_inner` / `LocalOwnedTasks::bind` (task creation) — `tokio_task_new`
+### `Cell::new` (task creation) — `tokio_cell_new`
 
-Fires when a newly spawned task is bound into its owned-tasks list.
+Fires when a new task's cell is allocated. Every task-creation path funnels through
+`tokio::runtime::task::core::Cell::<T,S>::new` — the leaf constructor called by
+`new_task` for the multi-thread scheduler (`tokio::spawn`), the current-thread
+scheduler (`spawn_local`), and the blocking pool. It is the single universal,
+release-stable task-creation point.
 
-Only two symbols are probed — one per scheduler flavour — not a debug/release pair:
+We probe `Cell::new` as a **uretprobe** (`obi_uretprobe_tokio_cell_new`) and read the new task's `Header` from the **return value** (`PT_REGS_RC`). `Cell::new` returns `Box<Cell<T,S>>`, and `Cell` is `#[repr(C)]` with `header: Header` as its first field, so the returned pointer *is* the task `Header` pointer used everywhere else — no argument-slot or pre-vs-post-construction ambiguity. The handler records the new task's parent (`current_task` on the spawning thread, unchanged) and the connection it should inherit. See [Request ownership is captured at task creation time](#request-ownership-is-captured-at-task-creation-time).
 
-- `OwnedTasks::bind_inner` — multi-thread scheduler (`tokio::spawn`). `bind_inner` is the locked-list callee that the public `OwnedTasks::bind` delegates to. 
-We probe `bind_inner` rather than `bind` because `bind` is inlined away in release, whereas `bind_inner` is present and executed in **both** debug and release — so this single symbol covers both builds and `bind` is never probed.
-- `LocalOwnedTasks::bind` — current-thread scheduler (`spawn_local`, actix-web); survives both build modes.
-
-`obi_uprobe_tokio_task_new` reads the new task pointer from **`PARM2`** (the `Task<S>` value; `PARM1` is the `&self` receiver) and records its parent and the connection it should inherit. See [Request ownership is captured at task creation time](#request-ownership-is-captured-at-task-creation-time).
+`Cell::new` is chosen over the `bind` functions because those are asymmetric across schedulers: `OwnedTasks` factors out a `bind_inner` that receives the built `Task<S>` (the `Header`), but `LocalOwnedTasks::bind` has no such helper and its argument at entry is the raw future, not the `Header`. `Cell::new` sidesteps that entirely by reading the finished cell from the return, and — unlike the intermediate `new_task` / `RawTask::new`, which are inlined away in release — it survives (it does the heap allocation). It also covers blocking-pool tasks, so the `spawn_blocking` return probe below is redundant for lineage (retained only for its connection handling).
 
 ### `pool::spawn_blocking` (return) — `tokio_spawn_blocking`
 
@@ -128,22 +128,21 @@ When the walk fails (e.g. a connection-pool driver task that predates OBI, or a 
 
 ### Request ownership is captured at task creation time
 
-`obi_uprobe_tokio_task_new` stores the request connection with a parent-first rule, mirroring `python.c:_asyncio_Task___init__`:
+`obi_uretprobe_tokio_cell_new` stores the request connection with a parent-first rule, mirroring `python.c:_asyncio_Task___init__`:
 
 1. if the spawning (parent) task already has `conn_valid`, the child **inherits** that connection directly — this propagates the inbound request down the task lineage,
 2. otherwise it falls back to the current thread's `pid_tid_to_conn` — covering the first task spawned directly inside a handler.
 
 Preferring the parent matters because `tokio_task_state` is request-scoped while `pid_tid_to_conn` is only thread-scoped: once child tasks interleave on a worker, the thread-local connection can already belong to a different in-flight request.
 
-The handler task's own connection is set when the inbound server span is saved (`trace_lifecycle.h`, "Fix 1"). 
-If the handler task predates OBI and was never seen by `task_new`, that path **lazily registers** it in `tokio_task_state` so the walk and the `spawn_blocking` bridge can still find it.
+The handler task's own connection is set when the inbound server span is saved (`trace_lifecycle.h`). If the handler task predates OBI and was never seen by `Cell::new`, that path **lazily registers** it in `tokio_task_state` so the walk and the `spawn_blocking` bridge can still find it.
 
 ### The inbound-vs-outbound connection guard
 
 `pid_tid_to_conn` holds whatever connection most recently touched the thread — which may be an *outgoing* `connect()` rather than the inbound request. 
 Writing an outbound connection as an `FD_SERVER` key would poison `tokio_task_state` and make every later `server_traces_aux` lookup miss.
 
-The poll-entry refresh and `task_new` therefore only adopt a thread connection when `d_port != orig_dport`. For an accepted inbound connection, `sort_connection_info` swaps the ports so `d_port` becomes the local server port (≠ the client's remote ephemeral `orig_dport`); for an outgoing connection both are the remote backend port and are equal. The inequality distinguishes the two.
+The poll-entry refresh and `Cell::new` therefore only adopt a thread connection when `d_port != orig_dport`. For an accepted inbound connection, `sort_connection_info` swaps the ports so `d_port` becomes the local server port (≠ the client's remote ephemeral `orig_dport`); for an outgoing connection both are the remote backend port and are equal. The inequality distinguishes the two.
 
 ### Connection refresh only fills, never clobbers
 
@@ -171,7 +170,7 @@ Non-Tokio servers (Go, Java, Python, nginx, …) hit this path constantly and mu
 
 The userspace instrumenter resolves Tokio symbols from the executable's own symbol table and matches them by **demangled prefix**, because:
 
-- Tokio's `poll`/`bind`/`spawn_blocking` symbols are **generic** and emitted as many monomorphized copies (one per type instantiation); all copies must be probed.
+- Tokio's `poll`/`Cell::new`/`spawn_blocking` symbols are **generic** and emitted as many monomorphized copies (one per type instantiation); all copies must be probed.
 - Rust emits symbols under two mangling schemes — **legacy** (`_ZN…E`, decoded by `rustDemangle`) and **v0** (`_R…`, decoded by `rustDemangleV0`; macOS adds a leading `__R`). `FindExeSymbolsByPrefix` demangles each symbol and matches the configured prefixes against the result, so both schemes resolve to the same probe set. Build-hash suffixes (`17h<hash>`) and `$LT$…$GT$` generic encodings are stripped during demangling.
 
 ## Known Limitations
