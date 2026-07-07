@@ -541,26 +541,6 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
 				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
 			}},
-			// spawn_blocking is a regular fn (not async) that synchronously allocates
-			// a blocking pool task and returns JoinHandle<R> (= NonNull<Header> = 8 bytes,
-			// returned in rax).  The uretprobe reads the blocking task ptr from rax,
-			// looks up the handler task's inbound connection (set by Fix 1), and
-			// registers the blocking task in tokio_task_state with conn_valid=1.
-			// This eliminates the racy process-level fallback for concurrent
-			// spawn_blocking calls: find_tokio_parent_trace resolves at depth 0.
-			//
-			// We target the inner free fn tokio::runtime::blocking::pool::spawn_blocking<F,R>,
-			// NOT the public wrapper tokio::task::blocking::spawn_blocking. The wrapper is
-			// inlined away in release; the inner fn survives in BOTH debug and release and
-			// returns the same JoinHandle<R> in rax, so it alone covers every build.
-			// Prefix matching is exact enough here: the sibling symbols pool::Spawner::
-			// spawn_blocking and pool::Spawner::spawn_blocking_inner have "Spawner::" after
-			// "pool::", so this prefix matches only the free fn's monomorphizations.
-			"tokio::runtime::blocking::pool::spawn_blocking": {{
-				Required:      false,
-				SymbolMatcher: ebpfcommon.SymbolMatcherPrefix,
-				End:           p.bpfObjects.ObiUretprobeTokioSpawnBlocking,
-			}},
 		},
 	}
 	if p.cfg.JVMRuntimeMetrics.Enabled {

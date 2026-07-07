@@ -110,9 +110,10 @@ static __always_inline void tokio_tag_inbound_conn(u64 id,
     //
     // Lazy-registration extension: if the task is NOT yet in tokio_task_state
     // (pre-OBI handler — created before OBI attached, never seen by
-    // obi_uretprobe_tokio_cell_new), CREATE the entry here.  This ensures the
-    // spawn_blocking uretprobe's Try-1 lookup succeeds for these tasks instead
-    // of falling through to racy thread- or process-level fallbacks.
+    // obi_uretprobe_tokio_cell_new), CREATE the entry here.  This makes the handler a
+    // valid conn_valid ancestor, so tasks it spawns — including blocking-pool tasks,
+    // whose Cell::new inherits this conn — resolve via the ancestry walk instead of
+    // falling through to racy thread- or process-level fallbacks.
     tokio_task_state_t *task_state =
         (tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &ts->current_task);
     if (task_state) {

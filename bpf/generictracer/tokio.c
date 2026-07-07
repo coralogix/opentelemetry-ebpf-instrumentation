@@ -194,81 +194,6 @@ int obi_uretprobe_tokio_poll(struct pt_regs *ctx) {
     return 0;
 }
 
-// NOTE (v0.4.0): now largely REDUNDANT with Handler 4 (Cell::new).  The blocking
-// task's cell is allocated via Cell::<BlockingTask,BlockingSchedule>::new on the
-// handler thread while current_task = the handler (already conn_valid=1), so
-// Handler 4 already records parent=handler and inherits the conn.  Handler 3's
-// extra write is harmless (same parent/conn; a spurious version bump on a task
-// with no children yet).  Kept until the blocking A/B discrimination test confirms
-// Cell::new alone covers this path, then a candidate for removal.
-//
-// Fires when spawn_blocking returns to the caller. This is a regular fn (not
-// async), so no context switch happens between the handler's last poll and this
-// uretprobe — tokio_thread_state still holds the correct handler task H for this
-// thread.
-//
-// In trace_lifecycle.h already set tokio_task_state[H].conn_valid=1 when
-// the inbound HTTP request was first seen.  Here we copy that connection to the
-// new blocking task B so that find_tokio_parent_trace resolves B at depth 0
-// (conn_valid=1) without touching the racy process-level fallback.
-//
-// Attached (via demangled-prefix matching in generictracer.go) to the inner free fn
-// tokio::runtime::blocking::pool::spawn_blocking<F,R>, which is present in BOTH debug
-// and release (the public wrapper tokio::task::blocking::spawn_blocking is inlined away
-// in release). It returns the JoinHandle in rax, so this single probe covers all builds.
-//
-// Return-value ABI (x86-64 SysV):
-//   JoinHandle<R> = RawTask = NonNull<Header> — an 8-byte newtype over a pointer.
-//   Returned in rax.  PT_REGS_RC(ctx) == the blocking task ptr B.
-SEC("uretprobe/self:tokio_spawn_blocking")
-int obi_uretprobe_tokio_spawn_blocking(struct pt_regs *ctx) {
-    const u64 id = bpf_get_current_pid_tgid();
-
-    if (!valid_pid(id)) {
-        return 0;
-    }
-
-    // JoinHandle<R> is returned in rax.
-    const u64 blocking_task_ptr = (u64)PT_REGS_RC(ctx);
-    if (blocking_task_ptr == k_tokio_task_none) {
-        return 0;
-    }
-
-    // The handler task is still "current" — spawn_blocking is synchronous.
-    const tokio_thread_state_t *ts =
-        (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
-    if (!ts || ts->current_task == k_tokio_task_none) {
-        return 0;
-    }
-
-    // Handler task's conn was set by Fix 1 (or its lazy-registration extension)
-    // in trace_lifecycle.h before spawn_blocking could be called.  If it is not
-    // present or conn_valid=0, there is nothing reliable to propagate.
-    const tokio_task_state_t *handler_state =
-        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &ts->current_task);
-    if (!handler_state || !handler_state->conn_valid) {
-        return 0;
-    }
-
-    // Bump the version counter on pointer reuse, mirroring obi_uretprobe_tokio_cell_new,
-    // rather than hardcoding 1 (a blocking task pointer can be a reused address).
-    const tokio_task_state_t *existing_b =
-        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &blocking_task_ptr);
-    const u64 next_version = existing_b ? existing_b->version + 1 : 1;
-    const tokio_task_state_t blocking_state = {
-        .parent = ts->current_task,
-        .parent_version = handler_state->version,  
-        .version = next_version ? next_version : 1, // never store 0 (sentinel)
-        .conn = handler_state->conn,
-        .conn_valid = 1,
-    };
-    bpf_map_update_elem(&tokio_task_state, &blocking_task_ptr, &blocking_state, BPF_ANY);
-    bpf_dbg_printk(
-        "tokio spawn_blocking: B=%llx port=%d", blocking_task_ptr, handler_state->conn.port);
-
-    return 0;
-}
-
 // Fires when a Tokio task cell is allocated, via a uretprobe on
 // tokio::runtime::task::core::Cell::<T,S>::new — the single constructor that EVERY
 // task-creation path funnels through (tokio::spawn / spawn_local / spawn_blocking,
@@ -332,7 +257,7 @@ int obi_uretprobe_tokio_cell_new(struct pt_regs *ctx) {
 
     // Try to inherit the server connection key from the parent's task state, and
     // record the parent's current version so the ancestry walk can later reject a
-    // reused/evicted parent pointer 
+    // reused/evicted parent pointer
     if (parent_task != k_tokio_task_none) {
         const tokio_task_state_t *parent_state =
             (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &parent_task);
