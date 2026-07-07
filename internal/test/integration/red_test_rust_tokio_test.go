@@ -266,22 +266,31 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	// Phase 2: sustained concurrent A/B burst.
 	driveTokioABConcurrent(t, c.serverA, c.serverB, 150, 20)
 
-	// Phase 3: wait for the burst traces to export, then classify once and assert.
+	// Phase 3: classify inside the poll so the gate waits for enough clean chains to
+	// export, rather than classifying one arbitrary mid-export snapshot (the flaky bit,
+	// since clean chains are only ~30% of the exported total). probes-on converges;
+	// probes-off times out. Breakdown logged via t.Cleanup so both cases emit it.
+	//
+	// The query limit must comfortably exceed the TOTAL traces both subtests produce:
+	// they share one Jaeger, and a failed correlation emits its backend span as a
+	// separate orphan trace, so the count balloons. A limit that the combined total can
+	// reach truncates the window and permanently starves the second subtest's clean
+	// chains (they never fit), so the poll can never converge.
+	const classifyLimit = 3000
+	var cleanA, cleanB, contaminated, other int
+	t.Cleanup(func() {
+		t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated=%d other(incomplete)=%d",
+			c.serverA, c.serverB, cleanA, cleanB, contaminated, other)
+	})
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 600)), 50,
-			"waiting for burst traces to export")
+		cleanA, cleanB, contaminated, other = tokioClassifyAB(tokioQueryServerTraces(ct, classifyLimit), c)
+		require.GreaterOrEqualf(ct, cleanA, c.minClean,
+			"only %d clean A chains (need ≥%d) — Tokio probes not correlating %s; "+
+				"contaminated=%d other=%d", cleanA, c.minClean, c.serverA, contaminated, other)
+		require.GreaterOrEqualf(ct, cleanB, c.minClean,
+			"only %d clean B chains (need ≥%d) — Tokio probes not correlating %s; "+
+				"contaminated=%d other=%d", cleanB, c.minClean, c.serverB, contaminated, other)
 	}, testTimeout, time.Second)
-
-	cleanA, cleanB, contaminated, other := tokioClassifyAB(tokioQueryServerTracesT(t, 600), c)
-	t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated=%d other(incomplete)=%d",
-		c.serverA, c.serverB, cleanA, cleanB, contaminated, other)
-
-	require.GreaterOrEqualf(t, cleanA, c.minClean,
-		"only %d clean A chains (need ≥%d) — Tokio probes not correlating %s; "+
-			"contaminated=%d other=%d", cleanA, c.minClean, c.serverA, contaminated, other)
-	require.GreaterOrEqualf(t, cleanB, c.minClean,
-		"only %d clean B chains (need ≥%d) — Tokio probes not correlating %s; "+
-			"contaminated=%d other=%d", cleanB, c.minClean, c.serverB, contaminated, other)
 }
 
 // driveTokioAB fires n sequential requests to each of serverA and serverB.
@@ -327,19 +336,6 @@ func tokioQueryServerTraces(ct *assert.CollectT, limit int) []jaeger.Trace {
 
 	var tq jaeger.TracesQuery
 	require.NoError(ct, json.NewDecoder(jr.Body).Decode(&tq))
-	return tq.Data
-}
-
-// tokioQueryServerTracesT is the *testing.T variant for the one-shot final query.
-func tokioQueryServerTracesT(t *testing.T, limit int) []jaeger.Trace {
-	t.Helper()
-	jr, err := http.Get(fmt.Sprintf("%s?service=server&lookback=1h&limit=%d", jaegerQueryURL, limit))
-	require.NoError(t, err)
-	defer jr.Body.Close()
-	require.Equal(t, http.StatusOK, jr.StatusCode)
-
-	var tq jaeger.TracesQuery
-	require.NoError(t, json.NewDecoder(jr.Body).Decode(&tq))
 	return tq.Data
 }
 

@@ -20,13 +20,20 @@ FROM rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c
 # (target/debug or target/release).
 ARG CARGO_PROFILE=release
 
+# RUSTFLAGS is threaded through so tests can select the symbol mangling scheme,
+# e.g. RUSTFLAGS="-C symbol-mangling-version=v0" to build the v0 (_R…) scheme
+# instead of the legacy (_ZN…E) default. Empty by default (legacy), so existing
+# builds are unchanged. It applies to every crate in the build, including tokio,
+# so its monomorphized symbols are emitted under the chosen scheme.
+ARG RUSTFLAGS=""
+
 WORKDIR /build
 COPY internal/test/integration/components/rusttokiotest .
 
 RUN if [ "$CARGO_PROFILE" = "debug" ]; then \
-        cargo build --locked -p server -p backend; \
+        RUSTFLAGS="${RUSTFLAGS}" cargo build --locked -p server -p backend; \
     else \
-        cargo build --locked --release -p server -p backend; \
+        RUSTFLAGS="${RUSTFLAGS}" cargo build --locked --release -p server -p backend; \
     fi
 
 FROM debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421

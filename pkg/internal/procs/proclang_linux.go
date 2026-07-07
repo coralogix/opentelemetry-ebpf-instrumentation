@@ -280,6 +280,7 @@ func (p *v0Parser) ident() string {
 func (p *v0Parser) base62() int {
 	n := 0
 	hasDigit := false
+	overflow := false
 scan:
 	for p.pos < len(p.sym) {
 		c := p.sym[p.pos]
@@ -297,21 +298,30 @@ scan:
 			// the switch and then wrongly consume the char as a 0 digit.)
 			break scan
 		}
-		n = n*62 + d
 		hasDigit = true
 		p.pos++
-		// A base62 value here is always a string length or byte position, so it can
-		// never legitimately exceed len(p.sym). Bail out before n overflows int and
-		// wraps negative, which would defeat the ">= len(p.sym)" bounds checks callers
-		// rely on and lead to a negative-index panic.
-		if n > len(p.sym) {
-			break scan
+		// Keep consuming digits so pos lands on the '_' terminator even for large
+		// values: disambiguator hashes (whose value is skipped) encode base62 numbers
+		// far larger than len(p.sym). Bailing out mid-number here would strand pos
+		// inside the hash and derail every subsequent token. Once the value exceeds
+		// any usable string length / byte position it can only be out-of-range —
+		// which every caller already rejects via its ">= len(p.sym)" bounds check —
+		// so stop accumulating (avoiding signed-int overflow to a negative index) but
+		// keep scanning to the terminator.
+		if !overflow {
+			n = n*62 + d
+			if n > len(p.sym) {
+				overflow = true
+			}
 		}
 	}
 	if p.pos < len(p.sym) && p.sym[p.pos] == '_' {
 		p.pos++
 	}
 	if hasDigit {
+		if overflow {
+			return len(p.sym) + 1 // sentinel > any valid index; callers reject it
+		}
 		return n + 1
 	}
 	return 0

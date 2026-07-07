@@ -6,6 +6,9 @@ services:
     build:
       context: ../../..
       dockerfile: ./internal/test/integration/components/rusttokiotest/Dockerfile
+      args:
+        CARGO_PROFILE: ${CARGO_PROFILE:-release}
+        RUSTFLAGS: ${RUSTFLAGS:-}
     image: hatest-rust-tokio
     ports:
       - "8092:8092" # server (the backend on 8093 stays internal)

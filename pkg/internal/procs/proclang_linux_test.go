@@ -256,25 +256,29 @@ func TestRustDemangleV0_NonV0ReturnsEmpty(t *testing.T) {
 // TestV0Base62StopsWithoutConsuming locks the base62 terminator fix: a non-base62
 // byte must end the number WITHOUT being consumed. (A plain `break` inside the
 // switch previously only left the switch and then swallowed the byte as a 0 digit.)
+// The terminator must be a genuinely non-base62 byte — '.' here, not a letter like
+// 'x' which is itself a valid base62 digit — and the value must stay <= len(sym) so
+// the overflow clamp doesn't mask the terminator behavior we're checking.
 func TestV0Base62StopsWithoutConsuming(t *testing.T) {
-	p := &v0Parser{sym: "5x"}
+	p := &v0Parser{sym: "1."}
 	got := p.base62()
-	assert.Equal(t, 6, got, "raw value 5, encoded +1")
-	assert.Equal(t, 1, p.pos, "must stop at 'x' without consuming it")
+	assert.Equal(t, 2, got, "raw value 1, encoded +1")
+	assert.Equal(t, 1, p.pos, "must stop at '.' without consuming it")
 }
 
-// TestV0Base62DoesNotOverflowNegative locks a crash fix: a base62 run long enough
-// to overflow int would wrap n negative, defeating the ">= len(p.sym)" bounds
-// checks callers (path's back-reference handling, ident's length check) rely on,
-// and panicking on a negative index/slice bound. A base62 value here is always a
-// string length or byte position, so it can never legitimately exceed len(p.sym);
-// the fix bails out once n crosses that bound.
+// TestV0Base62DoesNotOverflowNegative locks a crash fix AND its terminator
+// invariant: a base62 run long enough to overflow int must (1) never wrap n
+// negative — which would defeat the ">= len(p.sym)" bounds checks callers rely on
+// and panic on a negative index — and (2) still consume the entire digit run plus
+// the trailing '_'. The value is clamped, but scanning must NOT bail mid-number:
+// real disambiguator hashes are long base62 runs, and stranding pos inside one
+// derails all subsequent parsing (the v0 tokio demangling bug).
 func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
 	sym := strings.Repeat("Z", 20) + "_" // 20 base62 digits, well past int64 overflow if uncapped
 	p := &v0Parser{sym: sym}
 	got := p.base62()
 	assert.GreaterOrEqual(t, got, 0, "must not overflow negative")
-	assert.Less(t, p.pos, len(sym)-1, "must bail out before consuming the whole pathological run")
+	assert.Equal(t, len(sym), p.pos, "must consume the whole run and the trailing '_'")
 }
 
 // TestRustPrefix_SelectsPollNotRawTaskPoll validates the v0.2.0 probe re-target: the
