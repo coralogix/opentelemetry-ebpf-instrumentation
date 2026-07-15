@@ -33,53 +33,42 @@ func runLintSchemaFilter(t *testing.T, diagnostics string) []json.RawMessage {
 	return remaining
 }
 
-const expectedDNSDuplicate = `[{
+const expectedDNSUnstableFormat = `[{
 	"diagnostic": {"severity": "Error"},
-	"error": {"DuplicateMetricName": {
-		"metric_name": "dns.lookup.duration",
-		"provenances": [
-			{"path": ".deps/upstream-v1.41.0/model/dns/metrics.yaml"},
-			{"path": "/obi-registry/groups/dns.yaml"}
-		]
-	}}
+	"error": {"FailToResolveDefinition": {"UnstableFileFormat": {
+		"file_format": "definition/2",
+		"provenance": "/obi-registry/groups/dns.yaml"
+	}}}
 }]`
 
-func TestLintSchemaFilterAllowsExpectedDNSDuplicate(t *testing.T) {
-	remaining := runLintSchemaFilter(t, expectedDNSDuplicate)
+func TestLintSchemaFilterAllowsExpectedDNSUnstableFormat(t *testing.T) {
+	remaining := runLintSchemaFilter(t, expectedDNSUnstableFormat)
 	if len(remaining) != 0 {
-		t.Fatalf("expected the documented dns.lookup.duration duplicate to be filtered, got %d diagnostics", len(remaining))
+		t.Fatalf("expected the documented definition/2 dns.yaml unstable-format diagnostic to be filtered, got %d diagnostics", len(remaining))
 	}
 }
 
 func TestLintSchemaFilterKeepsUnrelatedDiagnostics(t *testing.T) {
 	cases := map[string]string{
-		"duplicate of another metric": `[{
-			"error": {"DuplicateMetricName": {
-				"metric_name": "http.server.request.duration",
-				"provenances": [
-					{"path": ".deps/upstream-v1.41.0/model/http/metrics.yaml"},
-					{"path": "/obi-registry/groups/dns.yaml"}
-				]
-			}}
+		"unstable format for a different file": `[{
+			"error": {"FailToResolveDefinition": {"UnstableFileFormat": {
+				"file_format": "definition/2",
+				"provenance": "/obi-registry/groups/network.yaml"
+			}}}
 		}]`,
-		"dns duplicate with unexpected provenances": `[{
-			"error": {"DuplicateMetricName": {
-				"metric_name": "dns.lookup.duration",
-				"provenances": [
-					{"path": "/obi-registry/groups/a.yaml"},
-					{"path": "/obi-registry/groups/b.yaml"}
-				]
-			}}
-		}]`,
-		"dns duplicate declared a third time": `[{
+		"duplicate metric name": `[{
 			"error": {"DuplicateMetricName": {
 				"metric_name": "dns.lookup.duration",
 				"provenances": [
 					{"path": ".deps/upstream-v1.41.0/model/dns/metrics.yaml"},
-					{"path": "/obi-registry/groups/dns.yaml"},
-					{"path": "/obi-registry/groups/extra.yaml"}
+					{"path": "/obi-registry/groups/dns.yaml"}
 				]
 			}}
+		}]`,
+		"resolution failure other than unstable format": `[{
+			"error": {"FailToResolveDefinition": {"UnresolvedAttributeRef": {
+				"attribute": "dns.question.name"
+			}}}
 		}]`,
 		"different error type": `[{
 			"diagnostic": {"severity": "Error"},

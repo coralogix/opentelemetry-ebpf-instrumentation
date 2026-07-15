@@ -3,16 +3,23 @@
 
 // Package weavercheck holds the transport-agnostic parsing and validation of
 // the OpenTelemetry weaver live-check report. Both the Docker-Compose
-// integration suites (package integration) and the Kubernetes / kind suites
-// (package kube) feed weaver the same OTLP stream and read back the same JSON
-// report; this package owns the shared report schema, the ignore lists, and
-// the advisory-accounting + assertion logic so the two transports stay in
-// lockstep.
+// integration suites (package integration) and the OATS suites (package
+// harness) feed weaver the same OTLP stream and read back the same JSON
+// report; this package owns the shared report schema and the
+// advisory-accounting + assertion logic so the transports stay in lockstep.
 //
-// The transports differ only in HOW they stop weaver and obtain the raw
-// report bytes (docker exec + host bind mount vs. HTTP /stop on a kind host
-// port + the shared testoutput mount); everything from "parse the bytes" on
-// is here.
+// The transports differ only in the admin URL they POST /stop to; weaver runs
+// with `--output http`, so the report comes back in the /stop response body
+// (see StopAndRead / FetchReport) and there is no report file to read.
+//
+// Advisories OBI deliberately accepts (e.g. the servicegraph `server`/`client`
+// and netolly `iface` namespace collisions) are dropped by weaver itself via
+// the `[[live-check.finding_filters]]` in schemas/obi/weaver.toml before the
+// report reaches this package, so they are absent from the accounting below.
+// What remains here is the enforcement that weaver's config can't express: in
+// addition to `violation`-level advice, OBI also fails on the advice types in
+// actionableAdviceTypes (today `extends_namespace`, which weaver classifies as
+// information-level).
 package weavercheck // import "go.opentelemetry.io/obi/internal/test/weavercheck"
 
 import (
@@ -20,11 +27,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,39 +47,11 @@ type TestingT interface {
 	FailNow()
 }
 
-// IgnoredSignals is an escape hatch for advice we explicitly suppress without
-// declaring the underlying signal in the OBI registry. The harness fails on
-// `violation`-level advice AND on `extends_namespace` advice (an attribute
-// emitted under an existing semconv namespace but not declared in any
-// registry). Most non-semconv emissions (Prometheus `target_info`,
-// OTel-contrib spanmetrics / service-graph shape, OBI-internal markers) are
-// declared in `schemas/obi/` and validated against by weaver, so this map is
-// intended to stay small. Add entries here only as a short-lived bridge while
-// OBI catches up to a semconv contract. Keys are "signal_type:signal_name".
-var IgnoredSignals = map[string]struct{}{}
-
-// IgnoredAdviceMessages suppresses specific advice messages that match known
-// structural tensions weaver reports against the registry as a whole rather
-// than against any one signal. Today this only covers the `server` / `client`
-// namespace collision: the OTel collector-contrib `servicegraphconnector`
-// emits bare `server` / `client` labels (matched in `service_graph.yaml`), but
-// upstream semconv reserves `server.*` / `client.*` as namespace prefixes
-// (`server.address`, `server.port`, …). Weaver's lint flags the registry-level
-// collision on every signal that touches an upstream `server.*` / `client.*`
-// attribute, even ones that don't use the bare label. The contract OBI emits
-// is fixed by the connector convention; the ignore documents the tension.
-var IgnoredAdviceMessages = map[string]struct{}{
-	"Namespace 'server' collides with existing attribute 'server.address'": {},
-	"Namespace 'server' collides with existing attribute 'server.port'":    {},
-	"Namespace 'client' collides with existing attribute 'client.address'": {},
-	"Namespace 'client' collides with existing attribute 'client.port'":    {},
-	// OBI emits `iface` (interface name) alongside `iface.direction`, so
-	// `iface` is both a leaf attribute *and* the namespace of another. The
-	// emission contract is owned by netolly, mirrors the older network-flow
-	// exporter convention, and is not negotiable for backward compatibility —
-	// accept the structural warning.
-	"Namespace 'iface' collides with existing attribute 'iface.direction'": {},
-}
+// Advisories OBI deliberately accepts (the servicegraph `server`/`client` and
+// netolly `iface` namespace collisions) are dropped by weaver's
+// `[[live-check.finding_filters]]` in schemas/obi/weaver.toml before the report
+// reaches this package — they are not re-listed here. New suppressions belong
+// in that config, not in Go.
 
 // actionableAdviceTypes lists the weaver finding-type values OBI treats as
 // failures in addition to `violation`-level advice. Hoisted here (rather than
@@ -140,21 +118,17 @@ func Parse(rawReport []byte) (*Report, error) {
 	return &report, nil
 }
 
-// FetchReport stops the weaver live-check container via its admin /stop
-// endpoint and returns the parsed report once weaver has flushed it to
-// reportPath. It is transport-agnostic and logging-agnostic (returns an error
-// rather than failing a test), so any transport that publishes weaver's admin
-// port to the host and mounts its report file can reuse it.
-func FetchReport(ctx context.Context, adminURL, reportPath string) (*Report, error) {
-	// A previous test in the same process may have left an older report at
-	// reportPath (weaver writes it as root, so we can't delete it here).
-	// Snapshot its mtime so waitForReport only accepts a report written
-	// after this /stop.
-	var prevMod time.Time
-	if fi, err := os.Stat(reportPath); err == nil {
-		prevMod = fi.ModTime()
-	}
-
+// StopAndRead POSTs to the weaver live-check admin /stop endpoint and returns
+// the raw report bytes from the HTTP response body. This requires the
+// container to run live-check with `--output http`, which makes /stop respond
+// with the full report instead of writing it to a file — so no shared report
+// file or bind mount is needed, and the report can't be a stale one from an
+// earlier test. It is transport-agnostic and logging-agnostic (returns an
+// error rather than failing a test): any transport that publishes weaver's
+// admin port to the test host can reuse it. Callers that want to archive the
+// raw report (e.g. per-test debugging artifacts) use this and Parse
+// separately; FetchReport is the parse-only convenience wrapper.
+func StopAndRead(ctx context.Context, adminURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building weaver /stop request: %w", err)
@@ -163,38 +137,27 @@ func FetchReport(ctx context.Context, adminURL, reportPath string) (*Report, err
 	if err != nil {
 		return nil, fmt.Errorf("stopping weaver (is it running and the admin port mapped?): %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("weaver /stop returned HTTP %d", resp.StatusCode)
 	}
-	raw, err := waitForReport(ctx, reportPath, prevMod)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading weaver /stop response body: %w", err)
+	}
+	return raw, nil
+}
+
+// FetchReport stops the weaver live-check container via its admin /stop
+// endpoint and returns the parsed report read straight from the /stop response
+// body (see StopAndRead). The container must run live-check with
+// `--output http`.
+func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
+	raw, err := StopAndRead(ctx, adminURL)
 	if err != nil {
 		return nil, err
 	}
 	return Parse(raw)
-}
-
-// waitForReport polls reportPath until it holds a report newer than prevMod,
-// is non-empty, and its size is stable across two ticks — so neither a stale
-// report from an earlier test nor a still-flushing one is read — or ctx
-// expires.
-func waitForReport(ctx context.Context, reportPath string, prevMod time.Time) ([]byte, error) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	var lastSize int64 = -1
-	for {
-		if fi, err := os.Stat(reportPath); err == nil && fi.Size() > 0 && fi.ModTime().After(prevMod) {
-			if fi.Size() == lastSize {
-				return os.ReadFile(reportPath)
-			}
-			lastSize = fi.Size()
-		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("weaver report %s not ready: %w", reportPath, ctx.Err())
-		case <-ticker.C:
-		}
-	}
 }
 
 // Validate logs the full advisory breakdown and asserts that zero actionable
@@ -230,36 +193,25 @@ func Validate(t TestingT, report *Report) {
 	t.Logf("  advisory details:")
 	for _, level := range []string{"violation", "improvement", "information"} {
 		for msg, count := range stats.AdviceMessageCounts {
-			_, msgIgnored := IgnoredAdviceMessages[msg]
 			info := adviceByMsg[msg]
 			if info == nil {
 				if level != "violation" {
 					continue
 				}
-
-				suffix := ""
-				if msgIgnored {
-					suffix = " [ignored]"
-				}
-				t.Logf("    [%s] [%dx] %s (signals: unknown)%s", level, count, msg, suffix)
+				t.Logf("    [%s] [%dx] %s (signals: unknown)", level, count, msg)
 				continue
 			}
 			if info.Level != level {
 				continue
 			}
 			signals := sortedSignals(info.Signals)
-			ignored := msgIgnored || allSignalsIgnored(info.Signals)
-			suffix := ""
-			if ignored {
-				suffix = " [ignored]"
-			}
-			t.Logf("    [%s] [%dx] %s (signals: %s)%s", level, count, msg, strings.Join(signals, ", "), suffix)
+			t.Logf("    [%s] [%dx] %s (signals: %s)", level, count, msg, strings.Join(signals, ", "))
 		}
 	}
 
 	actionableAdvisories := countActionableAdvisories(stats, adviceByMsg)
-	t.Logf("  advisories: %d violation(s), %d actionable (violations + actionableAdviceTypes, after ignoring %v)",
-		violations, actionableAdvisories, sortedSignals(IgnoredSignals))
+	t.Logf("  advisories: %d violation(s), %d actionable (violations + actionableAdviceTypes)",
+		violations, actionableAdvisories)
 
 	assert.Zero(t, actionableAdvisories,
 		"weaver found %d actionable semantic convention advisory(ies) "+
@@ -279,24 +231,21 @@ func isActionableAdvice(level, adviceType string) bool {
 	return actionable
 }
 
-// countActionableAdvisories counts advisories that must fail validation,
-// excluding signals listed in IgnoredSignals and messages listed in
-// IgnoredAdviceMessages. Messages present in the statistics but absent from
-// the sample data carry no level/type/signal attribution, so they are
-// conservatively counted as actionable unless message-ignored.
+// countActionableAdvisories counts advisories that must fail validation:
+// `violation`-level advice plus any advice type in actionableAdviceTypes.
+// Advisories OBI accepts are already dropped from the report by weaver
+// (schemas/obi/weaver.toml), so there is nothing to ignore here. Messages
+// present in the statistics but absent from the sample data carry no
+// level/type attribution, so they are conservatively counted as actionable.
 func countActionableAdvisories(stats *Statistics, adviceByMsg map[string]*adviceInfo) int {
 	var count int
 	for msg, occurrences := range stats.AdviceMessageCounts {
-		_, messageIgnored := IgnoredAdviceMessages[msg]
 		info := adviceByMsg[msg]
 		if info == nil {
-			if !messageIgnored {
-				count += occurrences
-			}
+			count += occurrences
 			continue
 		}
-		ignored := messageIgnored || allSignalsIgnored(info.Signals)
-		if isActionableAdvice(info.Level, info.AdviceType) && !ignored {
+		if isActionableAdvice(info.Level, info.AdviceType) {
 			count += occurrences
 		}
 	}
@@ -363,19 +312,6 @@ func extractAdviceInfo(data json.RawMessage, result map[string]*adviceInfo) {
 			extractAdviceInfo(item, result)
 		}
 	}
-}
-
-// allSignalsIgnored returns true if every signal in the set is in IgnoredSignals.
-func allSignalsIgnored(signals map[string]struct{}) bool {
-	if len(signals) == 0 {
-		return false
-	}
-	for sig := range signals {
-		if _, ignored := IgnoredSignals[sig]; !ignored {
-			return false
-		}
-	}
-	return true
 }
 
 func sortedSignals(set map[string]struct{}) []string {

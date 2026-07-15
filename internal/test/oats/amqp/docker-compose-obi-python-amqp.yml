@@ -79,15 +79,16 @@ services:
   # weaver's OTLP listener is moved to 4327; admin /stop stays on 4320. The OATS
   # harness stops it after the checks and fails the test on any actionable advisory.
   weaver:
-    image: otel/weaver:v0.24.1@sha256:263964a7d444e77812f7a2d654e17683c4760a968c91278acdb7a44c20ccd572
+    image: otel/weaver:v0.24.2@sha256:d1fb16d279f39810c340fbbf1cf9e5e995a3a9cefa531938e9012437e3bc00c1
     network_mode: host
-    user: "0:0"
     working_dir: /obi-registry
     command:
       - registry
       - live-check
       - --registry
       - /obi-registry
+      - --config
+      - /obi-registry/weaver.toml
       - --include-unreferenced
       - --inactivity-timeout
       - "300"
@@ -100,10 +101,9 @@ services:
       - --diagnostic-format
       - json
       - --output
-      - /tmp/weaver-out
+      - http
     volumes:
       - ../../../../schemas/obi:/obi-registry:ro
-      - /tmp/obi-weaver-out:/tmp/weaver-out
     healthcheck:
       test: ["CMD-SHELL", "wget --timeout=1 -q -O /dev/null http://127.0.0.1:4327/ 2>&1 | grep -qv refused"]
       interval: 5s

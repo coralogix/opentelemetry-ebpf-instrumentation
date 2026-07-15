@@ -6,13 +6,14 @@
 #
 # We capture `weaver registry check`'s JSON diagnostic stream and fail on any
 # diagnostic that survives the allowlist in `lint-schema-filter.jq` (today:
-# only the documented `dns.lookup.duration` DuplicateMetricName — see that
-# file and schemas/obi/groups/dns.yaml for the rationale and the upstream
-# weaver issue). `--future` promotes pending warnings (e.g. missing examples
-# on string attributes) to errors so we catch them at PR time rather than in
-# integration logs. Note that weaver exits non-zero when diagnostics exist,
-# so a non-zero exit with parseable diagnostics on stdout is a lint finding,
-# not an execution failure.
+# only the documented `definition/2` "not yet stable" warning for
+# groups/dns.yaml — see that file and schemas/obi/groups/dns.yaml for the
+# rationale and the upstream weaver issue). `--future` promotes pending
+# warnings (e.g. missing examples on string attributes, and the v2 file-format
+# warning) to errors so we catch them at PR time rather than in integration
+# logs. Note that weaver exits non-zero when diagnostics exist, so a non-zero
+# exit with parseable diagnostics on stdout is a lint finding, not an execution
+# failure.
 #
 # Usage: lint-schema.sh <oci-bin> <weaver-image> <registry-host-path>
 set -euo pipefail

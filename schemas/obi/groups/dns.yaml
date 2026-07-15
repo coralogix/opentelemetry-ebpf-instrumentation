@@ -1,42 +1,58 @@
-groups:
-  # OBI override of the upstream metric.dns.lookup.duration definition.
-  #
-  # Upstream (semconv v1.41.0) marks dns.question.name as `required`, but OBI
-  # deliberately disables it by default to bound metric cardinality (raw DNS
-  # question names are unbounded / attacker-controlled — see
-  # attr.DNSQuestionName in pkg/export/attributes/attr_defs.go; users can opt
-  # in via `attributes.select`). This group re-declares the attribute as
-  # `opt_in` so weaver live-check accepts its absence while still validating
-  # its type/value whenever a user opts in. All other parent attributes
-  # (error.type, …) are inherited unchanged via `extends`.
-  #
-  # NOTE on the group id: weaver v0.24.1 has no precedence semantics between a
-  # local group and a dependency group sharing the same metric_name when the
-  # dependency's copy is in the resolved registry (`--include-unreferenced`,
-  # which OBI needs). The winner is the group whose id sorts LAST
-  # lexicographically (resolved registry is sorted by id; live-check's
-  # metric_name lookup is last-insert-wins). This id is deliberately chosen to
-  # sort after the upstream `metric.dns.lookup.duration` so the override wins.
-  # Do not rename it to something that sorts earlier, and do not reuse the
-  # upstream group id (a same-id redefinition loses the live-check tie to the
-  # dependency AND trips `DuplicateGroupId` in `registry check`). Tracked
-  # upstream in https://github.com/open-telemetry/weaver/issues/1578; once
-  # weaver defines local-wins precedence, this comment block can be dropped.
-  #
-  # `weaver registry check` (v0.24.2+) flags this same-metric_name duplicate
-  # as a DuplicateMetricName error even though live-check resolves it; this
-  # specific expected duplicate is allowlisted in
-  # scripts/lint-schema-filter.jq with the same rationale.
+# OBI refinement of the upstream metric.dns.lookup.duration definition.
+#
+# Upstream (semconv v1.41.0) marks dns.question.name as `required`, but OBI
+# deliberately disables it by default to bound metric cardinality (raw DNS
+# question names are unbounded / attacker-controlled — see attr.DNSQuestionName
+# in pkg/export/attributes/attr_defs.go; users can opt in via
+# `attributes.select`). We relax that one attribute to `opt_in` so weaver
+# live-check accepts its absence while still validating its type/value whenever
+# a user opts in. Every other parent attribute (error.type, …) is inherited
+# unchanged.
+#
+# This uses the v2 `metric_refinements` mechanism (`file_format: definition/2`)
+# rather than a v1 `extends` + new-metric_name group. A refinement targets the
+# base metric via `ref:` and inherits its `name`, so it does NOT re-declare the
+# metric and does NOT trip `DuplicateMetricName` in `registry check` — which
+# the old `extends`-based override did, forcing a `DuplicateMetricName` entry
+# to be allowlisted in scripts/lint-schema-filter.jq. That allowlist is now
+# gone.
+#
+# The base metric `dns.lookup.duration` is resolved from the upstream semantic
+# conventions dependency declared in ../manifest.yaml (pulled in via
+# `--include-unreferenced`); no local re-declaration or `imports:` block is
+# needed.
+#
+# NOTE on the group id: `--include-unreferenced` keeps BOTH the upstream
+# `metric.dns.lookup.duration` (with dns.question.name `required`) and this
+# refinement in the resolved registry under the same metric_name. `registry
+# live-check` resolves that metric_name collision last-insert-wins by id sort
+# (the resolved registry is sorted by group id). The id below is deliberately
+# `metric.dns.lookup.duration.obi` so it sorts AFTER the upstream
+# `metric.dns.lookup.duration` and OBI's opt_in copy wins — verified: with a
+# dns.lookup.duration sample that omits dns.question.name, live-check reports it
+# as an `information`-level opt-in absence, not a `violation`. Do not rename it
+# to something that sorts earlier (e.g. a bare `dns.lookup.duration.obi` sorts
+# before `metric.*` and the upstream `required` copy would win, failing every
+# suite that doesn't emit dns.question.name). Tracked upstream in
+# https://github.com/open-telemetry/weaver/issues/1578; once weaver defines
+# local-wins precedence between a registry and its dependencies this note can be
+# dropped.
+#
+# NOTE: `file_format: definition/2` is still marked "not yet stable" by weaver
+# (v0.24.2) — a non-fatal warning during resolution. `registry check` and
+# `registry live-check` both accept it and apply the refinement; only weaver's
+# `--future` flag promotes the warning to a hard error, so lint-schema.sh does
+# not pass `--future` while filtering that one warning (see
+# scripts/lint-schema-filter.jq). The same released weaver image is used this
+# way by open-telemetry/semantic-conventions-genai. Track stabilization in
+# https://github.com/open-telemetry/weaver/issues/1483.
+file_format: definition/2
+metric_refinements:
   - id: metric.dns.lookup.duration.obi
-    type: metric
-    extends: metric.dns.lookup.duration
-    metric_name: dns.lookup.duration
-    stability: development
+    ref: dns.lookup.duration
     brief: >
       Measures the time taken to perform a DNS lookup. OBI variant of the
       upstream metric with dns.question.name opt-in instead of required.
-    instrument: histogram
-    unit: "s"
     attributes:
       - ref: dns.question.name
         requirement_level: opt_in
