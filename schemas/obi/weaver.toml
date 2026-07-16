@@ -22,18 +22,18 @@
 # and netolly emits a bare `iface` alongside `iface.direction` (network.yaml).
 # Upstream semconv reserves `server.*` / `client.*` / `iface.*` as namespace
 # prefixes (`server.address`, `server.port`, `iface.direction`, …), so weaver
-# flags a namespace-vs-attribute collision on every metric sample that also
-# touches one of those upstream attributes. These emission contracts are fixed
-# by the connector conventions and by netolly's backward-compatible network-flow
-# shape — they are not negotiable — so we accept the collision.
+# flags a namespace-vs-attribute collision on every sample that also touches one
+# of those upstream attributes. These emission contracts are fixed by the
+# connector conventions and by netolly's backward-compatible network-flow shape
+# — they are not negotiable — so we accept the collision.
 #
-# Scope: `metric` only. OBI's bare `server` / `client` / `iface` keys appear
-# exclusively on metrics, so restricting the filter to the metric signal keeps
-# an `illegal_namespace` collision on any other signal type surfacing as a real
-# failure. This is broader than the old per-message Go allowlist (it drops any
-# metric `illegal_namespace`, not just the five known server/client/iface
-# messages); weaver's finding filters match on finding id + signal type, not on
-# the message string.
+# No `signal_type` scope: the bare `server` / `client` keys ride on OBI's spans
+# (and the span metrics derived from them), not only on metrics, so weaver
+# reports the collision on `span:*` signals too — the filter must apply to every
+# signal type to match the emission contract (this mirrors the old per-message
+# Go allowlist, which was not signal-scoped either). This is broader than that
+# allowlist in one respect: it drops any `illegal_namespace` finding, not just
+# the five known server/client/iface messages, because weaver's finding filters
+# match on finding id, not on the message string.
 [[live-check.finding_filters]]
 exclude = ["illegal_namespace"]
-signal_type = "metric"
