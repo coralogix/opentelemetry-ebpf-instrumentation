@@ -62,6 +62,17 @@ test('api loaded AFTER injection: late copy is still wired, app SDK wins handoff
   assert.ok(!r.bridge.includes('after'), 'bridge must stop capturing after the late SDK registers');
 });
 
+test('active manual spans publish -mspan/ override and restore on unwind', () => {
+  // The bridge points traces_ctx_v1 at the innermost active manual span so
+  // OBI's eBPF client spans nest under it, then restores the enclosing span (or
+  // pops to none) as each scope unwinds. For nested startActiveSpan('outer' >
+  // 'inner'): override(outer), override(inner), restore(outer) on inner exit,
+  // pop on outer exit.
+  const r = runScenario('mspan-nesting');
+  assert.deepStrictEqual(r.mspan, ['outer', 'inner', 'outer', 'pop']);
+  assert.deepStrictEqual(r.bridge, ['inner', 'outer'], 'both spans are still captured');
+});
+
 test('SDK registers after injection: bridge yields and the app SDK takes over', () => {
   const r = runScenario('late-sdk');
   assert.deepStrictEqual(r.bridge, ['before'], 'bridge captures only the pre-handover span');
