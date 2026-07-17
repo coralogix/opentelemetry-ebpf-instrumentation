@@ -2933,6 +2933,12 @@
       "default": false,
       "x-env-var": "OTEL_EBPF_ENFORCE_SYS_CAPS"
     },
+    "env_enrichment": {
+      "type": "boolean",
+      "description": "Enriches spans with values declared in the instrumented process environment (e.g. db.namespace on Postgres client spans from postgres:// URLs and PG* variables), only when the declared endpoint provably matches the span destination",
+      "default": false,
+      "x-env-var": "OTEL_EBPF_ENV_ENRICHMENT"
+    },
     "executable_path": {
       "$ref": "#/$defs/RegexpAttr",
       "description": "Allows selecting the instrumented executable whose complete path contains the Exec value.  Use OTEL_EBPF_AUTO_TARGET_EXE",

@@ -41,6 +41,7 @@ Generated from [`config-schema.json`](config-schema.json).
 | `channel_send_timeout` | `duration` | `OTEL_EBPF_CHANNEL_SEND_TIMEOUT` | `1m` | `30s`, `5m`, `1ms`, etc |  |  |
 | `channel_send_timeout_panic` | `boolean` | `OTEL_EBPF_CHANNEL_SEND_TIMEOUT_PANIC` | `false` |  |  |  |
 | `enforce_sys_caps` | `boolean` | `OTEL_EBPF_ENFORCE_SYS_CAPS` | `false` |  |  | Check for required system capabilities and bail if they are not present. If set to 'false', OBI will still print a list of missing capabilities, but the execution will continue |
+| `env_enrichment` | `boolean` | `OTEL_EBPF_ENV_ENRICHMENT` | `false` |  |  | Enriches spans with values declared in the instrumented process environment (e.g. db.namespace on Postgres client spans from postgres:// URLs and PG* variables), only when the declared endpoint provably matches the span destination |
 | `executable_path` | `regex` | `OTEL_EBPF_EXECUTABLE_PATH` |  | `^app-.*`, `^service-..$`, `^prod-.*-db$`, etc | Yes | Allows selecting the instrumented executable whose complete path contains the Exec value.  Use OTEL_EBPF_AUTO_TARGET_EXE |
 | `log_config` | `string` | `OTEL_EBPF_LOG_CONFIG` |  | `json`, `yaml` |  | Enables the logging of the configuration on startup. |
 | `log_format` | `string` | `OTEL_EBPF_LOG_FORMAT` | `text` | `json`, `text` |  |  |
