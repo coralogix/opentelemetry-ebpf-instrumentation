@@ -145,6 +145,7 @@ services:
     pid: "host"
     cgroup: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_TRACE_PRINTER: "text"
       OTEL_EBPF_METRICS_INTERVAL: "${OTEL_EBPF_METRICS_INTERVAL:-1s}"

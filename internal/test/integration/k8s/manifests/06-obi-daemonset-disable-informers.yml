@@ -72,6 +72,8 @@ spec:
             - mountPath: /testoutput
               name: testoutput
           env:
+            - name: OTEL_EBPF_ENV_ENRICHMENT
+              value: "true"
             - name: GOCOVERDIR
               value: "/testoutput"
             - name: OTEL_EBPF_DISCOVERY_POLL_INTERVAL

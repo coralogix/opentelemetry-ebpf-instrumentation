@@ -66,6 +66,7 @@ services:
       - shared
     pid: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: "/configs/obi-config-go-kafka-traceparent.yml"
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_TRACE_PRINTER: "text"

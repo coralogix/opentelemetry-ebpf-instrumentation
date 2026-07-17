@@ -34,6 +34,7 @@ services:
     privileged: true
     pid: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: /configs/obi-config-jvm-runtime-metrics.yml
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms

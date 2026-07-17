@@ -21,6 +21,7 @@ services:
     privileged: true
     network_mode: host
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: /configs/obi-config-netolly.yml
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_NETWORK_METRICS: "true" # explicitly enabling network metrics

@@ -83,6 +83,7 @@ services:
     network_mode: "host"
     pid: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_TRACE_PRINTER: "text"
       OTEL_EBPF_OPEN_PORT: "3040,443"

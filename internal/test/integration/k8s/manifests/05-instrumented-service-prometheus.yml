@@ -100,6 +100,8 @@ spec:
             - mountPath: /testoutput
               name: testoutput
           env:
+            - name: OTEL_EBPF_ENV_ENRICHMENT
+              value: "true"
             - name: OTEL_EBPF_CONFIG_PATH
               value: "/configs/obi-config-promscrape.yml"
             - name: GOCOVERDIR

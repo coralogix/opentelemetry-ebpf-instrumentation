@@ -360,10 +360,14 @@ type Config struct {
 	// Routes configures URL path grouping. If not set, data will be directly forwarded to exporters.
 	Routes       *transform.RoutesConfig       `yaml:"routes"`
 	NameResolver *transform.NameResolverConfig `yaml:"name_resolver"`
-	OTELMetrics  otelcfg.MetricsConfig         `yaml:"otel_metrics_export"`
-	Traces       otelcfg.TracesConfig          `yaml:"otel_traces_export"`
-	Prometheus   prom.PrometheusConfig         `yaml:"prometheus_export"`
-	TracePrinter debug.TracePrinter            `yaml:"trace_printer" env:"OTEL_EBPF_TRACE_PRINTER"`
+	// EnvEnrichment enriches spans with values declared in the instrumented process environment
+	// (e.g. db.namespace on Postgres client spans from postgres:// URLs and PG* variables), only
+	// when the declared endpoint provably matches the span destination
+	EnvEnrichment bool                  `yaml:"env_enrichment" env:"OTEL_EBPF_ENV_ENRICHMENT" validate:"boolean"`
+	OTELMetrics   otelcfg.MetricsConfig `yaml:"otel_metrics_export"`
+	Traces        otelcfg.TracesConfig  `yaml:"otel_traces_export"`
+	Prometheus    prom.PrometheusConfig `yaml:"prometheus_export"`
+	TracePrinter  debug.TracePrinter    `yaml:"trace_printer" env:"OTEL_EBPF_TRACE_PRINTER"`
 
 	// Exec allows selecting the instrumented executable whose complete path contains the Exec value.
 	//

@@ -27,6 +27,7 @@ services:
     network_mode: "host"
     pid: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: "/configs/obi-config-with-jaeger-host.yml"
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_TRACE_PRINTER: "text"

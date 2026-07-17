@@ -38,6 +38,7 @@ services:
     privileged: true
     network_mode: service:testserver
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: /configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_NETWORK_SOURCE: ${OTEL_EBPF_NETWORK_SOURCE}

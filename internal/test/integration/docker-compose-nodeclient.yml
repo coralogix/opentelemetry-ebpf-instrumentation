@@ -31,6 +31,7 @@ services:
     network_mode: "service:nodeclient"
     pid: "service:nodeclient"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_TRACE_PRINTER: "text"
       OTEL_EBPF_AUTO_TARGET_LANGUAGE: "nodejs"

@@ -26,6 +26,7 @@ services:
     privileged: true
     pid: "host"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       OTEL_EBPF_CONFIG_PATH: /configs/obi-config-go-runtime-metrics${INSTRUMENTER_CONFIG_SUFFIX}.yml
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms

@@ -105,10 +105,15 @@ func newGraphBuilder(
 		kubeToContainerDecorator, containerDecoratorToNameResolver,
 	), swarm.WithID("DockerDecorator"))
 
-	nameResolverToAttrFilter := msg2.QueueFromConfig[[]request.Span](config, "nameResolverToAttrFilter")
+	nameResolverToEnvEnrichment := msg2.QueueFromConfig[[]request.Span](config, "nameResolverToEnvEnrichment")
 	swi.Add(transform.NameResolutionProvider(ctxInfo, config.NameResolver,
-		containerDecoratorToNameResolver, nameResolverToAttrFilter),
+		containerDecoratorToNameResolver, nameResolverToEnvEnrichment),
 		swarm.WithID("NameResolution"))
+
+	nameResolverToAttrFilter := msg2.QueueFromConfig[[]request.Span](config, "nameResolverToAttrFilter")
+	swi.Add(transform.EnvEnrichmentProvider(ctxInfo, config.EnvEnrichment,
+		nameResolverToEnvEnrichment, nameResolverToAttrFilter),
+		swarm.WithID("EnvEnrichment"))
 
 	// In vendored mode, the invoker might want to override the export queue for connecting their
 	// own exporters, otherwise we create a new queue

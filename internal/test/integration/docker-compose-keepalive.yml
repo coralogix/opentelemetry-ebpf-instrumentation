@@ -40,6 +40,7 @@ services:
     pid: "host"
     network_mode: "service:keepaliveclient"
     environment:
+      OTEL_EBPF_ENV_ENRICHMENT: "true"
       GOCOVERDIR: "/coverage"
     depends_on:
       keepaliveclient:

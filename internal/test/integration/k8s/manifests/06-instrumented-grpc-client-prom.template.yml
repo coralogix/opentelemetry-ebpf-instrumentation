@@ -56,6 +56,8 @@ spec:
       ports:
         - containerPort: 8999
       env:
+        - name: OTEL_EBPF_ENV_ENRICHMENT
+          value: "true"
         - name: OTEL_EBPF_PROMETHEUS_PORT
           value: "8999"
         - name: GOCOVERDIR
