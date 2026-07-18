@@ -6,6 +6,7 @@ package integration // import "go.opentelemetry.io/obi/internal/test/integration
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -13,18 +14,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 
+	"go.opentelemetry.io/obi/internal/test/integration/components/docker"
 	"go.opentelemetry.io/obi/internal/test/weavercheck"
 )
 
 const (
 	weaverContainer = "weaver"
 	weaverAdminPort = 4320
-	// weaverTimeout bounds the /stop request-response: weaver drains its
-	// buffered signals and returns the live-check report as the HTTP response
-	// body. The drain scales with the unique signal count — heavy
-	// multi-language suites need real headroom.
+	// weaverTimeout bounds the entire post-/stop sequence (HTTP /stop,
+	// docker wait, docker cp of the report file, parse). The drain after
+	// /stop scales with the unique signal count — heavy multi-language
+	// suites need real headroom.
 	weaverTimeout = 3 * time.Minute
 )
 
@@ -55,42 +59,72 @@ func runWeaverValidation(t *testing.T) {
 }
 
 // fetchWeaverReportDocker stops the weaver container (which runs as a service
-// in the Docker Compose stack receiving OTLP from the collector) via its admin
-// /stop endpoint and reads the live-check report straight from the /stop
-// response body — weaver runs with `--output http`, so no report file or bind
-// mount is involved. It archives and parses the report and returns it with
-// ok=true on success. On any failure it records the error (or, when a prior
-// test failure is detected, simply tears weaver down so the surrounding
-// compose teardown stays clean) and returns ok=false.
+// in the Docker Compose stack receiving OTLP from the collector), reads its
+// live-check report from the host bind mount, archives it, and parses it. It
+// returns the parsed report and ok=true on success. On any failure it records
+// the error (or, when a prior test failure is detected, simply tears weaver
+// down so the surrounding compose teardown stays clean) and returns ok=false.
 //
 // This must be called while the Docker Compose stack is still running.
 func fetchWeaverReportDocker(t *testing.T) (*weavercheck.Report, bool) {
 	t.Helper()
 
+	priorFailure := t.Failed()
+	if priorFailure {
+		t.Logf("skipping weaver validation: prior test failure detected; " +
+			"only stopping the weaver container so compose teardown is clean")
+	}
+
+	// weaver writes the report as root; delete via docker exec, not os.Remove.
+	const hostReport = "/tmp/obi-weaver-out/live_check.json"
+	const containerReport = "/tmp/weaver-out/live_check.json"
+	rmCtx, rmCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer rmCancel()
+	if _, err := docker.Exec(rmCtx, weaverContainer, "rm", "-f", containerReport); err != nil {
+		t.Errorf("removing stale weaver report: %v", err)
+		return nil, false
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), weaverTimeout)
 	defer cancel()
 
-	// Signal weaver to stop accepting data and return its report. If the /stop
-	// call fails (timeout, container already killed, …) we record the failure
-	// and force-remove the container so the surrounding `compose.Close()` still
-	// runs and the next test invocation starts from a clean slate.
-	adminURL := fmt.Sprintf("http://127.0.0.1:%d/stop", weaverAdminPort)
-	rawReport, err := weavercheck.StopAndRead(ctx, adminURL)
+	// Signal weaver to stop accepting data and produce its report. If any
+	// post-/stop step fails (timeout, container already killed, …) we record
+	// the failure and force-remove the container so the surrounding
+	// `compose.Close()` still runs and the next test invocation starts from
+	// a clean slate.
+	url := fmt.Sprintf("http://127.0.0.1:%d/stop", weaverAdminPort)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Errorf("stopping weaver and reading its report: %v", err)
+		t.Errorf("failed to stop weaver (is it running?): %v", err)
+		forceRemoveWeaverContainer(t)
+		return nil, false
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Errorf("weaver /stop returned HTTP %d", resp.StatusCode)
 		forceRemoveWeaverContainer(t)
 		return nil, false
 	}
 
-	// A prior test failure means the emitted telemetry is suspect. We still
-	// POST /stop above so weaver drains and compose teardown stays clean, but
-	// skip validating the report.
-	if t.Failed() {
-		t.Logf("skipping weaver validation: prior test failure detected " +
-			"(weaver stopped for a clean compose teardown)")
+	// Wait for the weaver container to finish processing and exit.
+	if _, err = exec.CommandContext(ctx, "docker", "wait", weaverContainer).Output(); err != nil {
+		t.Errorf("failed to wait for weaver container: %v", err)
+		forceRemoveWeaverContainer(t)
 		return nil, false
 	}
 
+	if priorFailure {
+		return nil, false
+	}
+
+	rawReport, err := os.ReadFile(hostReport)
+	if err != nil {
+		t.Errorf("failed to read weaver report at %s: %v", hostReport, err)
+		return nil, false
+	}
 	return archiveAndParseWeaverReport(t, rawReport)
 }
 

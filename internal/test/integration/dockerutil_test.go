@@ -193,10 +193,8 @@ func setupContainerCollector(t *testing.T, net dockertest.Network, configFile st
 // alongside the otelcol container. Mirrors the shared compose snippet at
 // `components/weaver/service.yml`: same image digest.
 // The container is named exactly "weaver" — matching `weaverContainer` in
-// `weaver.go` — because `runWeaverValidation` reaches it by name to
-// force-remove it if the /stop call fails. `--output http` makes weaver return
-// its live-check report in the /stop response body, so no report bind mount is
-// needed.
+// `weaver.go` — because `runWeaverValidation` `docker wait` / `docker cp`
+// by name.
 func setupContainerWeaver(t *testing.T, net dockertest.Network) {
 	t.Helper()
 
@@ -207,28 +205,29 @@ func setupContainerWeaver(t *testing.T, net dockertest.Network) {
 		dockertest.WithCmd([]string{
 			"registry", "live-check",
 			"--registry", "/obi-registry",
-			"--config", "/obi-registry/weaver.toml",
 			"--include-unreferenced",
 			"--inactivity-timeout", "300",
 			"--admin-port", "4320",
 			"--format", "json",
 			"--diagnostic-format", "json",
-			"--output", "http",
+			"--output", "/tmp/weaver-out",
 		}),
 		dockertest.WithMounts([]string{
 			filepath.Join(pathRoot, "schemas/obi") + ":/obi-registry:ro",
+			"/tmp/obi-weaver-out:/tmp/weaver-out",
 		}),
 		dockertest.WithPortBindings(portBindings("4320/tcp", "4320")),
 		dockertest.WithContainerConfig(func(config *container.Config) {
 			config.WorkingDir = "/obi-registry"
 			config.ExposedPorts = exposedPorts("4317/tcp", "4320/tcp")
+			config.User = "0:0"
 		}),
 		dockertest.WithoutReuse(),
 	)
 	require.NoError(t, err, "could not start weaver container")
 	t.Cleanup(func() {
 		// Best-effort: `runWeaverValidation` may have already removed it via
-		// `forceRemoveWeaverContainer`; ignore the error in that case.
+		// `docker wait` + `docker rm -f`; ignore the error in that case.
 		_ = w.Close(context.Background())
 	})
 
