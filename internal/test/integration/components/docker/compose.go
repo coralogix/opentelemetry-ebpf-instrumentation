@@ -10,14 +10,26 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"testing"
 	"time"
 
 	"go.opentelemetry.io/obi/internal/test/tools"
 )
+
+// composeArgs prepends the standard compose invocation with one -f per layered file
+func (c *Compose) composeArgs(args ...string) []string {
+	cmdArgs := []string{"compose", "--ansi", "never"}
+	for _, p := range c.Paths {
+		cmdArgs = append(cmdArgs, "-f", p)
+	}
+	return append(cmdArgs, args...)
+}
 
 // stopTimeout bounds how long `docker compose stop` waits between SIGTERM and
 // SIGKILL for each container. Keeps shutdown predictable when a container is
@@ -29,7 +41,7 @@ const stopTimeout = "5"
 const waitTimeout = 30 * time.Second
 
 type Compose struct {
-	Path     string
+	Paths    []string
 	Logger   io.WriteCloser
 	Env      []string
 	skipWait bool
@@ -39,6 +51,9 @@ func defaultEnv() []string {
 	env := os.Environ()
 	env = append(env, "OTEL_EBPF_EXECUTABLE_PATH=testserver")
 	env = append(env, "JAVA_EXECUTABLE_PATH=greeting")
+	// suite appends may repeat these keys: compose takes the last occurrence
+	env = append(env, "OTEL_EBPF_OPEN_PORT=8080")
+	env = append(env, "TEST_SERVICE_PORTS=8381:8080")
 	return env
 }
 
@@ -53,10 +68,389 @@ func ComposeSuite(composeFile, logFile string) (*Compose, error) {
 	composePath := filepath.Join(projectRoot, "internal", "test", "integration", composeFile)
 
 	return &Compose{
-		Path:   composePath,
+		Paths:  []string{composePath},
 		Logger: logs,
 		Env:    defaultEnv(),
 	}, nil
+}
+
+// OBI declares the per-suite configuration of the obi service. It is
+// rendered as the last compose override layer, so suites configure obi
+// entirely from Go instead of re-declaring it in a compose file. Values may
+// contain ${VAR} references, which compose interpolates as usual
+type Healthcheck struct {
+	Test        []string
+	Interval    string
+	Timeout     string
+	Retries     int
+	StartPeriod string
+}
+
+type ServiceDef struct {
+	// RunDir mounts the standard obi volume set with this per-suite
+	// /var/run/obi directory under testoutput; ignored when Volumes is set
+	RunDir string
+	// ConfigYAML is written under testoutput and wired as OTEL_EBPF_CONFIG_PATH
+	// through the /coverage mount, so suites carry their OBI config inline
+	ConfigYAML      string
+	Image           string
+	BuildContext    string
+	BuildDockerfile string
+	ContainerName   string
+	Hostname        string
+	User            string
+	WorkingDir      string
+	Cgroup          string
+	Restart         string
+	MemoryLimit     string
+	Privileged      *bool
+	Entrypoint      []string
+	CapAdd          []string
+	CapDrop         []string
+	Networks        []string
+	// UlimitNofile renders ulimits.nofile soft/hard values when non-zero
+	UlimitNofile [2]int
+	Healthcheck  *Healthcheck
+	Env          map[string]string
+	NetworkMode  string
+	Pid          string
+	Command      []string
+	Ports        []string
+	Volumes      []string
+	// DependsOn maps a service name to its wait condition (e.g. service_started)
+	DependsOn map[string]string
+}
+
+// Stack is a full per-suite topology rendered as one compose override layer
+type Stack struct {
+	Services map[string]*ServiceDef
+	// NamedVolumes and Networks declare top-level compose objects
+	NamedVolumes []string
+	Networks     []string
+}
+
+// OBI is the obi service definition; other services use the same shape
+type OBI = ServiceDef
+
+// stdOBIEnv is the obi environment shared by most suites; StdOBI merges
+// per-suite overrides on top of it
+var stdOBIEnv = map[string]string{
+	"GOCOVERDIR":                          "/coverage",
+	"OTEL_EBPF_TRACE_PRINTER":             "text",
+	"OTEL_EBPF_METRICS_INTERVAL":          "1s",
+	"OTEL_EBPF_BPF_BATCH_TIMEOUT":         "10ms",
+	"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT": "1ms",
+	"OTEL_EBPF_LOG_LEVEL":                 "DEBUG",
+	"OTEL_EBPF_BPF_DEBUG":                 "TRUE",
+	"OTEL_EBPF_HOSTNAME":                  "obi",
+	"OTEL_EBPF_SERVICE_NAMESPACE":         "integration-test",
+	"OTEL_EBPF_DISCOVERY_POLL_INTERVAL":   "500ms",
+	"OTEL_EBPF_OPEN_PORT":                 "${OTEL_EBPF_OPEN_PORT}",
+}
+
+// Bool returns a pointer for optional boolean fields like Privileged
+func Bool(b bool) *bool { return &b }
+
+// logPathFor derives the suite log path from the test name:
+// TestSuite_PythonPostgres -> testoutput/test-suite-python-postgres.log
+func logPathFor(t testing.TB) string {
+	name := strings.TrimPrefix(t.Name(), "Test")
+	var sb strings.Builder
+	for i, r := range name {
+		if r == '_' || r == '/' {
+			sb.WriteByte('-')
+			continue
+		}
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			prev := name[i-1]
+			if prev != '_' && prev != '/' && !(prev >= 'A' && prev <= 'Z') {
+				sb.WriteByte('-')
+			}
+		}
+		sb.WriteRune(r)
+	}
+	slug := strings.ToLower(sb.String())
+	return filepath.Join(tools.ProjectDir(), "testoutput", "test-"+slug+".log")
+}
+
+// SuiteStack is ComposeStack with the log file derived from the test name
+func SuiteStack(t testing.TB, obi *OBI, composeFiles ...string) *Compose {
+	t.Helper()
+	c, err := ComposeStack(logPathFor(t), obi, composeFiles...)
+	if err != nil {
+		t.Fatalf("creating compose stack: %v", err)
+	}
+	return c
+}
+
+// SuiteStackServices is ComposeStackServices with the log file derived from
+// the test name
+func SuiteStackServices(t testing.TB, stack Stack, composeFiles ...string) *Compose {
+	t.Helper()
+	c, err := ComposeStackServices(logPathFor(t), stack, composeFiles...)
+	if err != nil {
+		t.Fatalf("creating compose stack: %v", err)
+	}
+	return c
+}
+
+// StdOBI returns o with the standard obi environment filled in; keys present
+// in o.Env win over the defaults
+func StdOBI(o OBI) *OBI {
+	env := maps.Clone(stdOBIEnv)
+	maps.Copy(env, o.Env)
+	o.Env = env
+	return &o
+}
+
+// ComposeStack builds a suite from layered compose files (base, family,
+// fragments), all relative to internal/test/integration, plus the rendered
+// per-suite OBI layer
+func ComposeStack(logFile string, obi *OBI, composeFiles ...string) (*Compose, error) {
+	logs, err := os.OpenFile(logFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o666)
+	if err != nil {
+		return nil, err
+	}
+
+	projectRoot := tools.ProjectDir()
+	intDir := filepath.Join(projectRoot, "internal", "test", "integration")
+	paths := make([]string, 0, len(composeFiles)+1)
+	for _, f := range composeFiles {
+		paths = append(paths, filepath.Join(intDir, f))
+	}
+
+	if obi != nil {
+		obi, err = materializeConfig(projectRoot, logFile, obi)
+		if err != nil {
+			return nil, err
+		}
+		overlay, err := renderStackOverlay(projectRoot, logFile, Stack{Services: map[string]*ServiceDef{"obi": obi}})
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, overlay)
+	}
+
+	return &Compose{
+		Paths:  paths,
+		Logger: logs,
+		Env:    defaultEnv(),
+	}, nil
+}
+
+// ComposeStackServices is ComposeStack for suites that define additional
+// services (test servers, databases) directly from Go instead of a
+// compose-suite yml file
+func ComposeStackServices(logFile string, stack Stack, composeFiles ...string) (*Compose, error) {
+	logs, err := os.OpenFile(logFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o666)
+	if err != nil {
+		return nil, err
+	}
+
+	projectRoot := tools.ProjectDir()
+	intDir := filepath.Join(projectRoot, "internal", "test", "integration")
+	paths := make([]string, 0, len(composeFiles)+1)
+	for _, f := range composeFiles {
+		paths = append(paths, filepath.Join(intDir, f))
+	}
+	if obi := stack.Services["obi"]; obi != nil {
+		mat, err := materializeConfig(projectRoot, logFile, obi)
+		if err != nil {
+			return nil, err
+		}
+		services := maps.Clone(stack.Services)
+		services["obi"] = mat
+		stack.Services = services
+	}
+	overlay, err := renderStackOverlay(projectRoot, logFile, stack)
+	if err != nil {
+		return nil, err
+	}
+	paths = append(paths, overlay)
+
+	return &Compose{
+		Paths:  paths,
+		Logger: logs,
+		Env:    defaultEnv(),
+	}, nil
+}
+
+// materializeConfig writes an inline OBI config under testoutput and points
+// OTEL_EBPF_CONFIG_PATH at it via the /coverage mount
+func materializeConfig(projectRoot, logFile string, obi *ServiceDef) (*ServiceDef, error) {
+	if obi.ConfigYAML == "" {
+		return obi, nil
+	}
+	base := strings.TrimSuffix(filepath.Base(logFile), filepath.Ext(logFile))
+	name := base + "-obi-config.yml"
+	if err := os.WriteFile(filepath.Join(projectRoot, "testoutput", name), []byte(obi.ConfigYAML), 0o666); err != nil {
+		return nil, err
+	}
+	out := *obi
+	out.Env = maps.Clone(obi.Env)
+	if out.Env == nil {
+		out.Env = map[string]string{}
+	}
+	out.Env["OTEL_EBPF_CONFIG_PATH"] = "/coverage/" + name
+	return &out, nil
+}
+
+// renderServicesOverlay writes a compose override with the given service
+// definitions. Written under testoutput, named after the suite log so
+// concurrent suites cannot collide. Key order is fixed so renders are
+// deterministic
+func renderStackOverlay(projectRoot, logFile string, stack Stack) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("services:\n")
+	for _, name := range slices.Sorted(maps.Keys(stack.Services)) {
+		writeService(&sb, name, stack.Services[name])
+	}
+	if len(stack.NamedVolumes) > 0 {
+		sb.WriteString("volumes:\n")
+		for _, v := range stack.NamedVolumes {
+			fmt.Fprintf(&sb, "  %s:\n", v)
+		}
+	}
+	if len(stack.Networks) > 0 {
+		sb.WriteString("networks:\n")
+		for _, n := range stack.Networks {
+			fmt.Fprintf(&sb, "  %s:\n", n)
+		}
+	}
+
+	base := strings.TrimSuffix(filepath.Base(logFile), filepath.Ext(logFile))
+	path := filepath.Join(projectRoot, "testoutput", base+"-obi.yml")
+	if err := os.WriteFile(path, []byte(sb.String()), 0o666); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func writeService(sb *strings.Builder, name string, obi *ServiceDef) {
+	fmt.Fprintf(sb, "  %s:\n", name)
+	if obi.BuildContext != "" {
+		fmt.Fprintf(sb, "    build:\n      context: %q\n", obi.BuildContext)
+		if obi.BuildDockerfile != "" {
+			fmt.Fprintf(sb, "      dockerfile: %q\n", obi.BuildDockerfile)
+		}
+	}
+	if obi.Image != "" {
+		fmt.Fprintf(sb, "    image: %q\n", obi.Image)
+	}
+	if obi.ContainerName != "" {
+		fmt.Fprintf(sb, "    container_name: %q\n", obi.ContainerName)
+	}
+	if obi.Hostname != "" {
+		fmt.Fprintf(sb, "    hostname: %q\n", obi.Hostname)
+	}
+	if obi.User != "" {
+		fmt.Fprintf(sb, "    user: %q\n", obi.User)
+	}
+	if obi.WorkingDir != "" {
+		fmt.Fprintf(sb, "    working_dir: %q\n", obi.WorkingDir)
+	}
+	if obi.Cgroup != "" {
+		fmt.Fprintf(sb, "    cgroup: %q\n", obi.Cgroup)
+	}
+	if obi.Restart != "" {
+		fmt.Fprintf(sb, "    restart: %q\n", obi.Restart)
+	}
+	if obi.Privileged != nil {
+		fmt.Fprintf(sb, "    privileged: %t\n", *obi.Privileged)
+	}
+	if len(obi.Entrypoint) > 0 {
+		sb.WriteString("    entrypoint:\n")
+		for _, e := range obi.Entrypoint {
+			fmt.Fprintf(sb, "      - %q\n", e)
+		}
+	}
+	if len(obi.CapAdd) > 0 {
+		sb.WriteString("    cap_add:\n")
+		for _, c := range obi.CapAdd {
+			fmt.Fprintf(sb, "      - %q\n", c)
+		}
+	}
+	if len(obi.CapDrop) > 0 {
+		sb.WriteString("    cap_drop:\n")
+		for _, c := range obi.CapDrop {
+			fmt.Fprintf(sb, "      - %q\n", c)
+		}
+	}
+	if len(obi.Networks) > 0 {
+		sb.WriteString("    networks:\n")
+		for _, n := range obi.Networks {
+			fmt.Fprintf(sb, "      - %q\n", n)
+		}
+	}
+	if obi.UlimitNofile != [2]int{} {
+		fmt.Fprintf(sb, "    ulimits:\n      nofile:\n        soft: %d\n        hard: %d\n", obi.UlimitNofile[0], obi.UlimitNofile[1])
+	}
+	if obi.MemoryLimit != "" {
+		fmt.Fprintf(sb, "    deploy:\n      resources:\n        limits:\n          memory: %s\n", obi.MemoryLimit)
+	}
+	if hc := obi.Healthcheck; hc != nil {
+		sb.WriteString("    healthcheck:\n      test:\n")
+		for _, t := range hc.Test {
+			fmt.Fprintf(sb, "        - %q\n", t)
+		}
+		if hc.Interval != "" {
+			fmt.Fprintf(sb, "      interval: %s\n", hc.Interval)
+		}
+		if hc.Timeout != "" {
+			fmt.Fprintf(sb, "      timeout: %s\n", hc.Timeout)
+		}
+		if hc.Retries > 0 {
+			fmt.Fprintf(sb, "      retries: %d\n", hc.Retries)
+		}
+		if hc.StartPeriod != "" {
+			fmt.Fprintf(sb, "      start_period: %s\n", hc.StartPeriod)
+		}
+	}
+	if len(obi.Command) > 0 {
+		sb.WriteString("    command:\n")
+		for _, c := range obi.Command {
+			sb.WriteString(fmt.Sprintf("      - %q\n", c))
+		}
+	}
+	if obi.NetworkMode != "" {
+		sb.WriteString(fmt.Sprintf("    network_mode: %q\n", obi.NetworkMode))
+	}
+	if obi.Pid != "" {
+		sb.WriteString(fmt.Sprintf("    pid: %q\n", obi.Pid))
+	}
+	if len(obi.Ports) > 0 {
+		sb.WriteString("    ports:\n")
+		for _, p := range obi.Ports {
+			sb.WriteString(fmt.Sprintf("      - %q\n", p))
+		}
+	}
+	vols := obi.Volumes
+	if len(vols) == 0 && obi.RunDir != "" {
+		vols = []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/" + obi.RunDir + ":/var/run/obi",
+		}
+	}
+	if len(vols) > 0 {
+		sb.WriteString("    volumes:\n")
+		for _, v := range vols {
+			sb.WriteString(fmt.Sprintf("      - %q\n", v))
+		}
+	}
+	if len(obi.DependsOn) > 0 {
+		sb.WriteString("    depends_on:\n")
+		for _, svc := range slices.Sorted(maps.Keys(obi.DependsOn)) {
+			sb.WriteString(fmt.Sprintf("      %s:\n        condition: %s\n", svc, obi.DependsOn[svc]))
+		}
+	}
+	if len(obi.Env) > 0 {
+		sb.WriteString("    environment:\n")
+		for _, k := range slices.Sorted(maps.Keys(obi.Env)) {
+			sb.WriteString(fmt.Sprintf("      %s: %q\n", k, obi.Env[k]))
+		}
+	}
 }
 
 func (c *Compose) Up() error {
@@ -85,7 +479,7 @@ func (c *Compose) Logs() error {
 }
 
 func (c *Compose) LogsOutput(services ...string) (string, error) {
-	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path, "logs"}
+	cmdArgs := c.composeArgs("logs")
 	cmdArgs = append(cmdArgs, services...)
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Env = c.Env
@@ -106,7 +500,7 @@ func (c *Compose) Stop() error {
 }
 
 func (c *Compose) Remove() error {
-	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path, "rm", "-f", "-v"}
+	cmdArgs := c.composeArgs("rm", "-f", "-v")
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Env = c.Env
 
@@ -129,8 +523,7 @@ func (c *Compose) command(args ...string) error {
 }
 
 func (c *Compose) commandContext(ctx context.Context, args ...string) error {
-	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path}
-	cmdArgs = append(cmdArgs, args...)
+	cmdArgs := c.composeArgs(args...)
 	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
 	cmd.Env = c.Env
 	if c.Logger != nil {
@@ -152,7 +545,7 @@ func Exec(ctx context.Context, container string, args ...string) (string, error)
 }
 
 func (c *Compose) ExecOutput(service string, args ...string) (string, error) {
-	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path, "exec", "-T", service}
+	cmdArgs := c.composeArgs("exec", "-T", service)
 	cmdArgs = append(cmdArgs, args...)
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Env = c.Env

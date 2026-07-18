@@ -1,0 +1,13 @@
+# OBI service skeleton shared by all integration suites. Combine with
+# compose-frag-<infra>.yml layers and a compose-suite/family overlay:
+#   docker compose -f compose-base.yml -f compose-frag-otelcol.yml ... -f compose-suite-<x>.yml
+# Ports and depends_on always belong to the suite overlay (list merge appends,
+# so shared layers must not declare them)
+
+services:
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    image: hatest-obi
+    privileged: true # in some environments (not GH Pull Requests) you can set it to false and then cap_add: [ SYS_ADMIN ]

@@ -1,0 +1,12 @@
+services:
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.156.0@sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108
+    container_name: otel-col
+    deploy:
+      resources:
+        limits:
+          memory: 125M
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-config/otelcol-config-weaver.yml"]
+    volumes:
+      - ./configs/:/etc/otelcol-config

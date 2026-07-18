@@ -5,7 +5,6 @@ package integration
 
 import (
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -16,8 +15,32 @@ import (
 )
 
 func TestExistingSocketsDetection(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-keepalive.yml", path.Join(pathOutput, "test-suite-keepalive.log"))
-	require.NoError(t, err)
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": &docker.OBI{
+			ConfigYAML:  obiConfigKeepalive,
+			NetworkMode: "service:keepaliveclient",
+			Pid:         "host",
+			RunDir:      "run-keepalive",
+			DependsOn:   map[string]string{"keepaliveclient": "service_healthy"},
+			Env: map[string]string{
+				"GOCOVERDIR": "/coverage",
+			},
+		},
+		"keepaliveclient": &docker.ServiceDef{
+			Image:           "hatest-keepaliveclient",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/keepaliveclient/Dockerfile",
+			Ports:           []string{"9091:9091"},
+			Healthcheck:     &docker.Healthcheck{Test: []string{"CMD", "test", "-f", "/tmp/connected"}, Interval: "1s", Retries: 15},
+			DependsOn:       map[string]string{"tpinjector-server": "service_started"},
+		},
+		"tpinjector-server": &docker.ServiceDef{
+			Image:           "hatest-tpinjector-server",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/tpinjector-server/Dockerfile",
+			Ports:           []string{"8080:8080"},
+		},
+	}}, "compose-base.yml")
 	require.NoError(t, compose.Up())
 
 	waitForTestComponentsNoMetrics(t, "http://localhost:8080/smoke")

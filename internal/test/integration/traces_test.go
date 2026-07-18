@@ -710,13 +710,7 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 
 			// Check the information of the java parent span
 			res = trace.FindByOperationName("GET /jtrace", "server")
-			require.Len(ct, res, 1, traceID)
-			parent = res[0]
-			require.NotEmpty(ct, parent.TraceID)
-			require.Equal(ct, traceID, parent.TraceID)
-			require.NotEmpty(ct, parent.SpanID)
-			// check duration is at least 2us
-			assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+			parent = requireSingleSpan(ct, res, traceID)
 			// check span attributes
 			sd = parent.Diff(
 				jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -730,13 +724,7 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 
 			// Check the information of the nodejs parent span
 			res = trace.FindByOperationName("GET /traceme", "server")
-			require.Len(ct, res, 1, traceID)
-			parent = res[0]
-			require.NotEmpty(ct, parent.TraceID)
-			require.Equal(ct, traceID, parent.TraceID)
-			require.NotEmpty(ct, parent.SpanID)
-			// check duration is at least 2us
-			assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+			parent = requireSingleSpan(ct, res, traceID)
 			// check span attributes
 			sd = parent.Diff(
 				jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -794,13 +782,7 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 
 			// Check the information of the python parent span
 			res = trace.FindByOperationName("GET /tracemetoo", "server")
-			require.Len(ct, res, 1, traceID)
-			parent = res[0]
-			require.NotEmpty(ct, parent.TraceID)
-			require.Equal(ct, traceID, parent.TraceID)
-			require.NotEmpty(ct, parent.SpanID)
-			// check duration is at least 2us
-			assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+			parent = requireSingleSpan(ct, res, traceID)
 			// check span attributes
 			sd = parent.Diff(
 				jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -814,13 +796,7 @@ func testNestedHTTPTracesKProbes(t *testing.T) {
 
 			// Check the information of the rails parent span
 			res = trace.FindByOperationName("GET /users", "server")
-			require.Len(ct, res, 1, traceID)
-			parent = res[0]
-			require.NotEmpty(ct, parent.TraceID)
-			require.Equal(ct, traceID, parent.TraceID)
-			require.NotEmpty(ct, parent.SpanID)
-			// check duration is at least 2us
-			assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+			parent = requireSingleSpan(ct, res, traceID)
 			// check span attributes
 			sd = parent.Diff(
 				jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -884,13 +860,7 @@ func ensureTracesMatch(t *testing.T, urlPath string) {
 			assert.Empty(ct, sd, sd.String())
 
 			res = trace.FindByOperationName("GET /traceme", "server")
-			require.Len(ct, res, 1, traceID)
-			parent = res[0]
-			require.NotEmpty(ct, parent.TraceID)
-			require.Equal(ct, traceID, parent.TraceID)
-			require.NotEmpty(ct, parent.SpanID)
-			// check duration is at least 2us
-			assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+			parent = requireSingleSpan(ct, res, traceID)
 			// check span attributes
 			sd = parent.Diff(
 				jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -971,13 +941,7 @@ func testNestedHTTPSTracesKProbes(t *testing.T) {
 
 		// check client call (and ensure server port is correct/not swapped)
 		res = trace.FindByOperationName("GET /users", "client")
-		require.Len(ct, res, 1, traceID)
-		parent = res[0]
-		require.NotEmpty(ct, parent.TraceID)
-		require.Equal(ct, traceID, parent.TraceID)
-		require.NotEmpty(ct, parent.SpanID)
-		// check duration is at least 2us
-		assert.Less(ct, (2 * time.Microsecond).Microseconds(), parent.Duration)
+		parent = requireSingleSpan(ct, res, traceID)
 		// check span attributes
 		sd = parent.Diff(
 			jaeger.Tag{Key: "http.request.method", Type: "string", Value: "GET"},
@@ -1855,4 +1819,16 @@ func testGoGenericHTTPSTraces(t *testing.T) {
 			assert.Empty(ct, sd, sd.String())
 		}, testTimeout, 100*time.Millisecond)
 	})
+}
+
+// requireSingleSpan asserts res holds exactly one span of the given trace
+// with sane IDs and a duration of at least 2us, and returns it
+func requireSingleSpan(ct *assert.CollectT, res []jaeger.Span, traceID string) jaeger.Span {
+	require.Len(ct, res, 1, traceID)
+	sp := res[0]
+	require.NotEmpty(ct, sp.TraceID)
+	require.Equal(ct, traceID, sp.TraceID)
+	require.NotEmpty(ct, sp.SpanID)
+	assert.Less(ct, (2 * time.Microsecond).Microseconds(), sp.Duration)
+	return sp
 }

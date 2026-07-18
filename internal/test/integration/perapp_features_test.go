@@ -6,7 +6,6 @@ package integration
 import (
 	"fmt"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -18,10 +17,65 @@ import (
 )
 
 func TestPerAppFeatures(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-perapp.yml",
-		path.Join(pathOutput, "test-suite-multiexec-perapp.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigPerapp,
+			Pid:        "host",
+			Ports:      []string{"8999:8999"},
+			RunDir:     "run-multi",
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+				"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+			},
+		}),
+		"jtestserver": &docker.ServiceDef{
+			Image: "ghcr.io/open-telemetry/obi-testimg:java-jar-0.1.0@sha256:92d325a0a7aadcce2559de70ef66d39fa07075b57d8fa33b4244ada4dde3787e",
+			Ports: []string{"8086:8085"},
+		},
+		"ntestserver": &docker.ServiceDef{
+			Image:           "hatest-testserver-node",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/nodejsserver/Dockerfile",
+			Command:         []string{"node", "app.js"},
+			Ports:           []string{"3031:3030"},
+		},
+		"otelcol": &docker.ServiceDef{
+			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
+			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Command: []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"},
+			Ports:   []string{"9090:9090"},
+		},
+		"pytestserver": &docker.ServiceDef{
+			Image:           "hatest-testserver-python",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/pythonserver/Dockerfile_7773",
+			Ports:           []string{"7773:7773"},
+		},
+		"rtestserver": &docker.ServiceDef{
+			Image: "ghcr.io/open-telemetry/obi-testimg:rust-0.1.0@sha256:3989aa18c1e23cbb5a4c511ae1ad3456f94a9b967fd916bc21ee10c1d940a95d",
+			Ports: []string{"8091:8090"},
+		},
+		"testserver": &docker.ServiceDef{
+			Image:           "hatest-testserver",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/testserver/Dockerfile",
+			Ports:           []string{"8080:8080", "8088:8088"},
+			DependsOn:       map[string]string{"otelcol": "service_started"},
+			Env: map[string]string{
+				"LOG_LEVEL": "DEBUG",
+			},
+		},
+		"utestserver": &docker.ServiceDef{
+			Image: "ghcr.io/open-telemetry/obi-testimg:rails-0.1.0@sha256:7a72159a113b9044378c42f7ea27ab00673c6a0ebfe3ac205cc006f46606b36c",
+			Ports: []string{"3041:3040"},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
 	require.NoError(t, compose.Up())
 
 	t.Run("OTEL exporter", func(t *testing.T) {

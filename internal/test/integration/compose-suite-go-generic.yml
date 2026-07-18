@@ -1,0 +1,109 @@
+services:
+  zookeeper:
+    restart: always
+    container_name: kafka-like-zookeeper
+    image: docker.io/bitnamilegacy/zookeeper:3.9@sha256:46d5bcbdf4434f40b7a453a7f53e6ea436a770981433c173ab782c0b13a5fb87
+    ports:
+      - "2181:2181"
+    volumes:
+      - "zookeeper-volume:/bitnami"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    restart: always
+    container_name: kafka-like
+    image: docker.io/bitnamilegacy/kafka:3.9@sha256:55df55bfc7ed5980447387620afa3498eab3985a4d8c731013d82b3fa8b43bff
+    ports:
+      - "9093:9093"
+      - "9092:9092"
+      - "9094:9094"   # SSL listener port      
+    volumes:
+      - "kafka-volume:/bitnami"
+      - "./components/javakafka-tls/certs:/bitnami/kafka/config/certs"   # mount certs
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,SSL:SSL
+      - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093,SSL://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:9092,EXTERNAL://kafka:9093,SSL://kafka:9094
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
+      - KAFKA_CFG_SSL_KEYSTORE_LOCATION=/bitnami/kafka/config/certs/kafka.keystore.jks
+      - KAFKA_CFG_SSL_KEYSTORE_PASSWORD=changeit
+      - KAFKA_CFG_SSL_KEY_PASSWORD=changeit
+      - KAFKA_CFG_SSL_TRUSTSTORE_LOCATION=/bitnami/kafka/config/certs/kafka.truststore.jks
+      - KAFKA_CFG_SSL_TRUSTSTORE_PASSWORD=changeit
+      - KAFKA_CFG_SSL_CLIENT_AUTH=none  # set to "required" for mTLS
+    depends_on:
+      - zookeeper
+
+  nodeserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsserver/Dockerfile
+    image: hatest-testserver-node
+    command:
+      - node
+      - app.js
+    ports:
+      - 3031:3030
+      - 3034:3033
+
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/gogeneric/Dockerfile
+    image: hatest-testserver
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8443:8443"
+    environment:
+      LOG_LEVEL: DEBUG
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=1.0.0"
+      KAFKA_PEERS: "kafka:9092"
+      KAFKA_TLS_PEERS: "kafka:9094"
+    depends_on:
+      kafka:
+        condition: service_started
+      nodeserver:
+        condition: service_started
+
+  otelcol:
+    ports:
+      - "4317" # OTLP over gRPC receiver
+      - "4318" # OTLP over HTTP receiver
+      - "9464" # Prometheus exporter
+      - "8888" # metrics endpoint
+    depends_on:
+      obi:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus-config.yml
+      - --web.enable-lifecycle
+      - --enable-feature=exemplar-storage
+      - --web.route-prefix=/
+    ports:
+      - "9090:9090"
+
+  jaeger:
+    ports:
+      - "16686:16686" # Query frontend
+      - "4317" # OTEL GRPC traces collector
+      - "4318" # OTEL HTTP traces collector
+
+volumes:
+  kafka-volume:
+  zookeeper-volume:
+# curl http://localhost:16686/api/services
+# curl http://localhost:16686/api/traces?service=testserver

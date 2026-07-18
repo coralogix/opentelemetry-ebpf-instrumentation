@@ -143,7 +143,7 @@ lint: lint-run
 lint-fix: lint-fix-run
 
 .PHONY: lint-run lint-fix-run
-lint-run: vanity-import-check lint-dependency-policy lint-collectt
+lint-run: vanity-import-check lint-dependency-policy lint-collectt lint-compose-layout
 lint-fix-run: LINT_EXTRA_ARGS = --fix
 lint-fix-run: vanity-import-fix-check lint-dependency-policy lint-collectt-fix
 .NOTPARALLEL: lint-fix-run
@@ -166,6 +166,11 @@ lint-dependency-policy:
 	else \
 		./scripts/lint-dependency-policy.sh; \
 	fi
+
+.PHONY: lint-compose-layout
+lint-compose-layout:
+	@echo "### Checking integration compose layout"
+	@./scripts/lint-compose-layout.sh
 
 .PHONY: lint-collectt
 lint-collectt:

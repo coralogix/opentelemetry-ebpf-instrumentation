@@ -1,0 +1,115 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile
+    image: hatest-testserver
+    ports:
+      - "8080:8080" # std http server
+      - "8088:8088" # jsonrpc server
+    environment:
+      LOG_LEVEL: DEBUG
+    depends_on:
+      otelcol:
+        condition: service_started
+      jaeger:
+        condition: service_started
+
+  # another instance of the above image. Used to test the deduplication
+  # of metrics when they come from the same executable file
+  testserver-unused:
+    image: hatest-testserver
+    ports:
+      - "38080:8080"
+    environment:
+      LOG_LEVEL: DEBUG
+
+  testserver1:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile_rename1
+    image: hatest-testserver1
+    ports:
+      - "8900:8900"
+    environment:
+      LOG_LEVEL: DEBUG
+
+  # image that runs two instances of the 'testserver' executable
+  # Used to test the deduplication
+  # of metrics when they come from the same executable file
+  testserver-duplicate:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile_duplicate
+    image: hatest-testserver-duplicate
+    ports:
+      - "18080:18080"
+      - "18090:18090"
+    environment:
+      LOG_LEVEL: DEBUG
+
+  rtestserver:
+    image: ghcr.io/open-telemetry/obi-testimg:rust-0.1.0@sha256:3989aa18c1e23cbb5a4c511ae1ad3456f94a9b967fd916bc21ee10c1d940a95d
+    ports:
+      - 8091:8090
+
+  rtestserverssl:
+    image: ghcr.io/open-telemetry/obi-testimg:rust-ssl-0.1.0@sha256:9f7d6352112dd6f3999f85cdb847c1e8b462a48dedbf2ba55337f3efcbd6fd1a
+    ports:
+      - 8491:8490
+    environment:
+      LOG_LEVEL: DEBUG
+
+  pytestserverssl:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/pythonserver/Dockerfile_tls
+    image: hatest-testserver-python-ssl
+    ports:
+      - 8381:8380
+
+  pytestserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/pythonserver/Dockerfile_7773
+    image: hatest-testserver-python
+    ports:
+      - 7773:7773
+
+  ntestserverssl:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsserver/Dockerfile
+    image: hatest-testserver-node-ssl
+    command:
+      - node
+      - app_tls.js
+    ports:
+      - 3034:3033
+
+  ntestserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsserver/Dockerfile
+    image: hatest-testserver-node
+    command:
+      - node
+      - app.js
+    ports:
+      - 3031:3030
+
+  utestserver:
+    image: ghcr.io/open-telemetry/obi-testimg:rails-0.1.0@sha256:7a72159a113b9044378c42f7ea27ab00673c6a0ebfe3ac205cc006f46606b36c
+    ports:
+      - 3041:3040
+
+  utestserverssl:
+    image: ghcr.io/open-telemetry/obi-testimg:rails-ssl-0.1.0@sha256:b230987a8e15e33c42f4d8fc1bdda22539c9614695ac833c1e7e9697efd2aaa7
+    ports:
+      - 3044:3043
+
+  jtestserver:
+    image: ghcr.io/open-telemetry/obi-testimg:java-jar-0.1.0@sha256:92d325a0a7aadcce2559de70ef66d39fa07075b57d8fa33b4244ada4dde3787e
+    ports:
+      - "8086:8085"
+

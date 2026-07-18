@@ -6,7 +6,6 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
-	"path"
 	"sync"
 	"testing"
 	"time"
@@ -41,9 +40,25 @@ func vtNestedTraces(ct *assert.CollectT) (total, nested int) {
 // sequential requests pass even on a broken build, so the load must be
 // concurrent and the assertion a ratio over many traces.
 func TestJavaVirtualThreads(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-java-vthreads.yml", path.Join(pathOutput, "test-suite-java-vthreads.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML:  obiConfigWithJaegerHost,
+		NetworkMode: "host",
+		Pid:         "host",
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"/sys/fs/cgroup:/sys/fs/cgroup",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-java-vthreads:/var/run/obi",
+		},
+		DependsOn: map[string]string{"testserver": "service_started"},
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":  "all",
+			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+			"OTEL_EBPF_OPEN_PORT":                "8085",
+			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+		},
+	}), "compose-base.yml", "compose-frag-jaeger.yml", "compose-suite-java-vthreads.yml")
 	require.NoError(t, compose.Up())
 
 	// Sequential requests correlate even without the virtual-thread fix, so a

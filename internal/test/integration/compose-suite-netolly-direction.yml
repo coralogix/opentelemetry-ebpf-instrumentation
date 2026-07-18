@@ -1,0 +1,42 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}
+    image: hatest-testserver
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      - "8087:8087"
+      - "50051:50051"
+    environment:
+      LOG_LEVEL: DEBUG
+      TARGET_URL: http://testserver2:8080
+
+  testserver2:
+    image: hatest-testserver
+    environment:
+      LOG_LEVEL: DEBUG
+    depends_on:
+      testserver:
+        condition: service_started
+
+  otelcol:
+    command: ["--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"]
+    ports:
+      - "4317" # OTLP over gRPC receiver
+      - "4318" # OTLP over HTTP receiver
+      - "9464" # Prometheus exporter
+      - "8888" # metrics endpoint
+    depends_on:
+      prometheus:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+
+  prometheus:
+    ports:
+      - "9090:9090"

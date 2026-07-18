@@ -1,0 +1,11 @@
+services:
+  sqlserver:
+    build:
+      context: ../../../internal/test/integration/components/mssqldb
+      dockerfile: Dockerfile
+    image: mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "p_ssW0rd"
+    ports:
+      - "1433:1433"

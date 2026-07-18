@@ -6,7 +6,6 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -125,9 +124,58 @@ func testGRPCGoClientFailsToConnect(t *testing.T) {
 }
 
 func TestSuiteOtherGRPCGo(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-other-grpc.yml", path.Join(pathOutput, "test-suite-other-grpc.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigOtherGrpc,
+			Pid:        "host",
+			Ports:      []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-other-grpc:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+				"OTEL_EBPF_PROMETHEUS_FEATURES":              "application,application_span",
+			},
+		}),
+		"backend": &docker.ServiceDef{
+			Image:           "hatest-backend",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/old_grpc/backend/Dockerfile",
+			Ports:           []string{"8080:8080"},
+			Env: map[string]string{
+				"WORKERS": "worker:5000",
+			},
+		},
+		"grpcpinger": &docker.ServiceDef{
+			Image:           "hatest-grpcpinger",
+			BuildContext:    "../../../",
+			BuildDockerfile: "internal/test/integration/components/grpcpinger/Dockerfile",
+			Env: map[string]string{
+				"TARGET_URL": "localhost:12345",
+			},
+		},
+		"jaeger": &docker.ServiceDef{
+			Ports: []string{"16686:16686", "4317", "4318"},
+		},
+		"otelcol": &docker.ServiceDef{
+			Ports:     []string{"4317", "4318", "9464", "8888"},
+			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Ports: []string{"9090:9090"},
+		},
+		"worker": &docker.ServiceDef{
+			Image:           "hatest-worker",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/old_grpc/worker/Dockerfile",
+			Ports:           []string{"5000:5000"},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `PROM_CONFIG_SUFFIX=`)
 	lockdown := KernelLockdownMode()

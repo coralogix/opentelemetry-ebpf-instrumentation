@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
 	"strconv"
 	"testing"
 	"time"
@@ -22,9 +21,21 @@ import (
 )
 
 func TestMultiProcess(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec.yml", path.Join(pathOutput, "test-suite-multiexec.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		Pid:     "host",
+		Command: []string{"--config=/configs/obi-config-multiexec${MULTI_TEST_MODE}.yml"},
+		Ports:   []string{"8999:8999"},
+		RunDir:  "run-multi",
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+			"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-multiexec.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
@@ -117,9 +128,29 @@ func TestMultiProcess(t *testing.T) {
 }
 
 func TestMultiProcessAppCP(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-app-cp.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML:  obiConfigMultiexecHost,
+		NetworkMode: "host",
+		Pid:         "host",
+		Ports:       []string{"8999:8999"},
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"/sys/fs/cgroup:/sys/fs/cgroup",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-multi:/var/run/obi",
+		},
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+			"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+			"OTEL_EBPF_SHUTDOWN_TIMEOUT":                 "5s",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-multiexec-host.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=all`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
 	require.NoError(t, compose.Up())
@@ -132,9 +163,29 @@ func TestMultiProcessAppCP(t *testing.T) {
 }
 
 func TestMultiProcessAppCPHeadersOnly(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-app-cp-no-ip.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML:  obiConfigMultiexecHost,
+		NetworkMode: "host",
+		Pid:         "host",
+		Ports:       []string{"8999:8999"},
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"/sys/fs/cgroup:/sys/fs/cgroup",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-multi:/var/run/obi",
+		},
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+			"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+			"OTEL_EBPF_SHUTDOWN_TIMEOUT":                 "5s",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-multiexec-host.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=headers`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=1`)
 
@@ -150,9 +201,29 @@ func TestMultiProcessAppCPHeadersOnly(t *testing.T) {
 }
 
 func TestMultiProcessAppCPTCPOnly(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec-host.yml", path.Join(pathOutput, "test-suite-multiexec-app-cp-tcp-only.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML:  obiConfigMultiexecHost,
+		NetworkMode: "host",
+		Pid:         "host",
+		Ports:       []string{"8999:8999"},
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"/sys/fs/cgroup:/sys/fs/cgroup",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-multi:/var/run/obi",
+		},
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+			"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+			"OTEL_EBPF_SHUTDOWN_TIMEOUT":                 "5s",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-multiexec-host.yml")
 	// Test TCP-only context propagation (no HTTP headers, only TCP options)
 	// Explicitly disable request header tracking since we're not injecting HTTP headers
 	compose.Env = append(compose.Env, `OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP=1`, `OTEL_EBPF_BPF_CONTEXT_PROPAGATION=tcp`, `OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS=false`)
@@ -314,9 +385,21 @@ func testPartialLanguageHTTPProbes(t *testing.T) {
 }
 
 func TestLanguageSelectors(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-multiexec.yml", path.Join(pathOutput, "test-suite-multiexec-lang.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		Pid:     "host",
+		Command: []string{"--config=/configs/obi-config-multiexec${MULTI_TEST_MODE}.yml"},
+		Ports:   []string{"8999:8999"},
+		RunDir:  "run-multi",
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+			"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-multiexec.yml")
 	// we are going to setup discovery directly in the configuration file, choose the lang config file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `MULTI_TEST_MODE=-lang`)
 	require.NoError(t, compose.Up())

@@ -6,7 +6,6 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -77,11 +76,19 @@ func testSampler(t *testing.T) {
 }
 
 func TestSampler(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-sampler.yml", path.Join(pathOutput, "test-suite-sampler.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		Pid:     "host",
+		Command: []string{"--config=/configs/${OBI_CONFIG}"},
+		Ports:   []string{"8999:8999"},
+		RunDir:  "run-multi",
+		Env: map[string]string{
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-family-nodeserver.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `OBI_CONFIG=obi-config-sampler.yml`)
 	require.NoError(t, compose.Up())
 
 	t.Run("Sampler", testSampler)

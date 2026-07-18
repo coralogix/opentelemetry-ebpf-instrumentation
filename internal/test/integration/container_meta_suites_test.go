@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -22,8 +21,49 @@ import (
 )
 
 func TestSuite_DockerMetadata(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-container-metadata.yml", path.Join(pathOutput, "test-suite-container-metadata.log"))
-	require.NoError(t, err)
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigContainerMeta,
+			Pid:        "host",
+			Ports:      []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+				"/var/run/docker.sock:/var/run/docker.sock",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_METRICS_FEATURES":                 featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":              featuresFull,
+				"OTEL_EBPF_PROMETHEUS_PORT":                  "8999",
+				"OTEL_EBPF_TRACE_PRINTER":                    "json",
+			},
+		}),
+		"jaeger": &docker.ServiceDef{
+			Ports: []string{"16686:16686", "4317", "4318"},
+		},
+		"otelcol": &docker.ServiceDef{
+			Ports:     []string{"4317", "4318", "9464", "8888"},
+			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Command: []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"},
+			Ports:   []string{"9090:9090"},
+		},
+		"testserver-as-in-compose": &docker.ServiceDef{
+			Image:           "hatest-testserver",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/testserver/Dockerfile",
+			Ports:           []string{"8080:8080"},
+			Env: map[string]string{
+				"LOG_LEVEL":                "DEBUG",
+				"OTEL_RESOURCE_ATTRIBUTES": "service.version=1.0.0",
+			},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
 	require.NoError(t, compose.Up())
 
 	t.Run("OTEL metrics are decorated with container metadata", func(t *testing.T) {

@@ -5,7 +5,6 @@ package integration
 
 import (
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -28,8 +27,20 @@ const (
 // 2. Uses the extracted trace ID instead of generating a new one
 // 3. Only injects Traceparent when one doesn't already exist
 func TestTraceparentExtraction(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-tpclient.yml", path.Join(pathOutput, "test-suite-traceparent.log"))
-	require.NoError(t, err)
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML: obiConfigTpclient,
+		Pid:        "host",
+		Ports:      []string{"8999:8999"},
+		RunDir:     "run-tpclient",
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "headers",
+			"OTEL_EBPF_BPF_HIGH_REQUEST_VOLUME":          "1",
+			"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
+			"OTEL_EBPF_OPEN_PORT":                        "6000,6001,6002",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-tpclient.yml")
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
 

@@ -73,6 +73,10 @@ Integration tests live in `internal/test/integration/`:
 go test -v -run <TestName> -timeout 10m ./internal/test/integration/
 ```
 
+New suites are defined in Go over shared compose layers — see
+[internal/test/integration/README.md](internal/test/integration/README.md)
+before adding one; `make lint` enforces the layout.
+
 Do not propose changes that fail local validation.
 
 ## Code Guidelines

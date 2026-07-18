@@ -6,7 +6,6 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
-	"path"
 	"testing"
 	"time"
 
@@ -210,9 +209,30 @@ func testGenericHeaderMultipleValues(t *testing.T) {
 }
 
 func TestSuiteGenericHeaders(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose.yml", path.Join(pathOutput, "test-suite-generic-headers.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		Pid:     "host",
+		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+		Ports:   []string{"8999:8999"},
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+		},
+		Env: map[string]string{
+			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+			"OTEL_EBPF_LOG_FORMAT":                                "json",
+			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+			"OTEL_EBPF_TRACE_PRINTER":                             "json",
+		},
+	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-http-enrichment-headers")
 	compose.Env = append(compose.Env, "OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=true")
 	require.NoError(t, compose.Up())

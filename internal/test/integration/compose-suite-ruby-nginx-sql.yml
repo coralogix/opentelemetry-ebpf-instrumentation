@@ -1,0 +1,103 @@
+services:
+  certgen:
+    build:
+      context: ./components/nginx-rails-sql/certgen
+    image: rails-nginx-sql-certgen:latest
+    volumes:
+      - mysql_server_certs:/out/mysql-server
+      - mysql_client_certs:/out/mysql-client
+      - nginx_certs:/out/nginx
+
+  testserver:
+    image: ghcr.io/open-telemetry/obi-testimg:rails-sql-0.0.1@sha256:6d3777a979af47d99b90d7d3f891332ee6b469964b1abf0af9f8c57df0711583
+    command: bash -c "sleep 10 && bundle exec rails db:create db:migrate db:seed && rails server -p 3040 -b 0.0.0.0"
+    container_name: rails_app
+    ports:
+      - "3041:3040"
+    environment:
+      OTEL_SERVICE_NAME: "my-ruby-app"
+      OTEL_RESOURCE_ATTRIBUTES: "cloud.region=ca,deployment.environment.name=staging"
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+      otelcol:
+        condition: service_started
+      db:
+        condition: service_started
+    networks:
+      - app_network
+    volumes:
+      - mysql_client_certs:/certs:ro
+
+  nginx:
+    image: nginx:latest@sha256:dec7a90bd0973b076832dc56933fe876bc014929e14b4ec49923951405370112
+    container_name: nginx_server
+    ports:
+      - "8443:443" # Expose TLS port
+    volumes:
+      - ./components/nginx-rails-sql/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_certs:/etc/nginx/tls:ro
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+      testserver:
+        condition: service_started
+    networks:
+      - app_network
+
+  db:
+    image: mysql:9.7.0@sha256:c9e48b0c008f1936d4139d1c0dcd5950a9dbe57d4d40f383013cde432fa6d6aa
+    command:
+      - --ssl-ca=/etc/mysql/certs/ca.pem
+      - --ssl-cert=/etc/mysql/certs/server-cert.pem
+      - --ssl-key=/etc/mysql/certs/server-key.pem
+      - --bind-address=0.0.0.0
+    container_name: mysql_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: my_database
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    volumes:
+      - db_data:/var/lib/mysql
+      - mysql_server_certs:/etc/mysql/certs:ro
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    networks:
+      - app_network
+
+  otelcol:
+    ports:
+      - "4317:4317" # OTLP over gRPC receiver
+      - "4318:4318" # OTLP over HTTP receiver
+      - "9464" # Prometheus exporter
+      - "8888" # metrics endpoint
+    depends_on:
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+  prometheus:
+    ports:
+      - "9090:9090"
+
+  # Jaeger for Traces
+  jaeger:
+    ports:
+      - "16686:16686" # Query frontend
+      - "4417:4317" # OTEL GRPC traces collector
+      - "4418:4318" # OTEL HTTP traces collector
+
+volumes:
+  db_data:
+  mysql_server_certs:
+  mysql_client_certs:
+  nginx_certs:
+
+
+networks:
+  app_network:

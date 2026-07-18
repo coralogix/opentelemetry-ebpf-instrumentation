@@ -6,7 +6,6 @@ package integration
 import (
 	"net"
 	"net/http"
-	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -21,9 +20,45 @@ import (
 )
 
 func TestNetwork_Deduplication(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly.yml", path.Join(pathOutput, "test-suite-netolly-dedupe.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": &docker.OBI{
+			NetworkMode: "service:testserver",
+			RunDir:      "run-netolly",
+			Env: map[string]string{
+				"GOCOVERDIR":                             "/coverage",
+				"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+				"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+				"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+				"OTEL_EBPF_HOSTNAME":                     "obi",
+				"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+				"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+				"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+				"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+				"OTEL_EBPF_NETWORK_METRICS":              "true",
+				"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+				"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+				"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+			},
+		},
+		"otelcol": &docker.ServiceDef{
+			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
+			Ports:     []string{"4317", "4318", "9464", "8888"},
+			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Ports: []string{"9090:9090"},
+		},
+		"testserver": &docker.ServiceDef{
+			Image:           "hatest-testserver",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/testserver/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}",
+			Ports:           []string{"8080:8080", "8081:8081", "8082:8082", "8083:8083", "8087:8087", "50051:50051"},
+			Env: map[string]string{
+				"LOG_LEVEL": "DEBUG",
+			},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_NETWORK_DEDUPER=first_come", "OTEL_EBPF_EXECUTABLE_PATH=", `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -39,9 +74,26 @@ func TestNetwork_Deduplication(t *testing.T) {
 }
 
 func TestNetwork_Deduplication_Use_Socket_Filter(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly.yml", path.Join(pathOutput, "test-suite-netolly-dedupe-no-tc.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, &docker.OBI{
+		NetworkMode: "service:testserver",
+		RunDir:      "run-netolly",
+		Env: map[string]string{
+			"GOCOVERDIR":                             "/coverage",
+			"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+			"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+			"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+			"OTEL_EBPF_HOSTNAME":                     "obi",
+			"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+			"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+			"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+			"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+			"OTEL_EBPF_NETWORK_METRICS":              "true",
+			"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+			"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+			"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+		},
+	}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-netolly.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_NETWORK_DEDUPER=first_come", "OTEL_EBPF_EXECUTABLE_PATH=", "OTEL_EBPF_NETWORK_SOURCE=socket_filter", `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -57,9 +109,26 @@ func TestNetwork_Deduplication_Use_Socket_Filter(t *testing.T) {
 }
 
 func TestNetwork_NoDeduplication(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly.yml", path.Join(pathOutput, "test-suite-netolly-nodedupe.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, &docker.OBI{
+		NetworkMode: "service:testserver",
+		RunDir:      "run-netolly",
+		Env: map[string]string{
+			"GOCOVERDIR":                             "/coverage",
+			"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+			"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+			"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+			"OTEL_EBPF_HOSTNAME":                     "obi",
+			"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+			"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+			"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+			"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+			"OTEL_EBPF_NETWORK_METRICS":              "true",
+			"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+			"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+			"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+		},
+	}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-netolly.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_NETWORK_DEDUPER=none", "OTEL_EBPF_EXECUTABLE_PATH=", `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -78,9 +147,26 @@ func TestNetwork_NoDeduplication(t *testing.T) {
 }
 
 func TestNetwork_AllowedAttributes(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly.yml", path.Join(pathOutput, "test-suite-netolly-allowed-attrs.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, &docker.OBI{
+		NetworkMode: "service:testserver",
+		RunDir:      "run-netolly",
+		Env: map[string]string{
+			"GOCOVERDIR":                             "/coverage",
+			"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+			"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+			"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+			"OTEL_EBPF_HOSTNAME":                     "obi",
+			"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+			"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+			"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+			"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+			"OTEL_EBPF_NETWORK_METRICS":              "true",
+			"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+			"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+			"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+		},
+	}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-netolly.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_EXECUTABLE_PATH=", `OTEL_EBPF_CONFIG_SUFFIX=-disallowattrs`, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -113,8 +199,39 @@ func TestNetwork_AllowedAttributes(t *testing.T) {
 }
 
 func TestNetwork_ReverseDNS(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly-rdns.yml", path.Join(pathOutput, "test-suite-netolly-reverse-dns.log"))
-	require.NoError(t, err)
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": &docker.OBI{
+			NetworkMode: "host",
+			RunDir:      "run-netolly",
+			Env: map[string]string{
+				"GOCOVERDIR":                             "/coverage",
+				"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+				"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+				"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly.yml",
+				"OTEL_EBPF_HOSTNAME":                     "obi",
+				"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+				"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+				"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+				"OTEL_EBPF_NETWORK_METRICS":              "true",
+				"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+				"OTEL_EBPF_NETWORK_REVERSE_DNS_TYPE":     "ebpf",
+				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+				"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://localhost:4318",
+			},
+		},
+		"curler": &docker.ServiceDef{
+			Image:   "alpine/curl@sha256:e62df00da54d9b51ae83ecdf4ad84a4fc4bca3a91189f1d6eae84d5f46d3a9cc",
+			Command: []string{"sh", "-c", "while true; do curl -s https://github.com/; sleep 5; done"},
+		},
+		"otelcol": &docker.ServiceDef{
+			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
+			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
+			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Ports: []string{"9090:9090"},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
 	compose.Env = append(compose.Env, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -137,9 +254,54 @@ func TestNetwork_ReverseDNS(t *testing.T) {
 }
 
 func TestNetwork_Direction(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly-direction.yml", path.Join(pathOutput, "test-suite-netolly-direction.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": &docker.OBI{
+			NetworkMode: "service:testserver",
+			RunDir:      "run-netolly-direction",
+			Env: map[string]string{
+				"GOCOVERDIR":                             "/coverage",
+				"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+				"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+				"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+				"OTEL_EBPF_FORCE_BPF_MAP_READER":         "legacy",
+				"OTEL_EBPF_HOSTNAME":                     "obi",
+				"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+				"OTEL_EBPF_METRICS_FEATURES":             "network",
+				"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+				"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+				"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+				"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+				"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+				"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+			},
+		},
+		"otelcol": &docker.ServiceDef{
+			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
+			Ports:     []string{"4317", "4318", "9464", "8888"},
+			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Ports: []string{"9090:9090"},
+		},
+		"testserver": &docker.ServiceDef{
+			Image:           "hatest-testserver",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/testserver/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}",
+			Ports:           []string{"8080:8080", "8081:8081", "8082:8082", "8083:8083", "8087:8087", "50051:50051"},
+			Env: map[string]string{
+				"LOG_LEVEL":  "DEBUG",
+				"TARGET_URL": "http://testserver2:8080",
+			},
+		},
+		"testserver2": &docker.ServiceDef{
+			Image:     "hatest-testserver",
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"LOG_LEVEL": "DEBUG",
+			},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_NETWORK_DEDUPER=first_come", "OTEL_EBPF_NETWORK_SOURCE=tc", "OTEL_EBPF_EXECUTABLE_PATH=", `OTEL_EBPF_CONFIG_SUFFIX=-direction`, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -167,9 +329,27 @@ func TestNetwork_Direction(t *testing.T) {
 }
 
 func TestNetwork_IfaceDirection_Use_Socket_Filter(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-netolly-direction.yml", path.Join(pathOutput, "test-suite-netolly-direction-no-tc.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, &docker.OBI{
+		NetworkMode: "service:testserver",
+		RunDir:      "run-netolly-direction",
+		Env: map[string]string{
+			"GOCOVERDIR":                             "/coverage",
+			"OTEL_EBPF_BPF_BATCH_TIMEOUT":            "1s",
+			"OTEL_EBPF_BPF_DEBUG":                    "TRUE",
+			"OTEL_EBPF_CONFIG_PATH":                  "/configs/obi-config-netolly${OTEL_EBPF_CONFIG_SUFFIX}.yml",
+			"OTEL_EBPF_FORCE_BPF_MAP_READER":         "legacy",
+			"OTEL_EBPF_HOSTNAME":                     "obi",
+			"OTEL_EBPF_LOG_LEVEL":                    "DEBUG",
+			"OTEL_EBPF_METRICS_FEATURES":             "network",
+			"OTEL_EBPF_METRICS_INTERVAL":             "1s",
+			"OTEL_EBPF_NETWORK_CACHE_ACTIVE_TIMEOUT": "1s",
+			"OTEL_EBPF_NETWORK_DEDUPER":              "${OTEL_EBPF_NETWORK_DEDUPER}",
+			"OTEL_EBPF_NETWORK_PRINT_FLOWS":          "true",
+			"OTEL_EBPF_NETWORK_SOURCE":               "${OTEL_EBPF_NETWORK_SOURCE}",
+			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":    "1ms",
+			"OTEL_EXPORTER_OTLP_ENDPOINT":            "http://otelcol:4318",
+		},
+	}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-netolly-direction.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_NETWORK_DEDUPER=first_come", "OTEL_EBPF_EXECUTABLE_PATH=", "OTEL_EBPF_NETWORK_SOURCE=socket_filter", `OTEL_EBPF_CONFIG_SUFFIX=-direction`, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 

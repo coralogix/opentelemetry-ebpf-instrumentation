@@ -1,0 +1,10 @@
+services:
+  sqlserver:
+    build:
+      context: ../../../internal/test/integration/components/postgresql/
+      dockerfile: Dockerfile
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: "postgres" # Supplied so we can load the test schema
+    ports:
+      - "5432:5432"

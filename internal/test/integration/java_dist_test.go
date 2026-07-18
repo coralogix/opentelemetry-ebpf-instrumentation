@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path"
 	"slices"
 	"strings"
 	"testing"
@@ -77,9 +76,29 @@ func testJavaNestedTracesPlainHTTP(t *testing.T, slug string) {
 }
 
 func TestJavaNestedTraces(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-java-dist.yml", path.Join(pathOutput, "test-suite-java-dist.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
+		ConfigYAML:  obiConfigWithJaegerHost,
+		NetworkMode: "host",
+		Pid:         "host",
+		Volumes: []string{
+			"./configs/:/configs",
+			"./system/sys/kernel/security:/sys/kernel/security",
+			"/sys/fs/cgroup:/sys/fs/cgroup",
+			"../../../testoutput:/coverage",
+			"../../../testoutput/run-nodejsdist:/var/run/obi",
+		},
+		DependsOn: map[string]string{"testserver": "service_started"},
+		Env: map[string]string{
+			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
+			"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
+			"OTEL_EBPF_OPEN_PORT":                        "8080",
+			"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+		},
+	}), "compose-base.yml", "compose-infra.yml", "compose-suite-java-dist.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
@@ -104,9 +123,56 @@ func TestJavaNestedTraces(t *testing.T) {
 }
 
 func TestJavaMalformedIoctlFailsClosed(t *testing.T) {
-	compose, err := docker.ComposeSuite("docker-compose-java-dist-malicious-ioctl.yml", path.Join(pathOutput, "test-suite-java-dist-malicious-ioctl.log"))
-	require.NoError(t, err)
-
+	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:      obiConfigWithJaegerHost,
+			Image:           "hatest-obi-b",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile-with-javaagent",
+			NetworkMode:     "host",
+			Pid:             "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"/sys/fs/cgroup:/sys/fs/cgroup",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-nodejsdist:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
+				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span,application_service_graph",
+				"OTEL_EBPF_METRICS_INTERVAL":                 "10ms",
+				"OTEL_EBPF_OPEN_PORT":                        "8080",
+				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+			},
+		}),
+		"jaeger": &docker.ServiceDef{
+			Ports: []string{"16686:16686", "4317", "4318"},
+		},
+		"otelcol": &docker.ServiceDef{
+			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
+			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
+		},
+		"prometheus": &docker.ServiceDef{
+			Command: []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"},
+			Ports:   []string{"9090:9090"},
+		},
+		"testserver": &docker.ServiceDef{
+			Image:           "hatest-java-dist-netty-tls-malicious",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/java_tls/netty_tls/Dockerfile",
+			Ports:           []string{"8081:8080"},
+			Env: map[string]string{
+				"LOG_LEVEL":         "DEBUG",
+				"OTEL_SERVICE_NAME": "testserver",
+			},
+		},
+	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() {

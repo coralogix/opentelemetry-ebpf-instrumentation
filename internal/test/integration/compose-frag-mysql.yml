@@ -1,0 +1,12 @@
+services:
+  sqlserver:
+    build:
+      context: ../../../internal/test/integration/components/mysqldb
+      dockerfile: Dockerfile
+    image: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "p_ssW0rd"
+      MYSQL_PASSWORD: "p_ssW0rd"
+      MYSQL_DATABASE: "sakila"
+    ports:
+      - "3306:3306"

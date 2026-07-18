@@ -1,0 +1,59 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}
+    image: hatest-testserver
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      - "8087:8087"
+      - "8088:8088"
+      - "8383:8383"
+      - "5051:5051"
+      - "50051:50051"
+    environment:
+      LOG_LEVEL: DEBUG
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=1.0.0"
+
+  pingclient:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/pingclient/Dockerfile${PINGSERVER_DOCKERFILE_SUFFIX}
+    image: hatest-pingclient
+    environment:
+      LOG_LEVEL: DEBUG
+
+  otelcol:
+    ports:
+      - "4317" # OTLP over gRPC receiver
+      - "4318" # OTLP over HTTP receiver
+      - "9464" # Prometheus exporter
+      - "8888" # metrics endpoint
+    depends_on:
+      obi:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      jaeger:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus-config${PROM_CONFIG_SUFFIX}.yml
+      - --web.enable-lifecycle
+      - --enable-feature=exemplar-storage
+      - --web.route-prefix=/
+    ports:
+      - "9090:9090"
+
+  jaeger:
+    ports:
+      - "16686:16686" # Query frontend
+      - "4317" # OTEL GRPC traces collector
+      - "4318" # OTEL HTTP traces collector
