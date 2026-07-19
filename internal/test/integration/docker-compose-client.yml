@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/pingclient/Dockerfile
+    image: hatest-pingclient
+    environment:
+      LOG_LEVEL: DEBUG

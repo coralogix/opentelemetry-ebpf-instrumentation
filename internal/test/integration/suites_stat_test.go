@@ -10,33 +10,24 @@ import (
 )
 
 func TestStat_GoStatMetrics(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
-	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
-	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			Pid:   "host",
-			Ports: []string{"8999:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-go-stat-metrics:/var/run/obi",
-				"/sys/kernel/tracing:/sys/kernel/tracing:rw",
-			},
-			DependsOn: map[string]string{"testserver": "service_started"},
+	runSuite(t, docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			Pid:          "host",
+			Ports:        []string{"8999:8999"},
+			RunDir:       "run-go-stat-metrics",
+			ExtraVolumes: []string{"/sys/kernel/tracing:/sys/kernel/tracing:rw"},
+			DependsOn:    map[string]string{"testserver": "service_started"},
 			Env: map[string]string{
-				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config${OTEL_EBPF_CONFIG_SUFFIX}.yml",
-				"OTEL_EBPF_METRICS_FEATURES":         "stats",
-				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-				"OTEL_EBPF_PROMETHEUS_PORT":          "8999",
-				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-				"OTEL_EBPF_TRACE_PRINTER":            "json",
+				"OTEL_EBPF_CONFIG_PATH":          "/configs/obi-config-go-runtime-metrics-otel.yml",
+				"OTEL_EBPF_METRICS_FEATURES":     "stats",
+				"OTEL_EBPF_OPEN_PORT":            "",
+				"OTEL_EBPF_PROMETHEUS_PORT":      "8999",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT": "true",
 			},
 		}),
-		"otelcol": vOtelcol,
+		"otelcol": docker.OtelcolNoJaeger(),
 		"jaeger":  nil,
-	}), "compose-suite-go-stat-metrics.yml"), []string{`TEST_SERVICE_PORTS=8381:8080`, `OTEL_EBPF_CONFIG_SUFFIX=-go-runtime-metrics-otel`, `PROM_CONFIG_SUFFIX=-promscrape-otel`}, true,
+	}), "docker-compose-go-stat-metrics.yml"), []string{`PROM_CONFIG_SUFFIX=-promscrape-otel`}, true,
 		st("Go Stat Metrics TCP RTT tests", testStatMetricsTCPRttGo),
 		st("Go Stat Metrics TCP Failed Connection tests", testStatMetricsTCPFailedConnectionsGo),
 		st("Go Stat Metrics TCP Retransmits tests", testStatMetricsTCPRetransmitsGo),

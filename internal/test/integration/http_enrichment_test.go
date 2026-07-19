@@ -209,36 +209,22 @@ func testGenericHeaderMultipleValues(t *testing.T) {
 }
 
 func TestSuiteGenericHeaders(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
-	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			Pid:     "host",
-			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Command: []string{"--config=/configs/obi-config-http-enrichment-headers.yml"},
 			Ports:   []string{"8999:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-			},
+			RunDir:  "run-base${TESTSERVER_DOCKERFILE_SUFFIX}",
 			Env: map[string]string{
-				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-				"OTEL_EBPF_LOG_FORMAT":                                "json",
-				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_EXECUTABLE_PATH":                  "testserver",
+				"OTEL_EBPF_METRICS_FEATURES":                 featuresFull,
+				"OTEL_EBPF_PROMETHEUS_FEATURES":              featuresFull,
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":         "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
 			},
 		}),
-		"otelcol": vOtelcol,
-	}), "compose-suite-default.yml")
-	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-http-enrichment-headers")
+		"otelcol": docker.OtelcolAfterOBI(),
+	}), "docker-compose.yml")
 	compose.Env = append(compose.Env, "OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=true")
 	require.NoError(t, compose.Up())
 

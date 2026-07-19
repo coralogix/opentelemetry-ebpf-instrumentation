@@ -76,33 +76,28 @@ func testJavaNestedTracesPlainHTTP(t *testing.T, slug string) {
 }
 
 func TestJavaNestedTraces(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML:  obiConfigWithJaegerHost,
-			NetworkMode: "host",
-			Pid:         "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security:/sys/kernel/security",
-				"/sys/fs/cgroup:/sys/fs/cgroup",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-nodejsdist:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testserver": "service_started"},
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			Image:           "hatest-obi-b",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile-with-javaagent",
+			ConfigYAML:      obiConfigWithJaegerHost,
+			NetworkMode:     "host",
+			Pid:             "host",
+			RunDir:          "run-nodejsdist",
+			ExtraVolumes:    []string{"/sys/fs/cgroup:/sys/fs/cgroup"},
+			DependsOn:       map[string]string{"testserver": "service_started"},
 			Env: map[string]string{
-				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
-				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
-				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
 				"OTEL_EBPF_OPEN_PORT":                        "8080",
-				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
+				"OTEL_EBPF_METRICS_FEATURES":                 featuresSpanGraph,
 			},
 		}),
-	}))
+	}), "docker-compose-java-dist.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
 
 	waitForTestComponentsRoute(t, "http://localhost:8081", "/api/health")
@@ -125,52 +120,35 @@ func TestJavaNestedTraces(t *testing.T) {
 }
 
 func TestJavaMalformedIoctlFailsClosed(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol := docker.NewServices()["otelcol"]
 	vOtelcol.DependsOn = map[string]string{"prometheus": "service_started", "weaver": "service_healthy"}
-	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus := docker.NewServices()["prometheus"]
 	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			ConfigYAML:      obiConfigWithJaegerHost,
 			Image:           "hatest-obi-b",
 			BuildContext:    "../../..",
 			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile-with-javaagent",
 			NetworkMode:     "host",
 			Pid:             "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security:/sys/kernel/security",
-				"/sys/fs/cgroup:/sys/fs/cgroup",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-nodejsdist:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testserver": "service_started"},
+			RunDir:          "run-nodejsdist",
+			ExtraVolumes:    []string{"/sys/fs/cgroup:/sys/fs/cgroup"},
+			DependsOn:       map[string]string{"testserver": "service_started"},
 			Env: map[string]string{
-				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
-				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
-				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span,application_service_graph",
-				"OTEL_EBPF_METRICS_INTERVAL":                 "10ms",
 				"OTEL_EBPF_OPEN_PORT":                        "8080",
-				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
+				"OTEL_EBPF_METRICS_FEATURES":                 featuresPromSpanGraph,
+				"OTEL_EBPF_METRICS_INTERVAL":                 "10ms",
 			},
 		}),
-		"testserver": &docker.ServiceDef{
-			Image:           "hatest-java-dist-netty-tls-malicious",
-			BuildContext:    "../../..",
-			BuildDockerfile: "./internal/test/integration/components/java_tls/netty_tls/Dockerfile",
-			Ports:           []string{"8081:8080"},
-			Env: map[string]string{
-				"LOG_LEVEL":         "DEBUG",
-				"OTEL_SERVICE_NAME": "testserver",
-			},
-		},
+		"weaver":     nil,
 		"otelcol":    vOtelcol,
 		"prometheus": vPrometheus,
-	}))
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	}), "docker-compose-java-dist-malicious-ioctl.yml")
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() {
 		require.NoError(t, compose.Close())

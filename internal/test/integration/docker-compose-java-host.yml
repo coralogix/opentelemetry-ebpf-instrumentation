@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   testserver:
     image: ${TESTSERVER_IMAGE:?TESTSERVER_IMAGE must be set to a digest-pinned obi-testimg java reference}
@@ -5,6 +7,3 @@ services:
       - "8086:8085"
     environment:
       LOG_LEVEL: DEBUG
-    depends_on:
-      otelcol:
-        condition: service_started

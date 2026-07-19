@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  testclient:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/gohttp2/client/Dockerfile
+    image: hatest-testclient
+    environment:
+      TARGET_URL: "https://testserver:7373"
+      TEST_HTTP2_PROTOCOLS: ${TEST_HTTP2_PROTOCOLS}
+    depends_on:
+      testserver:
+        condition: service_started
+
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/gohttp2/server/Dockerfile
+    image: hatest-server
+    ports:
+      - "7373:7373"
+    environment:
+      TEST_HTTP2_PROTOCOLS: ${TEST_HTTP2_PROTOCOLS}
+    depends_on:
+      otelcol:
+        condition: service_started

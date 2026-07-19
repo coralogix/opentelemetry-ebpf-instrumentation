@@ -1,0 +1,17 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/gosunrpc/Dockerfile
+    image: hatest-testserver-go-sunrpc
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+      - "8999:8999"
+    environment:
+      - SUNRPC_PORT=11111
+      - HTTP_PORT=8080
+    depends_on:
+      otelcol:
+        condition: service_started
+      jaeger:
+        condition: service_started

@@ -1,0 +1,34 @@
+services:
+  vernemq:
+    restart: always
+    container_name: vernemq-mqtt-broker
+    image: vernemq/vernemq:latest@sha256:ad60e4c04f4fa6cadeea43ecf37351b8a76d7c343ecb5e86eda6053aed0cf524
+    ports:
+      - "1883:1883" # MQTT port
+    environment:
+      - DOCKER_VERNEMQ_ACCEPT_EULA=yes
+      - DOCKER_VERNEMQ_ALLOW_ANONYMOUS=on
+      - DOCKER_VERNEMQ_LOG__CONSOLE__LEVEL=warning
+      - DOCKER_VERNEMQ_PLUGINS__vmq_acl=on
+      - DOCKER_VERNEMQ_VMQ_ACL__ACL_FILE=/etc/vernemq/vmq.acl
+    volumes:
+      - ./vernemq-acl:/etc/vernemq
+
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/gomqtt/Dockerfile
+    image: hatest-testserver-go-mqtt
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    environment:
+      - MQTT_BROKER=vernemq:1883
+      - MQTT_TOPIC=test/topic
+      - MQTT_QOS=1
+    depends_on:
+      otelcol:
+        condition: service_started
+      vernemq:
+        condition: service_started
+      jaeger:
+        condition: service_started

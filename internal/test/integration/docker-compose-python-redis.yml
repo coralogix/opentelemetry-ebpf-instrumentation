@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  redis:
+    build:
+      context: ../../../internal/test/integration/components/redis/
+      dockerfile: Dockerfile
+    image: redis
+
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythonredis/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-redis
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      redis:
+        condition: service_started

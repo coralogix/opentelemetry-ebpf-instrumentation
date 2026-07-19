@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  # old gRPC
+  backend:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/old_grpc/backend/Dockerfile
+    image: hatest-backend
+    ports:
+      - "8080:8080"
+    environment:
+      WORKERS: "worker:5000"
+
+  # old gRPC
+  worker:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/old_grpc/worker/Dockerfile
+    image: hatest-worker
+    ports:
+      - "5000:5000"
+
+  # gRPC client going nowhere
+  grpcpinger:
+    build:
+      context: ../../../
+      dockerfile: internal/test/integration/components/grpcpinger/Dockerfile
+    image: hatest-grpcpinger
+    environment:
+      TARGET_URL: "localhost:12345"

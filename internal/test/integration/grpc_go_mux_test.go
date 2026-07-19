@@ -39,21 +39,20 @@ func testREDMetricsForGRPCMuxLibrary(t *testing.T, route, svcNs, serverPort stri
 }
 
 func TestGRPCMux(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML: obiConfigGrpcHttp2Mux,
+	vPrometheus := docker.NewServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			ConfigYAML: obiConfigGrpcHTTP2Mux,
 			Pid:        "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-http2-mux:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testclient": "service_started"},
+			Env:        map[string]string{"OTEL_EBPF_OPEN_PORT": ""},
+			RunDir:     "run-http2-mux",
+			DependsOn:  map[string]string{"testclient": "service_started"},
 		}),
-	}))
+		"prometheus": vPrometheus,
+	}), "docker-compose-grpc-http2-mux.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8080`, `TARGET_PORTS=8080:8080`)
+	compose.Env = append(compose.Env, `TARGET_URL=testserver:8080`, `TARGET_PORTS=8080:8080`)
 	require.NoError(t, compose.Up())
 
 	t.Run("Go RED metrics: grpc-http2 mux service", func(t *testing.T) {
@@ -65,21 +64,20 @@ func TestGRPCMux(t *testing.T) {
 }
 
 func TestGRPCMuxTLS(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML: obiConfigGrpcHttp2Mux,
+	vPrometheus := docker.NewServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			ConfigYAML: obiConfigGrpcHTTP2Mux,
 			Pid:        "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-http2-mux:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testclient": "service_started"},
+			Env:        map[string]string{"OTEL_EBPF_OPEN_PORT": ""},
+			RunDir:     "run-http2-mux",
+			DependsOn:  map[string]string{"testclient": "service_started"},
 		}),
-	}))
+		"prometheus": vPrometheus,
+	}), "docker-compose-grpc-http2-mux.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8383`, `TARGET_PORTS=8383:8383`, `TEST_SUFFIX=_tls`)
+	compose.Env = append(compose.Env, `TARGET_URL=testserver:8383`, `TARGET_PORTS=8383:8383`, `TEST_SUFFIX=_tls`)
 	require.NoError(t, compose.Up())
 
 	t.Run("Go RED metrics: grpc-http2 mux service TLS", func(t *testing.T) {

@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  testclient:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/go_grpc_server_mux/Dockerfile_pinger${TEST_SUFFIX}
+    image: hatest-testclient
+    environment:
+      TARGET_URL: ${TARGET_URL}
+    depends_on:
+      testserver:
+        condition: service_started
+
+  testserver:
+    build:
+      context: components/go_grpc_server_mux/
+      dockerfile: Dockerfile${TEST_SUFFIX}
+    image: hatest-server
+    ports:
+      - ${TARGET_PORTS}
+    depends_on:
+      otelcol:
+        condition: service_started

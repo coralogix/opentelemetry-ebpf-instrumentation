@@ -18,13 +18,13 @@ PREPULL_REGISTRY_RE="${PREPULL_REGISTRY_RE:-mcr\.microsoft\.com}"
 case "${MODE}" in
 --build-targets)
     shopt -s nullglob
-    compose_files=("${SEARCH_DIR}"/compose-suite-multiexec*.yml)
+    compose_files=("${SEARCH_DIR}"/docker-compose-multiexec*.yml)
     if [ ${#compose_files[@]} -eq 0 ]; then
-        echo "discover-integration-images.sh: no compose-suite-multiexec*.yml under ${SEARCH_DIR}" >&2
+        echo "discover-integration-images.sh: no docker-compose-multiexec*.yml under ${SEARCH_DIR}" >&2
         exit 1
     fi
 
-    # obi itself is defined in Go (docker.StdOBI), not in any compose file
+    # obi itself is defined in Go (docker.NewOBI), not in any compose file
     {
         echo "hatest-obi=internal/test/integration/components/obi/Dockerfile"
         awk '

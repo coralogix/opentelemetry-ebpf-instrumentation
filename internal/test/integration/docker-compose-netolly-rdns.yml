@@ -1,0 +1,9 @@
+version: "3.8"
+
+services:
+  curler:
+    image: alpine/curl@sha256:e62df00da54d9b51ae83ecdf4ad84a4fc4bca3a91189f1d6eae84d5f46d3a9cc
+    command:
+      - sh
+      - -c
+      - "while true; do curl -s https://github.com/; sleep 5; done"

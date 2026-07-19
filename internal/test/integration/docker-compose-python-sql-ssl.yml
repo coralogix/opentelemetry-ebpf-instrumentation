@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  sqlserver:
+    build:
+      context: ../../../internal/test/integration/components/postgresql/
+      dockerfile: Dockerfile
+    image: postgres
+    command: -c ssl=on -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    environment:
+      POSTGRES_PASSWORD: "postgres" # Supplied so we can load the test schema
+    ports:
+      - "5432:5432"
+
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythonsql/
+      dockerfile: Dockerfile_ssl
+    image: hatest-testserver-python-sql
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      sqlserver:
+        condition: service_started

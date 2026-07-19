@@ -108,25 +108,23 @@ func testNestedHTTP2Traces(t *testing.T, url string) {
 }
 
 func TestHTTP2Go(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML: obiConfigHttp2,
+	vPrometheus := docker.NewServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			ConfigYAML: obiConfigHTTP2,
 			Pid:        "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-http2:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testclient": "service_started"},
+			Env:        map[string]string{"OTEL_EBPF_OPEN_PORT": ""},
+			RunDir:     "run-http2",
+			DependsOn:  map[string]string{"testclient": "service_started"},
 		}),
-	}))
+		"prometheus": vPrometheus,
+	}), "docker-compose-http2.yml")
 	testHTTP2GO(t, compose, false)
 }
 
 func testHTTP2GO(t *testing.T, compose *docker.Compose, useHTTPProtocols bool) {
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	if useHTTPProtocols {
 		compose.Env = append(compose.Env, `TEST_HTTP2_PROTOCOLS=1`)
 	}
@@ -155,18 +153,17 @@ func testHTTP2GO(t *testing.T, compose *docker.Compose, useHTTPProtocols bool) {
 }
 
 func TestHTTP2GoWithHTTPProtocols(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML: obiConfigHttp2,
+	vPrometheus := docker.NewServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			ConfigYAML: obiConfigHTTP2,
 			Pid:        "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-http2:/var/run/obi",
-			},
-			DependsOn: map[string]string{"testclient": "service_started"},
+			Env:        map[string]string{"OTEL_EBPF_OPEN_PORT": ""},
+			RunDir:     "run-http2",
+			DependsOn:  map[string]string{"testclient": "service_started"},
 		}),
-	}))
+		"prometheus": vPrometheus,
+	}), "docker-compose-http2.yml")
 	testHTTP2GO(t, compose, true)
 }

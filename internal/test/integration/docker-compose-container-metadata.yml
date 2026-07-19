@@ -1,0 +1,11 @@
+services:
+  testserver-as-in-compose:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile
+    image: hatest-testserver
+    ports:
+      - "8080:8080"
+    environment:
+      LOG_LEVEL: DEBUG
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=1.0.0"

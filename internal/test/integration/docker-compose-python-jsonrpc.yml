@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythonjsonrpc/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-jsonrpc
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started

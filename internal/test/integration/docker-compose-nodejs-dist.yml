@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  testserver_b:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsdist/Dockerfile_b
+    image: hatest-testserver-nodejs-b
+    ports:
+      - 5002:5001
+    environment:
+      OTEL_SERVICE_NAME: "service-b"
+    depends_on:
+      otelcol:
+        condition: service_started
+
+  testserver_r:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsdist/Dockerfile_r
+    image: hatest-testserver-nodejs-r
+    ports:
+      - 5007:5006
+    environment:
+      OTEL_SERVICE_NAME: "service-r"
+    depends_on:
+      otelcol:
+        condition: service_started

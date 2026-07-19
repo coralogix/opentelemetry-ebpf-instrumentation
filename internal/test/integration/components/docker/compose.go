@@ -50,10 +50,7 @@ type Compose struct {
 
 func defaultEnv() []string {
 	env := os.Environ()
-	env = append(env, "OTEL_EBPF_EXECUTABLE_PATH=testserver")
-	env = append(env, "JAVA_EXECUTABLE_PATH=greeting")
-	// suite appends may repeat these keys: compose takes the last occurrence
-	env = append(env, "OTEL_EBPF_OPEN_PORT=8080")
+	// suite appends may repeat this key: compose takes the last occurrence
 	env = append(env, "TEST_SERVICE_PORTS=8381:8080")
 	return env
 }
@@ -91,9 +88,16 @@ type ServiceDef struct {
 	// RunDir mounts the standard obi volume set with this per-suite
 	// /var/run/obi directory under testoutput; ignored when Volumes is set
 	RunDir string
+	// ExtraVolumes are appended to the RunDir standard set
+	ExtraVolumes []string
 	// ConfigYAML is written under testoutput and wired as OTEL_EBPF_CONFIG_PATH
 	// through the /coverage mount, so suites carry their OBI config inline
-	ConfigYAML      string
+	ConfigYAML string
+	// CPMatrix passes the CI context-propagation matrix toggles through
+	CPMatrix bool
+	// NoDefaultEnv skips the shared obiEnv defaults: the suite's Env is the
+	// complete obi environment
+	NoDefaultEnv    bool
 	Image           string
 	BuildContext    string
 	BuildDockerfile string
@@ -133,20 +137,35 @@ type Stack struct {
 // OBI is the obi service definition; other services use the same shape
 type OBI = ServiceDef
 
-// stdOBIEnv is the obi environment shared by most suites; StdOBI merges
+// obiEnv is the obi environment shared by most suites; NewOBI merges
 // per-suite overrides on top of it
-var stdOBIEnv = map[string]string{
+var obiEnv = map[string]string{
 	"GOCOVERDIR":                          "/coverage",
-	"OTEL_EBPF_TRACE_PRINTER":             "text",
+	"OTEL_EBPF_TRACE_PRINTER":             "json",
 	"OTEL_EBPF_METRICS_INTERVAL":          "1s",
 	"OTEL_EBPF_BPF_BATCH_TIMEOUT":         "10ms",
 	"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT": "1ms",
 	"OTEL_EBPF_LOG_LEVEL":                 "DEBUG",
+	"OTEL_EBPF_LOG_FORMAT":                "json",
 	"OTEL_EBPF_BPF_DEBUG":                 "TRUE",
 	"OTEL_EBPF_HOSTNAME":                  "obi",
 	"OTEL_EBPF_SERVICE_NAMESPACE":         "integration-test",
 	"OTEL_EBPF_DISCOVERY_POLL_INTERVAL":   "500ms",
-	"OTEL_EBPF_OPEN_PORT":                 "${OTEL_EBPF_OPEN_PORT}",
+	"OTEL_EBPF_PROCESSES_INTERVAL":        "100ms",
+	"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":  "5s",
+	// keep unresolved peer addresses raw: no suite asserts renamed hosts
+	"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS": "",
+	// service.version passthrough, asserted by the exemplar tests and
+	// harmless elsewhere
+	"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+	"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+}
+
+// cpMatrixEnv passes the CI context-propagation matrix toggles through to obi
+var cpMatrixEnv = map[string]string{
+	"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":   "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
+	"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":  "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
+	"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
 }
 
 // Bool returns a pointer for optional boolean fields like Privileged
@@ -154,8 +173,8 @@ func Bool(b bool) *bool { return &b }
 
 // logPathFor derives the suite log path from the test name:
 // TestSuite_PythonPostgres -> testoutput/test-suite-python-postgres.log
-func logPathFor(t testing.TB) string {
-	name := strings.TrimPrefix(t.Name(), "Test")
+func logPathFor(tb testing.TB) string {
+	name := strings.TrimPrefix(tb.Name(), "Test")
 	var sb strings.Builder
 	for i, r := range name {
 		if r == '_' || r == '/' {
@@ -164,7 +183,7 @@ func logPathFor(t testing.TB) string {
 		}
 		if i > 0 && r >= 'A' && r <= 'Z' {
 			prev := name[i-1]
-			if prev != '_' && prev != '/' && !(prev >= 'A' && prev <= 'Z') {
+			if prev != '_' && prev != '/' && (prev < 'A' || prev > 'Z') {
 				sb.WriteByte('-')
 			}
 		}
@@ -176,9 +195,9 @@ func logPathFor(t testing.TB) string {
 
 // TestserverOBI is the obi definition for the most common suite shape: obi
 // sharing the test server's network and pid namespaces, with the standard
-// volume set. env carries only suite-specific settings; StdOBI fills the rest
+// volume set. env carries only suite-specific settings; NewOBI fills the rest
 func TestserverOBI(runDir string, env map[string]string) *OBI {
-	return StdOBI(OBI{
+	return NewOBI(OBI{
 		NetworkMode: "service:testserver",
 		Pid:         "service:testserver",
 		RunDir:      runDir,
@@ -187,45 +206,38 @@ func TestserverOBI(runDir string, env map[string]string) *OBI {
 	})
 }
 
-// Testserver is a ServiceDef for a test server built from an
-// internal/test/integration/components directory
-func Testserver(component, dockerfile, image string, ports ...string) *ServiceDef {
-	return &ServiceDef{
-		BuildContext:    "../../../internal/test/integration/components/" + component + "/",
-		BuildDockerfile: dockerfile,
-		Image:           image,
-		Ports:           ports,
-		DependsOn:       map[string]string{"otelcol": "service_started"},
-	}
-}
-
 // SuiteStack is ComposeStack with the log file derived from the test name
-func SuiteStack(t testing.TB, obi *OBI, composeFiles ...string) *Compose {
-	t.Helper()
-	c, err := ComposeStack(logPathFor(t), obi, composeFiles...)
+func SuiteStack(tb testing.TB, obi *OBI, composeFiles ...string) *Compose {
+	tb.Helper()
+	c, err := ComposeStack(logPathFor(tb), obi, composeFiles...)
 	if err != nil {
-		t.Fatalf("creating compose stack: %v", err)
+		tb.Fatalf("creating compose stack: %v", err)
 	}
 	return c
 }
 
 // SuiteStackServices is ComposeStackServices with the log file derived from
 // the test name
-func SuiteStackServices(t testing.TB, stack Stack, composeFiles ...string) *Compose {
-	t.Helper()
-	c, err := ComposeStackServices(logPathFor(t), stack, composeFiles...)
+func SuiteStackServices(tb testing.TB, stack Stack, composeFiles ...string) *Compose {
+	tb.Helper()
+	c, err := ComposeStackServices(logPathFor(tb), stack, composeFiles...)
 	if err != nil {
-		t.Fatalf("creating compose stack: %v", err)
+		tb.Fatalf("creating compose stack: %v", err)
 	}
 	return c
 }
 
-// StdOBI returns o with the standard obi environment filled in; keys present
-// in o.Env win over the defaults
-func StdOBI(o OBI) *OBI {
-	env := maps.Clone(stdOBIEnv)
-	maps.Copy(env, o.Env)
-	o.Env = env
+// NewOBI returns o with the standard obi image, privileged mode and
+// environment filled in; keys present in o.Env win over the defaults
+func NewOBI(o OBI) *OBI {
+	if !o.NoDefaultEnv {
+		env := maps.Clone(obiEnv)
+		if o.CPMatrix {
+			maps.Copy(env, cpMatrixEnv)
+		}
+		maps.Copy(env, o.Env)
+		o.Env = env
+	}
 	if o.BuildContext == "" && o.Image == "" {
 		o.BuildContext = "../../.."
 		o.BuildDockerfile = "./internal/test/integration/components/obi/Dockerfile"
@@ -237,10 +249,10 @@ func StdOBI(o OBI) *OBI {
 	return &o
 }
 
-// StdServices returns the standard infrastructure: a wired OpenTelemetry
-// collector, prometheus, jaeger and the weaver semconv validator. StdStack
+// NewServices returns the standard infrastructure: a wired OpenTelemetry
+// collector, prometheus, jaeger and the weaver semconv validator. NewStack
 // merges these under a suite's own services; set an entry to nil to omit it
-func StdServices() map[string]*ServiceDef {
+func NewServices() map[string]*ServiceDef {
 	return map[string]*ServiceDef{
 		"otelcol": {
 			Image:         "otel/opentelemetry-collector-contrib:0.156.0@sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108",
@@ -278,10 +290,12 @@ func StdServices() map[string]*ServiceDef {
 			ContainerName: "weaver",
 			User:          "0:0",
 			WorkingDir:    "/obi-registry",
-			Command: []string{"registry", "live-check", "--registry", "/obi-registry",
+			Command: []string{
+				"registry", "live-check", "--registry", "/obi-registry",
 				"--include-unreferenced", "--inactivity-timeout", "300",
 				"--admin-port", "4320", "--format", "json",
-				"--diagnostic-format", "json", "--output", "/tmp/weaver-out"},
+				"--diagnostic-format", "json", "--output", "/tmp/weaver-out",
+			},
 			Volumes: []string{"/tmp/obi-weaver-out:/tmp/weaver-out", "../../../schemas/obi:/obi-registry:ro"},
 			Ports:   []string{"4320:4320"},
 			Healthcheck: &Healthcheck{
@@ -295,23 +309,45 @@ func StdServices() map[string]*ServiceDef {
 	}
 }
 
-// StdStack merges the standard infrastructure under the given services.
+// JaegerUI is the standard jaeger with the kafka UI config mounted
+func JaegerUI() *ServiceDef {
+	v := NewServices()["jaeger"]
+	v.Command = []string{"--query.ui-config=/etc/jaeger/ui-config.json"}
+	v.Volumes = []string{"./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json"}
+	return v
+}
+
+// OtelcolNoJaeger is the standard collector without the jaeger exporter;
+// pair with a `"jaeger": nil` entry
+func OtelcolNoJaeger() *ServiceDef {
+	v := NewServices()["otelcol"]
+	v.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	return v
+}
+
+// OtelcolAfterOBI is the standard collector, additionally waiting for obi
+func OtelcolAfterOBI() *ServiceDef {
+	v := NewServices()["otelcol"]
+	v.DependsOn["obi"] = "service_started"
+	return v
+}
+
+// NewStack merges the standard infrastructure under the given services.
 // Suite entries win; a nil entry removes the service entirely
-func StdStack(services map[string]*ServiceDef) Stack {
-	merged := StdServices()
+func NewStack(services map[string]*ServiceDef) Stack {
+	merged := NewServices()
 	maps.Copy(merged, services)
 	for k, v := range merged {
 		if v == nil {
 			delete(merged, k)
 		}
 	}
-	// drop dependencies on services removed via nil entries
+	// drop dependencies on services removed via explicit nil entries; deps on
+	// services provided by overlay yml files must survive
 	for _, svc := range merged {
 		for dep := range svc.DependsOn {
-			if _, present := merged[dep]; !present && dep != "obi" && dep != "testserver" {
-				if _, wasNil := services[dep]; wasNil || services[dep] == nil {
-					delete(svc.DependsOn, dep)
-				}
+			if v, wasSet := services[dep]; wasSet && v == nil {
+				delete(svc.DependsOn, dep)
 			}
 		}
 	}
@@ -335,6 +371,9 @@ func ComposeStack(logFile string, obi *OBI, composeFiles ...string) (*Compose, e
 	}
 
 	if obi != nil {
+		if obi.Image == "" && obi.BuildContext == "" {
+			return nil, errors.New("obi service has no image: construct it with docker.NewOBI")
+		}
 		obi, err = materializeConfig(projectRoot, logFile, obi)
 		if err != nil {
 			return nil, err
@@ -369,6 +408,9 @@ func ComposeStackServices(logFile string, stack Stack, composeFiles ...string) (
 		paths = append(paths, filepath.Join(intDir, f))
 	}
 	if obi := stack.Services["obi"]; obi != nil {
+		if obi.Image == "" && obi.BuildContext == "" {
+			return nil, errors.New("obi service has no image: construct it with docker.NewOBI")
+		}
 		mat, err := materializeConfig(projectRoot, logFile, obi)
 		if err != nil {
 			return nil, err
@@ -476,10 +518,15 @@ func writeService(sb *strings.Builder, name string, obi *ServiceDef) {
 	if obi.Privileged != nil {
 		fmt.Fprintf(sb, "    privileged: %t\n", *obi.Privileged)
 	}
-	if len(obi.Entrypoint) > 0 {
-		sb.WriteString("    entrypoint:\n")
-		for _, e := range obi.Entrypoint {
-			fmt.Fprintf(sb, "      - %q\n", e)
+	// a non-nil empty Entrypoint renders as [] to clear the image entrypoint
+	if obi.Entrypoint != nil {
+		if len(obi.Entrypoint) == 0 {
+			sb.WriteString("    entrypoint: []\n")
+		} else {
+			sb.WriteString("    entrypoint:\n")
+			for _, e := range obi.Entrypoint {
+				fmt.Fprintf(sb, "      - %q\n", e)
+			}
 		}
 	}
 	if len(obi.CapAdd) > 0 {
@@ -527,51 +574,68 @@ func writeService(sb *strings.Builder, name string, obi *ServiceDef) {
 	if len(obi.Command) > 0 {
 		sb.WriteString("    command:\n")
 		for _, c := range obi.Command {
-			sb.WriteString(fmt.Sprintf("      - %q\n", c))
+			fmt.Fprintf(sb, "      - %q\n", c)
 		}
 	}
 	if obi.NetworkMode != "" {
-		sb.WriteString(fmt.Sprintf("    network_mode: %q\n", obi.NetworkMode))
+		fmt.Fprintf(sb, "    network_mode: %q\n", obi.NetworkMode)
 	}
 	if obi.Pid != "" {
-		sb.WriteString(fmt.Sprintf("    pid: %q\n", obi.Pid))
+		fmt.Fprintf(sb, "    pid: %q\n", obi.Pid)
 	}
 	if len(obi.Ports) > 0 {
 		sb.WriteString("    ports:\n")
 		for _, p := range obi.Ports {
-			sb.WriteString(fmt.Sprintf("      - %q\n", p))
+			fmt.Fprintf(sb, "      - %q\n", p)
 		}
 	}
 	vols := obi.Volumes
 	if len(vols) == 0 && obi.RunDir != "" {
 		vols = []string{
 			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
+			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX:-}:/sys/kernel/security",
 			"../../../testoutput:/coverage",
 			"../../../testoutput/" + obi.RunDir + ":/var/run/obi",
 		}
+		vols = append(vols, obi.ExtraVolumes...)
 	}
 	if len(vols) > 0 {
 		sb.WriteString("    volumes:\n")
 		for _, v := range vols {
-			sb.WriteString(fmt.Sprintf("      - %q\n", v))
+			fmt.Fprintf(sb, "      - %q\n", v)
 		}
 	}
 	if len(obi.DependsOn) > 0 {
 		sb.WriteString("    depends_on:\n")
 		for _, svc := range slices.Sorted(maps.Keys(obi.DependsOn)) {
-			sb.WriteString(fmt.Sprintf("      %s:\n        condition: %s\n", svc, obi.DependsOn[svc]))
+			fmt.Fprintf(sb, "      %s:\n        condition: %s\n", svc, obi.DependsOn[svc])
 		}
 	}
 	if len(obi.Env) > 0 {
 		sb.WriteString("    environment:\n")
 		for _, k := range slices.Sorted(maps.Keys(obi.Env)) {
-			sb.WriteString(fmt.Sprintf("      %s: %q\n", k, obi.Env[k]))
+			fmt.Fprintf(sb, "      %s: %q\n", k, obi.Env[k])
 		}
 	}
 }
 
 func (c *Compose) Up() error {
+	// OBI_RENDER_ONLY diverts Up into `compose config`, dumping the rendered
+	// stack under testoutput/render/ and failing the suite immediately
+	if os.Getenv("OBI_RENDER_ONLY") != "" {
+		dir := filepath.Join(tools.ProjectDir(), "testoutput", "render")
+		_ = os.MkdirAll(dir, 0o777)
+		base := strings.TrimSuffix(filepath.Base(c.Paths[len(c.Paths)-1]), ".yml")
+		cmd := exec.Command("docker", c.composeArgs("config")...)
+		cmd.Env = c.Env
+		out, err := cmd.CombinedOutput()
+		suffix := ""
+		if err != nil {
+			suffix = ".err"
+		}
+		_ = os.WriteFile(filepath.Join(dir, base+suffix+".render.yml"), out, 0o666)
+		return errors.New("OBI_RENDER_ONLY")
+	}
 	// When SKIP_DOCKER_BUILD is set, Docker images have been pre-built on the host
 	// and loaded into the VM's Docker daemon. Skip --build to avoid rebuilding them
 	// inside the VM (which is extremely slow under TCG/software CPU emulation).

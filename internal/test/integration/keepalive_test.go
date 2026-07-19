@@ -15,36 +15,21 @@ import (
 )
 
 func TestExistingSocketsDetection(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": &docker.OBI{
-			ConfigYAML:  obiConfigKeepalive,
-			NetworkMode: "service:keepaliveclient",
-			Pid:         "host",
-			RunDir:      "run-keepalive",
-			DependsOn:   map[string]string{"keepaliveclient": "service_healthy"},
-			Env: map[string]string{
-				"GOCOVERDIR": "/coverage",
-			},
-		},
-		"keepaliveclient": &docker.ServiceDef{
-			Image:           "hatest-keepaliveclient",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/keepaliveclient/Dockerfile",
-			Ports:           []string{"9091:9091"},
-			Healthcheck:     &docker.Healthcheck{Test: []string{"CMD", "test", "-f", "/tmp/connected"}, Interval: "1s", Retries: 15},
-			DependsOn:       map[string]string{"tpinjector-server": "service_started"},
-		},
-		"tpinjector-server": &docker.ServiceDef{
-			Image:           "hatest-tpinjector-server",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/tpinjector-server/Dockerfile",
-			Ports:           []string{"8080:8080"},
-		},
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			NoDefaultEnv: true,
+			ConfigYAML:   obiConfigKeepalive,
+			NetworkMode:  "service:keepaliveclient",
+			Pid:          "host",
+			RunDir:       "run-keepalive",
+			DependsOn:    map[string]string{"keepaliveclient": "service_healthy"},
+			Env:          map[string]string{"GOCOVERDIR": "/coverage"},
+		}),
 		"otelcol":    nil,
 		"prometheus": nil,
 		"jaeger":     nil,
 		"weaver":     nil,
-	}))
+	}), "docker-compose-keepalive.yml")
 	require.NoError(t, compose.Up())
 
 	waitForTestComponentsNoMetrics(t, "http://localhost:8080/smoke")

@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  tpclient:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/tpclient/Dockerfile
+    image: tpclient
+    ports:
+      - "6000:6000"
+      - "6001:6001"
+      - "6002:6002"
+    environment:
+      LOG_LEVEL: DEBUG
+    depends_on:
+      otelcol:
+        condition: service_started
+      jaeger:
+        condition: service_started

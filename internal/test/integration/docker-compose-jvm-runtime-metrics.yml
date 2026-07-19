@@ -1,0 +1,21 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/javatestserver/Dockerfile_jar
+    image: hatest-testserver-jvm-runtime-metrics
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    environment:
+      LOG_LEVEL: DEBUG
+    command:
+      - java
+      - -Xms128m
+      - -Xmx128m
+      - -XX:+UseSerialGC
+      - -Xlog:gc
+      - -jar
+      - /greeting-service-1.2.0.jar
+    depends_on:
+      otelcol:
+        condition: service_started

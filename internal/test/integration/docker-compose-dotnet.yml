@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/dotnetserver/Dockerfile
+    image: hatest-testserver
+    ports:
+      - 5267:5266
+      - 7034:7033
+    depends_on:
+      otelcol:
+        condition: service_started

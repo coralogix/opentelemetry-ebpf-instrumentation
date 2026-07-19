@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile
+    image: hatest-testserver
+    ports:
+      - "8085:8080"
+
+  pythonasync:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/pythonasync-uvloop/Dockerfile-3.9
+    image: hatest-pythonasync-uvloop
+    ports:
+      - "8391:8391"
+    environment:
+      LOG_LEVEL: DEBUG
+      BACKEND_URL: "http://testserver:8080"
+      UVICORN_LOOP: "uvloop"
+      OTEL_SERVICE_NAME: "pythonasync-uvloop"
+    depends_on:
+      testserver:
+        condition: service_started

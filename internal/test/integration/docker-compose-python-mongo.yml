@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  mongo:
+    build:
+      context: ../../../internal/test/integration/components/mongo/
+      dockerfile: Dockerfile
+    image: mongo
+
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythonmongo/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-mongo
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      mongo:
+        condition: service_started

@@ -25,7 +25,7 @@ services:
     pid: "host"
     environment:
       GOCOVERDIR: "/coverage"
-      OTEL_EBPF_EXECUTABLE_PATH: "${OTEL_EBPF_EXECUTABLE_PATH}"
+      OTEL_EBPF_EXECUTABLE_PATH: "testserver"
       OTEL_EBPF_METRICS_FEATURES: "application"
       OTEL_EBPF_METRICS_INTERVAL: "1s"
       OTEL_EBPF_DISCOVERY_POLL_INTERVAL: "500ms"

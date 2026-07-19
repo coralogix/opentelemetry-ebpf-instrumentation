@@ -73,3 +73,5 @@ services:
 volumes:
   kafka-volume:
   zookeeper-volume:
+# curl http://localhost:16686/api/services
+# curl http://localhost:16686/api/traces?service=testserver

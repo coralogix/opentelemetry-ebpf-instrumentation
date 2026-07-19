@@ -27,23 +27,21 @@ const (
 // 2. Uses the extracted trace ID instead of generating a new one
 // 3. Only injects Traceparent when one doesn't already exist
 func TestTraceparentExtraction(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			ConfigYAML: obiConfigTpclient,
 			Pid:        "host",
 			Ports:      []string{"8999:8999"},
 			RunDir:     "run-tpclient",
 			Env: map[string]string{
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
 				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "headers",
 				"OTEL_EBPF_BPF_HIGH_REQUEST_VOLUME":          "1",
-				"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
 				"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
 				"OTEL_EBPF_OPEN_PORT":                        "6000,6001,6002",
 			},
 		}),
-	}))
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
+	}), "docker-compose-tpclient.yml")
 	require.NoError(t, compose.Up())
 
 	// Wait for service to be ready

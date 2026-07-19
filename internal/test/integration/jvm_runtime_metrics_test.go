@@ -19,53 +19,36 @@ import (
 const jvmRuntimeMetricsHostPort = "8386"
 
 func TestJVMRuntimeMetrics(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
-	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
-	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus := docker.NewServices()["prometheus"]
 	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": &docker.OBI{
-			ConfigYAML: obiConfigJvmRuntimeMetrics,
-			Pid:        "host",
-			Ports:      []string{"${OTEL_EBPF_PROMETHEUS_HOST_PORT:-8999}:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-jvm-runtime-metrics:/var/run/obi",
-				"/sys/kernel/tracing:/sys/kernel/tracing:rw",
-			},
-			DependsOn: map[string]string{"testserver": "service_started"},
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			NoDefaultEnv: true,
+			ConfigYAML:   obiConfigJvmRuntimeMetrics,
+			Pid:          "host",
+			Ports:        []string{"${OTEL_EBPF_PROMETHEUS_HOST_PORT:-8999}:8999"},
+			RunDir:       "run-jvm-runtime-metrics",
+			ExtraVolumes: []string{"/sys/kernel/tracing:/sys/kernel/tracing:rw"},
+			DependsOn:    map[string]string{"testserver": "service_started"},
 			Env: map[string]string{
 				"GOCOVERDIR":                        "/coverage",
 				"OTEL_EBPF_BPF_DEBUG":               "TRUE",
 				"OTEL_EBPF_DISCOVERY_POLL_INTERVAL": "500ms",
-				"OTEL_EBPF_EXECUTABLE_PATH":         "java",
 				"OTEL_EBPF_HOSTNAME":                "obi",
 				"OTEL_EBPF_LOG_LEVEL":               "DEBUG",
-				"OTEL_EBPF_METRICS_INTERVAL":        "10ms",
 				"OTEL_EBPF_PROCESSES_INTERVAL":      "100ms",
+				"OTEL_EBPF_SERVICE_NAMESPACE":       "integration-test",
+				"OTEL_EBPF_EXECUTABLE_PATH":         "java",
+				"OTEL_EBPF_METRICS_INTERVAL":        "10ms",
 				"OTEL_EBPF_PROMETHEUS_PORT":         "8999",
 				"OTEL_EBPF_PROMETHEUS_TTL":          "250ms",
-				"OTEL_EBPF_SERVICE_NAMESPACE":       "integration-test",
 				"OTEL_SERVICE_NAME":                 "jvm-runtime",
 			},
-		},
-		"testserver": &docker.ServiceDef{
-			Image:           "hatest-testserver-jvm-runtime-metrics",
-			BuildContext:    "../../..",
-			BuildDockerfile: "./internal/test/integration/components/javatestserver/Dockerfile_jar",
-			Command:         []string{"java", "-Xms128m", "-Xmx128m", "-XX:+UseSerialGC", "-Xlog:gc", "-jar", "/greeting-service-1.2.0.jar"},
-			Ports:           []string{"${TEST_SERVICE_PORTS}"},
-			DependsOn:       map[string]string{"otelcol": "service_started"},
-			Env: map[string]string{
-				"LOG_LEVEL": "DEBUG",
-			},
-		},
-		"otelcol":    vOtelcol,
+		}),
+		"otelcol":    docker.OtelcolNoJaeger(),
 		"prometheus": vPrometheus,
 		"jaeger":     nil,
-	}))
+	}), "docker-compose-jvm-runtime-metrics.yml")
 	compose.Env = append(compose.Env, `TEST_SERVICE_PORTS=`+jvmRuntimeMetricsHostPort+`:8085`)
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() {

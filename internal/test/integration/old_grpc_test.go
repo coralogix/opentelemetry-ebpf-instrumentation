@@ -124,53 +124,22 @@ func testGRPCGoClientFailsToConnect(t *testing.T) {
 }
 
 func TestSuiteOtherGRPCGo(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
-	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			ConfigYAML: obiConfigOtherGrpc,
 			Pid:        "host",
 			Ports:      []string{"8999:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-other-grpc:/var/run/obi",
-			},
+			RunDir:     "run-other-grpc",
 			Env: map[string]string{
-				"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
 				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_OPEN_PORT":                        "",
 				"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
-				"OTEL_EBPF_PROMETHEUS_FEATURES":              "application,application_span",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":              featuresPromSpan,
 			},
 		}),
-		"backend": &docker.ServiceDef{
-			Image:           "hatest-backend",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/old_grpc/backend/Dockerfile",
-			Ports:           []string{"8080:8080"},
-			Env: map[string]string{
-				"WORKERS": "worker:5000",
-			},
-		},
-		"grpcpinger": &docker.ServiceDef{
-			Image:           "hatest-grpcpinger",
-			BuildContext:    "../../../",
-			BuildDockerfile: "internal/test/integration/components/grpcpinger/Dockerfile",
-			Env: map[string]string{
-				"TARGET_URL": "localhost:12345",
-			},
-		},
-		"worker": &docker.ServiceDef{
-			Image:           "hatest-worker",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/old_grpc/worker/Dockerfile",
-			Ports:           []string{"5000:5000"},
-		},
-		"otelcol": vOtelcol,
-	}))
+		"otelcol": docker.OtelcolAfterOBI(),
+	}), "docker-compose-other-grpc.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `PROM_CONFIG_SUFFIX=`)
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {

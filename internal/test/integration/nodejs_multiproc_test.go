@@ -106,26 +106,24 @@ func testNestedTraces(t *testing.T) {
 }
 
 func TestNodeJSMultiProc(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			Pid:     "host",
-			Command: []string{"--config=/configs/${OBI_CONFIG}"},
-			Ports:   []string{"8999:8999"},
-			RunDir:  "run-multi",
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			CPMatrix: true,
+			Pid:      "host",
+			Command:  []string{"--config=/configs/${OBI_CONFIG}"},
+			Ports:    []string{"8999:8999"},
+			RunDir:   "run-multi",
 			Env: map[string]string{
-				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION}",
-				"OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP":         "${OTEL_EBPF_BPF_DISABLE_BLACK_BOX_CP}",
-				"OTEL_EBPF_BPF_HIGH_REQUEST_VOLUME":          "1",
-				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "${OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS}",
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
 				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_BPF_HIGH_REQUEST_VOLUME":          "1",
 				"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
 				"OTEL_EBPF_OPEN_PORT":                        "5000,5002,5003",
 			},
 		}),
-	}))
+	}), "docker-compose-nodemultiproc.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `OBI_CONFIG=obi-config-nodemultiproc.yml`)
+	compose.Env = append(compose.Env, `OBI_CONFIG=obi-config-nodemultiproc.yml`)
 	require.NoError(t, compose.Up())
 
 	t.Run("Nested traces", testNestedTraces)

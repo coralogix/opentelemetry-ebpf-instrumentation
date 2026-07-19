@@ -12,8 +12,9 @@ import (
 )
 
 func TestJVMRuntimeEventsLive(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": &docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			NoDefaultEnv:    true,
 			Image:           "hatest-jvm-runtime-event-test",
 			BuildContext:    "../../..",
 			BuildDockerfile: "./internal/test/integration/components/jvm-runtime-event-test/Dockerfile",
@@ -28,7 +29,7 @@ func TestJVMRuntimeEventsLive(t *testing.T) {
 				"GOCACHE":    "/tmp/go-build-cache",
 				"GOMODCACHE": "/tmp/go-mod-cache",
 			},
-		},
+		}),
 		"otelcol":    nil,
 		"prometheus": nil,
 		"jaeger":     nil,

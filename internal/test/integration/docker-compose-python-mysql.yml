@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  sqlserver:
+    build:
+      context: ../../../internal/test/integration/components/mysqldb
+      dockerfile: Dockerfile
+    image: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "p_ssW0rd"
+      MYSQL_PASSWORD: "p_ssW0rd"
+      MYSQL_DATABASE: "sakila"
+    ports:
+      - "3306:3306"
+
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythonsql/
+      dockerfile: Dockerfile_mysql
+    image: hatest-testserver-python-sql
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      sqlserver:
+        condition: service_started

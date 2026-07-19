@@ -45,22 +45,16 @@ var expectedRelayServices = []string{
 // by sending a known traceparent to the first Go hop and verifying it arrives
 // at the last hop with the same trace ID.
 func TestSuite_GRPCRelay(t *testing.T) {
-	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger := docker.NewServices()["jaeger"]
 	vJaeger.Ports = []string{"16686:16686", "4317:4317", "4318:4318"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
-			ConfigYAML: obiConfigGrpcRelay,
-			Cgroup:     "host",
-			Pid:        "host",
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"/sys/fs/bpf:/sys/fs/bpf",
-				"/sys/fs/cgroup:/sys/fs/cgroup",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-grpc-relay:/var/run/obi",
-			},
-			DependsOn: map[string]string{"go-entry": "service_started"},
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
+			ConfigYAML:   obiConfigGrpcRelay,
+			Cgroup:       "host",
+			Pid:          "host",
+			RunDir:       "run-grpc-relay",
+			ExtraVolumes: []string{"/sys/fs/bpf:/sys/fs/bpf", "/sys/fs/cgroup:/sys/fs/cgroup"},
+			DependsOn:    map[string]string{"go-entry": "service_started"},
 			Env: map[string]string{
 				"OTEL_EBPF_BPF_BATCH_TIMEOUT":         "${OTEL_EBPF_BPF_BATCH_TIMEOUT:-250ms}",
 				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":   "${OTEL_EBPF_BPF_CONTEXT_PROPAGATION:-all}",
@@ -71,106 +65,11 @@ func TestSuite_GRPCRelay(t *testing.T) {
 				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT": "${OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT:-200ms}",
 			},
 		}),
-		"dotnet-relay": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-dotnet",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/dotnet/Dockerfile",
-			Ports:           []string{"8095:8095"},
-			DependsOn:       map[string]string{"go-terminal": "service_started"},
-			Env: map[string]string{
-				"GRPC_PORT":   "50056",
-				"HEALTH_PORT": "8095",
-				"NEXT_HOP":    "go-terminal:50054",
-			},
-		},
-		"go-entry": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-go-entry",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/go/Dockerfile",
-			Ports:           []string{"8080:8080"},
-			DependsOn:       map[string]string{"python-relay": "service_started"},
-			Env: map[string]string{
-				"HTTP_PORT":          "8080",
-				"NEXT_HOP":           "python-relay:50051",
-				"NEXT_HOP_MULTIPLEX": "go-grpc-to-http:50060",
-			},
-		},
-		"go-grpc-to-http": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-go-grpc-to-http",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/go/Dockerfile",
-			Ports:           []string{"8091:8091"},
-			DependsOn:       map[string]string{"go-http-to-grpc": "service_started"},
-			Env: map[string]string{
-				"GRPC_PORT":     "50060",
-				"HEALTH_PORT":   "8091",
-				"NEXT_HOP_HTTP": "http://go-http-to-grpc:8081/relay",
-			},
-		},
-		"go-http-to-grpc": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-go-http-to-grpc",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/go/Dockerfile",
-			Ports:           []string{"8081:8081"},
-			DependsOn:       map[string]string{"nodejs-relay": "service_started"},
-			Env: map[string]string{
-				"HTTP_PORT": "8081",
-				"NEXT_HOP":  "nodejs-relay:50053",
-			},
-		},
-		"go-terminal": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-go-terminal",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/go/Dockerfile",
-			Ports:           []string{"8094:8094"},
-			DependsOn:       map[string]string{"jaeger": "service_started"},
-			Env: map[string]string{
-				"GRPC_PORT":   "50054",
-				"HEALTH_PORT": "8094",
-			},
-		},
-		"java-relay": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-java",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/java/Dockerfile",
-			Ports:           []string{"8093:8093"},
-			DependsOn:       map[string]string{"dotnet-relay": "service_started"},
-			Env: map[string]string{
-				"GRPC_PORT":   "50055",
-				"HEALTH_PORT": "8093",
-				"NEXT_HOP":    "dotnet-relay:50056",
-			},
-		},
-		"nodejs-relay": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-nodejs",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/nodejs/Dockerfile",
-			Ports:           []string{"8092:8092"},
-			DependsOn:       map[string]string{"java-relay": "service_started"},
-			Env: map[string]string{
-				"GRPC_DNS_RESOLVER": "native",
-				"GRPC_PORT":         "50053",
-				"HEALTH_PORT":       "8092",
-				"NEXT_HOP":          "java-relay:50055",
-			},
-		},
-		"python-relay": &docker.ServiceDef{
-			Image:           "hatest-grpc-relay-python",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/grpc_relay/python/Dockerfile",
-			Ports:           []string{"8090:8090"},
-			DependsOn:       map[string]string{"go-grpc-to-http": "service_started"},
-			Env: map[string]string{
-				"GRPC_PORT":   "50051",
-				"HEALTH_PORT": "8090",
-				"NEXT_HOP":    "go-grpc-to-http:50060",
-			},
-		},
 		"jaeger":     vJaeger,
 		"otelcol":    nil,
 		"prometheus": nil,
 		"weaver":     nil,
-	}))
+	}), "docker-compose-grpc-relay.yml")
 	if !KernelLockdownMode() {
 		compose.Env = append(compose.Env, `SECURITY_CONFIG_SUFFIX=_none`)
 	}

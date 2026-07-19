@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/testserver/Dockerfile${TESTSERVER_DOCKERFILE_SUFFIX}
+    image: hatest-testserver
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      - "8087:8087"
+      - "50051:50051"
+    environment:
+      LOG_LEVEL: DEBUG

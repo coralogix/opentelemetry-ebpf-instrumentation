@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  httpproxyserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/http_proxy_server/Dockerfile
+    image: hatest-httpproxyserver
+    ports:
+      - "3035:3030"
+    environment:
+      OTEL_SERVICE_NAME: "httpproxyserver"
+    depends_on:
+      otelcol:
+        condition: service_started

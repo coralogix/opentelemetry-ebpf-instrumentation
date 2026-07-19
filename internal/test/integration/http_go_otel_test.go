@@ -317,48 +317,30 @@ func TestHTTPGoOTelDisabledOptInstrumentedApp(t *testing.T) {
 }
 
 func TestHTTPGoOTelInstrumentedAppGRPC(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol := docker.NewServices()["otelcol"]
 	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config.yml"}
 	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started"}
-	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus := docker.NewServices()["prometheus"]
 	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			ConfigYAML: obiConfigGoOtelGrpc,
 			Pid:        "service:testserver",
 			Ports:      []string{"8999:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-otel-grpc:/var/run/obi",
-			},
+			RunDir:     "run-otel-grpc",
 			Env: map[string]string{
+				"OTEL_EBPF_OPEN_PORT":                          "8080",
 				"OTEL_EBPF_EXCLUDE_OTEL_INSTRUMENTED_SERVICES": "${OTEL_EBPF_EXCLUDE_OTEL_INSTRUMENTED_SERVICES}",
-				"OTEL_EBPF_EXECUTABLE_PATH":                    "${OTEL_EBPF_EXECUTABLE_PATH}",
 				"OTEL_EBPF_METRICS_FEATURES":                   featuresAppSpan,
 				"OTEL_EBPF_METRICS_INTERVAL":                   "10ms",
-				"OTEL_EBPF_PROCESSES_INTERVAL":                 "100ms",
-				"OTEL_EBPF_PROMETHEUS_FEATURES":                "application,application_span",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                featuresPromSpan,
 			},
 		}),
-		"testserver": &docker.ServiceDef{
-			Image:           "hatest-testserver",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/go_otel_grpc/Dockerfile",
-			Ports:           []string{"8080:8080"},
-			Env: map[string]string{
-				"LOG_LEVEL":                           "DEBUG",
-				"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "${APP_OTEL_METRICS_ENDPOINT}",
-				"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT":  "${APP_OTEL_TRACES_ENDPOINT}",
-			},
-		},
 		"otelcol":    vOtelcol,
 		"prometheus": vPrometheus,
 		"weaver":     nil,
-	}))
+	}), "docker-compose-go-otel-grpc.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=8080`)
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {
@@ -398,37 +380,31 @@ func otelWaitForTestComponentsTraces(t *testing.T, url, subpath string) {
 }
 
 func TestHTTPGoOTelAvoidsInstrumentedAppGRPC(t *testing.T) {
-	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol := docker.NewServices()["otelcol"]
 	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config.yml"}
 	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started"}
-	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus := docker.NewServices()["prometheus"]
 	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			ConfigYAML: obiConfigGoOtelGrpc,
 			Pid:        "service:testserver",
 			Ports:      []string{"8999:8999"},
-			Volumes: []string{
-				"./configs/:/configs",
-				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-				"../../../testoutput:/coverage",
-				"../../../testoutput/run-otel-grpc:/var/run/obi",
-			},
+			RunDir:     "run-otel-grpc",
 			Env: map[string]string{
+				"OTEL_EBPF_OPEN_PORT":                          "8080",
 				"OTEL_EBPF_EXCLUDE_OTEL_INSTRUMENTED_SERVICES": "${OTEL_EBPF_EXCLUDE_OTEL_INSTRUMENTED_SERVICES}",
-				"OTEL_EBPF_EXECUTABLE_PATH":                    "${OTEL_EBPF_EXECUTABLE_PATH}",
 				"OTEL_EBPF_METRICS_FEATURES":                   featuresAppSpan,
 				"OTEL_EBPF_METRICS_INTERVAL":                   "10ms",
-				"OTEL_EBPF_PROCESSES_INTERVAL":                 "100ms",
-				"OTEL_EBPF_PROMETHEUS_FEATURES":                "application,application_span",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                featuresPromSpan,
 			},
 		}),
 		"otelcol":    vOtelcol,
 		"prometheus": vPrometheus,
 		"weaver":     nil,
-	}), "compose-suite-go-otel-grpc.yml")
+	}), "docker-compose-go-otel-grpc.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=8080`, `APP_OTEL_METRICS_ENDPOINT=http://otelcol:4317`, `APP_OTEL_TRACES_ENDPOINT=http://jaeger:4317`)
+	compose.Env = append(compose.Env, `APP_OTEL_METRICS_ENDPOINT=http://otelcol:4317`, `APP_OTEL_TRACES_ENDPOINT=http://jaeger:4317`)
 	lockdown := KernelLockdownMode()
 
 	if !lockdown {

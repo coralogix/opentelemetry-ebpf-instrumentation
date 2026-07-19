@@ -13,10 +13,14 @@ import (
 
 // Standard OTEL_EBPF_*_FEATURES combinations used across suites
 const (
-	featuresApp     = "application"
-	featuresAppSpan = "application,application_span_otel"
-	featuresFull    = "application,application_span_otel,application_service_graph,ebpf,application_host"
-	featuresProcess = "application,application_span_otel,application_process,application_service_graph"
+	featuresApp           = "application"
+	featuresAppSpan       = "application,application_span_otel"
+	featuresSpanGraph     = "application,application_span_otel,application_service_graph"
+	featuresPromSpan      = "application,application_span"
+	featuresPromSpanGraph = "application,application_span,application_service_graph"
+	featuresProcessFull   = "application,application_span_otel,application_process,application_service_graph,ebpf,application_host"
+	featuresFull          = "application,application_span_otel,application_service_graph,ebpf,application_host"
+	featuresProcess       = "application,application_span_otel,application_process,application_service_graph"
 )
 
 // subtest pairs a t.Run name with its function

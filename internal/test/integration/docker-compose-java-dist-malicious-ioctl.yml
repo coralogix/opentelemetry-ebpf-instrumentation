@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/java_tls/netty_tls/Dockerfile
+    image: hatest-java-dist-netty-tls-malicious
+    ports:
+      - "8081:8080"
+    environment:
+      LOG_LEVEL: DEBUG
+      OTEL_SERVICE_NAME: testserver

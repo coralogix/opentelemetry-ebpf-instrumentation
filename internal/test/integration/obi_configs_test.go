@@ -75,7 +75,7 @@ attributes:
     "*":
       include: ["*"]`
 
-const obiConfigGrpcHttp2Mux = `routes:
+const obiConfigGrpcHTTP2Mux = `routes:
   unmatched: path
 prometheus_export:
   port: 8999
@@ -119,7 +119,7 @@ discovery:
       open_ports: 50054
 `
 
-const obiConfigHttp2 = `routes:
+const obiConfigHTTP2 = `routes:
   unmatched: path
 prometheus_export:
   port: 8999

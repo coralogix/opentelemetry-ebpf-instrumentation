@@ -1,0 +1,75 @@
+version: "3.8"
+
+services:
+  couchbase:
+    image: couchbase:community-7.6.1@sha256:d7c02936ce46d83b765ea4a89250abff12dc6640ae9abb11eebbc581180e4b53
+    ports:
+      - "8091:8091"
+      - "8093:8093"
+      - "11210:11210"
+    ulimits:
+      nofile:
+        soft: 200000
+        hard: 200000
+    environment:
+      - COUCHBASE_ADMINISTRATOR_USERNAME=Administrator
+      - COUCHBASE_ADMINISTRATOR_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-u", "Administrator:password", "http://localhost:8091/pools"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  couchbase-init:
+    image: couchbase:community-7.6.1@sha256:d7c02936ce46d83b765ea4a89250abff12dc6640ae9abb11eebbc581180e4b53
+    depends_on:
+      couchbase:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        echo 'Waiting for Couchbase to be ready...'
+        sleep 5
+        echo 'Initializing cluster...'
+        couchbase-cli cluster-init -c couchbase:8091 \
+          --cluster-username Administrator \
+          --cluster-password password \
+          --cluster-ramsize 512 \
+          --cluster-index-ramsize 256 \
+          --services data,index,query
+        echo 'Creating bucket...'
+        couchbase-cli bucket-create -c couchbase:8091 \
+          -u Administrator -p password \
+          --bucket test-bucket \
+          --bucket-type couchbase \
+          --bucket-ramsize 256
+        echo 'Creating scope and collection...'
+        couchbase-cli collection-manage -c couchbase:8091 \
+          -u Administrator -p password \
+          --bucket test-bucket \
+          --create-scope test-scope
+        couchbase-cli collection-manage -c couchbase:8091 \
+          -u Administrator -p password \
+          --bucket test-bucket \
+          --create-collection test-scope.test-collection
+        echo 'Waiting for query service to be ready...'
+        until curl -s -u Administrator:password http://couchbase:8093/admin/ping > /dev/null 2>&1; do
+          echo 'Query service not ready, waiting...'
+          sleep 2
+        done
+        echo 'Couchbase initialization complete'
+
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/pythoncouchbase/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-couchbase
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      couchbase-init:
+        condition: service_completed_successfully

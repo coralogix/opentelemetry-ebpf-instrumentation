@@ -375,7 +375,7 @@ func testREDMetricsForHTTPLibrary(t *testing.T, url, svcName, svcNs string) {
 				`service_namespace="` + svcNs + `",` +
 				`http_route="/echo",` +
 				`service_name="` + svcName + `"}`)
-			requirePromCallCount(ct, err, results, 3)
+			requirePromCallCount(ct, err, results)
 		}, testTimeout, 100*time.Millisecond)
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -407,7 +407,7 @@ func testREDMetricsForHTTPLibrary(t *testing.T, url, svcName, svcNs string) {
 				`service_namespace="` + svcNs + `",` +
 				`http_route="/echoBack",` +
 				`service_name="` + svcName + `"}`)
-			requirePromCallCount(ct, err, results, 3)
+			requirePromCallCount(ct, err, results)
 		}, testTimeout, 100*time.Millisecond)
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -438,7 +438,7 @@ func testREDMetricsForHTTPLibrary(t *testing.T, url, svcName, svcNs string) {
 				`http_response_status_code="203",` +
 				`service_namespace="` + svcNs + `",` +
 				`service_name="` + svcName + `"}`)
-			requirePromCallCount(ct, err, results, 3)
+			requirePromCallCount(ct, err, results)
 		}, testTimeout, 100*time.Millisecond)
 
 		require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -649,7 +649,7 @@ func testREDMetricsForHTTPLibraryNoRoute(t *testing.T, url, svcName string) {
 			`service_namespace="integration-test",` +
 			`http_route="/echo",` +
 			`service_name="` + svcName + `"}`)
-		requirePromCallCount(ct, err, results, 3)
+		requirePromCallCount(ct, err, results)
 	}, testTimeout, 100*time.Millisecond)
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -681,7 +681,7 @@ func testREDMetricsForHTTPLibraryNoRoute(t *testing.T, url, svcName string) {
 			`service_namespace="integration-test",` +
 			`http_route="/echoBack",` +
 			`service_name="` + svcName + `"}`)
-		requirePromCallCount(ct, err, results, 3)
+		requirePromCallCount(ct, err, results)
 	}, testTimeout, 100*time.Millisecond)
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -712,7 +712,7 @@ func testREDMetricsForHTTPLibraryNoRoute(t *testing.T, url, svcName string) {
 			`http_response_status_code="203",` +
 			`service_namespace="integration-test",` +
 			`service_name="` + svcName + `"}`)
-		requirePromCallCount(ct, err, results, 3)
+		requirePromCallCount(ct, err, results)
 	}, testTimeout, 100*time.Millisecond)
 
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
@@ -957,11 +957,11 @@ func testREDMetricsHTTPAutoRoutes(t *testing.T) {
 	}
 }
 
-// requirePromCallCount asserts the query succeeded and its summed count is
-// at least minCalls
-func requirePromCallCount(ct *assert.CollectT, err error, results []promtest.Result, minCalls int) {
+// requirePromCallCount asserts the query succeeded and its summed count
+// covers the three standard test calls
+func requirePromCallCount(ct *assert.CollectT, err error, results []promtest.Result) {
 	require.NoError(ct, err)
 	enoughPromResults(ct, results)
 	val := totalPromCount(ct, results)
-	assert.LessOrEqual(ct, minCalls, val)
+	assert.LessOrEqual(ct, 3, val)
 }

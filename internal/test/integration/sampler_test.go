@@ -76,21 +76,22 @@ func testSampler(t *testing.T) {
 }
 
 func TestSampler(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
-		"obi": docker.StdOBI(docker.OBI{
+	compose := docker.SuiteStackServices(t, docker.NewStack(map[string]*docker.ServiceDef{
+		"obi": docker.NewOBI(docker.OBI{
 			Pid:     "host",
 			Command: []string{"--config=/configs/${OBI_CONFIG}"},
 			Ports:   []string{"8999:8999"},
 			RunDir:  "run-multi",
 			Env: map[string]string{
-				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
 				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_OPEN_PORT":                        "",
 				"OTEL_EBPF_METRICS_FEATURES":                 featuresAppSpan,
 			},
 		}),
-	}))
+	}), "docker-compose-sampler.yml")
 	// we are going to setup discovery directly in the configuration file
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `OBI_CONFIG=obi-config-sampler.yml`)
+	compose.Env = append(compose.Env, `OBI_CONFIG=obi-config-sampler.yml`)
 	require.NoError(t, compose.Up())
 
 	t.Run("Sampler", testSampler)

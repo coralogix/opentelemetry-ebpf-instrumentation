@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: internal/test/integration/components/nodejsserver/Dockerfile
+    image: hatest-testserver-node
+    command:
+      - node
+      - ${NODE_APP}.js
+    ports:
+      - 3031:3030
+      - 3034:3033
+    depends_on:
+      otelcol:
+        condition: service_started

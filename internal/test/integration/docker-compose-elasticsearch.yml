@@ -1,0 +1,50 @@
+services:
+  elasticsearchserver:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.0@sha256:754c3d8ca6f74acba58eb0610b8479a13c36df09ac1a4e0f2667dc167d377b84 
+    container_name: elasticsearch-server
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'   
+          memory: 2G  
+        reservations:
+          cpus: '0.25' 
+          memory: 1G   
+  
+  opensearchserver:
+    image: opensearchproject/opensearch:3.7.0@sha256:123e6591a47b1d54686890551bdb35739c85193ecded381219fc9e059e18128f
+    container_name: opensearch-server
+    ports:
+      - "9201:9200"
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'   
+          memory: 2G  
+        reservations:
+          cpus: '0.25' 
+          memory: 1G   
+  
+  testserver:
+    build:
+      context: ../../../internal/test/integration/components/elasticsearch/
+      dockerfile: Dockerfile
+    image: hatest-testserver-python-elasticsearch
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    depends_on:
+      otelcol:
+        condition: service_started
+      elasticsearchserver:
+        condition: service_started
+      opensearchserver:
+        condition: service_started
