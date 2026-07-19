@@ -108,17 +108,19 @@ func testNestedHTTP2Traces(t *testing.T, url string) {
 }
 
 func TestHTTP2Go(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML: obiConfigHttp2,
-		Pid:        "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-http2:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testclient": "service_started"},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-http2.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigHttp2,
+			Pid:        "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-http2:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testclient": "service_started"},
+		}),
+	}))
 	testHTTP2GO(t, compose, false)
 }
 
@@ -153,16 +155,18 @@ func testHTTP2GO(t *testing.T, compose *docker.Compose, useHTTPProtocols bool) {
 }
 
 func TestHTTP2GoWithHTTPProtocols(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML: obiConfigHttp2,
-		Pid:        "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-http2:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testclient": "service_started"},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-http2.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigHttp2,
+			Pid:        "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-http2:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testclient": "service_started"},
+		}),
+	}))
 	testHTTP2GO(t, compose, true)
 }

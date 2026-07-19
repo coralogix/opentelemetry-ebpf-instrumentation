@@ -1,8 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-//go:build integration
-
 package integration
 
 // Inline OBI configurations, wired per suite via docker.OBI.ConfigYAML.
@@ -413,4 +411,23 @@ otel_metrics_export:
   endpoint: http://otelcol:4318
 otel_traces_export:
   endpoint: http://otelcol:4318
+`
+
+const obiConfigAerospike = `routes:
+  patterns:
+    - /basic/:rnd
+  unmatched: path
+  ignored_patterns:
+    - /metrics
+  ignore_mode: traces
+otel_metrics_export:
+  endpoint: http://otelcol:4318
+otel_traces_export:
+  endpoint: http://otelcol:4318
+attributes:
+  kubernetes:
+    cluster_name: obi-k8s-test-cluster
+  select:
+    "*":
+      include: ["*"]
 `

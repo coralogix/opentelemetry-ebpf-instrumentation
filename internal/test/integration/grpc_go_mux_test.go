@@ -39,17 +39,19 @@ func testREDMetricsForGRPCMuxLibrary(t *testing.T, route, svcNs, serverPort stri
 }
 
 func TestGRPCMux(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML: obiConfigGrpcHttp2Mux,
-		Pid:        "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-http2-mux:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testclient": "service_started"},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-grpc-http2-mux.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigGrpcHttp2Mux,
+			Pid:        "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-http2-mux:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testclient": "service_started"},
+		}),
+	}))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8080`, `TARGET_PORTS=8080:8080`)
 	require.NoError(t, compose.Up())
@@ -63,17 +65,19 @@ func TestGRPCMux(t *testing.T) {
 }
 
 func TestGRPCMuxTLS(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML: obiConfigGrpcHttp2Mux,
-		Pid:        "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-http2-mux:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testclient": "service_started"},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-grpc-http2-mux.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML: obiConfigGrpcHttp2Mux,
+			Pid:        "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-http2-mux:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testclient": "service_started"},
+		}),
+	}))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`, `TARGET_URL=testserver:8383`, `TARGET_PORTS=8383:8383`, `TEST_SUFFIX=_tls`)
 	require.NoError(t, compose.Up())

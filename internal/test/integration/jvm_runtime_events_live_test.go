@@ -12,7 +12,7 @@ import (
 )
 
 func TestJVMRuntimeEventsLive(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": &docker.OBI{
 			Image:           "hatest-jvm-runtime-event-test",
 			BuildContext:    "../../..",
@@ -29,7 +29,11 @@ func TestJVMRuntimeEventsLive(t *testing.T) {
 				"GOMODCACHE": "/tmp/go-mod-cache",
 			},
 		},
-	}}, "compose-base.yml")
+		"otelcol":    nil,
+		"prometheus": nil,
+		"jaeger":     nil,
+		"weaver":     nil,
+	}))
 	t.Cleanup(func() {
 		require.NoError(t, compose.Close())
 	})

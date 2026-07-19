@@ -41,30 +41,35 @@ func TestSuite_Go(t *testing.T) {
 		{name: "go-latest", env: []string{"TESTSERVER_DOCKERFILE_SUFFIX=_latest", "PINGSERVER_DOCKERFILE_SUFFIX=_latest"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			compose, err := docker.ComposeStack(path.Join(pathOutput, "test-suite-"+tc.name+".log"), docker.StdOBI(docker.OBI{
-				Pid:     "host",
-				Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-				Ports:   []string{"8999:8999"},
-				Volumes: []string{
-					"./configs/:/configs",
-					"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-					"../../../testoutput:/coverage",
-					"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-				},
-				Env: map[string]string{
-					"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-					"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-					"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-					"OTEL_EBPF_LOG_FORMAT":                                "json",
-					"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-					"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-					"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-					"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-					"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-					"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-					"OTEL_EBPF_TRACE_PRINTER":                             "json",
-				},
-			}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+			vOtelcol := docker.StdServices()["otelcol"]
+			vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+			compose, err := docker.ComposeStackServices(path.Join(pathOutput, "test-suite-"+tc.name+".log"), docker.StdStack(map[string]*docker.ServiceDef{
+				"obi": docker.StdOBI(docker.OBI{
+					Pid:     "host",
+					Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+					Ports:   []string{"8999:8999"},
+					Volumes: []string{
+						"./configs/:/configs",
+						"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+						"../../../testoutput:/coverage",
+						"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+					},
+					Env: map[string]string{
+						"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+						"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+						"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+						"OTEL_EBPF_LOG_FORMAT":                                "json",
+						"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+						"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+						"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+						"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+						"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+						"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+						"OTEL_EBPF_TRACE_PRINTER":                             "json",
+					},
+				}),
+				"otelcol": vOtelcol,
+			}), "compose-suite-default.yml")
 			require.NoError(t, err)
 			compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=(pingclient|testserver)`)
 			compose.Env = append(compose.Env, tc.env...)
@@ -106,30 +111,35 @@ func TestSuiteNestedTraces(t *testing.T) {
 
 	// Echo (server) -> echo (client) -> EchoBack (server)
 	lockdown := KernelLockdownMode()
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	if !lockdown {
 		compose.Env = append(compose.Env, `SECURITY_CONFIG_SUFFIX=_none`)
 	}
@@ -146,36 +156,43 @@ func TestSuiteNestedTraces(t *testing.T) {
 }
 
 func TestSuiteGoGeneric(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Command:     []string{"--config=/configs/obi-config.yml"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security_none:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_LOG_LEVEL":                                 "INFO",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_OPEN_PORT":                                 "8080",
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-go-generic.yml"), nil, true,
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Command:     []string{"--config=/configs/obi-config.yml"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security_none:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_LOG_LEVEL":                                 "INFO",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_OPEN_PORT":                                 "8080",
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-go-generic.yml"), nil, true,
 		st("Generic Go HTTP/TCP traces (all spans nested)", testGoGenericHTTPTraces),
 		st("Generic Go HTTPS/TCP(TLS) traces (all spans nested)", testGoGenericHTTPSTraces))
 }
 
 func TestSuiteClientPromScrape(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
 			Ports:   []string{"8999:8999"},
@@ -190,16 +207,6 @@ func TestSuiteClientPromScrape(t *testing.T) {
 				"OTEL_EBPF_PROMETHEUS_FEATURES":              "application,application_span,application_service_graph,application_host",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-pingclient",
 			BuildContext:    "../../..",
@@ -208,7 +215,8 @@ func TestSuiteClientPromScrape(t *testing.T) {
 				"LOG_LEVEL": "DEBUG",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=pingclient`)
 	compose.Env = append(compose.Env,
 		`INSTRUMENTER_CONFIG_SUFFIX=-promscrape`,
@@ -224,30 +232,35 @@ func TestSuiteClientPromScrape(t *testing.T) {
 
 // Same as Test suite, but the generated test image does not contain debug information
 func TestSuite_NoDebugInfo(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env, `TESTSERVER_DOCKERFILE_SUFFIX=_nodebug`)
 	require.NoError(t, compose.Up())
 
@@ -266,30 +279,35 @@ func TestSuite_NoDebugInfo(t *testing.T) {
 
 // Same as Test suite, but the generated test image does not contain debug information
 func TestSuite_StaticCompilation(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env, `TESTSERVER_DOCKERFILE_SUFFIX=_static`)
 	require.NoError(t, compose.Up())
 
@@ -307,7 +325,9 @@ func TestSuite_StaticCompilation(t *testing.T) {
 }
 
 func TestSuite_OldestGoVersion(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Pid:     "service:testserver",
 			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
@@ -325,16 +345,6 @@ func TestSuite_OldestGoVersion(t *testing.T) {
 				"OTEL_GO_AUTO_TARGET_EXE":                             "${OTEL_GO_AUTO_TARGET_EXE}",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver",
 			BuildContext:    "../../..",
@@ -345,7 +355,8 @@ func TestSuite_OldestGoVersion(t *testing.T) {
 				"OTEL_RESOURCE_ATTRIBUTES": "service.version=1.0.0",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+	}))
 	compose.Env = append(compose.Env, `OTEL_GO_AUTO_TARGET_EXE=*testserver`, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 
@@ -365,58 +376,68 @@ func TestSuite_OldestGoVersion(t *testing.T) {
 
 func TestSuite_SkipGoTracers(t *testing.T) {
 	t.Skip("seems flaky, we need to look into this")
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml"), []string{`OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=1`}, true,
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml"), []string{`OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=1`}, true,
 		st("RED metrics", testREDMetricsShortHTTP))
 }
 
 func TestSuite_GRPCExport(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-grpc-export")
 	require.NoError(t, compose.Up())
 	t.Run("RED metrics", testREDMetricsHTTP)
@@ -430,30 +451,35 @@ func TestSuite_GRPCExport(t *testing.T) {
 }
 
 func TestSuite_GRPCExportKProbes(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-grpc-export")
 	compose.Env = append(compose.Env, `OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=1`)
 	require.NoError(t, compose.Up())
@@ -471,30 +497,35 @@ func TestSuite_GRPCExportKProbes(t *testing.T) {
 // Instead of submitting metrics via OTEL, exposes them as an obi:8999/metrics endpoint
 // that is scraped by the Prometheus server
 func TestSuite_PrometheusScrape(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env,
 		`INSTRUMENTER_CONFIG_SUFFIX=-promscrape`,
 		`PROM_CONFIG_SUFFIX=-promscrape`,
@@ -518,7 +549,9 @@ func TestSuite_PrometheusScrape(t *testing.T) {
 }
 
 func TestSuite_Java(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Image:       "hatest-javaobi",
 			NetworkMode: "service:testserver",
@@ -532,14 +565,6 @@ func TestSuite_Java(t *testing.T) {
 				"OTEL_SERVICE_NAME":         "${OTEL_SERVICE_NAME}",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:     "${TESTSERVER_IMAGE:?TESTSERVER_IMAGE must be set to a digest-pinned obi-testimg java reference}",
 			Ports:     []string{"8086:8085"},
@@ -548,13 +573,18 @@ func TestSuite_Java(t *testing.T) {
 				"LOG_LEVEL": "DEBUG",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml"), []string{`TESTSERVER_IMAGE=` + obiTestImgJavaNative}, true,
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	})), []string{`TESTSERVER_IMAGE=` + obiTestImgJavaNative}, true,
 		st("Java RED metrics", testREDMetricsJavaHTTP))
 }
 
 // Same as TestSuite_Java but we run in the process namespace and it uses process namespace filtering
 func TestSuite_Java_PID(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	vOtelcol.DependsOn = map[string]string{"obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Image:       "hatest-javaobi",
 			NetworkMode: "service:testserver",
@@ -569,14 +599,6 @@ func TestSuite_Java_PID(t *testing.T) {
 				"OTEL_SERVICE_NAME":                 "${OTEL_SERVICE_NAME}",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image: "${TESTSERVER_IMAGE:?TESTSERVER_IMAGE must be set to a digest-pinned obi-testimg java reference}",
 			Ports: []string{"8086:8085"},
@@ -584,24 +606,37 @@ func TestSuite_Java_PID(t *testing.T) {
 				"LOG_LEVEL": "DEBUG",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml"), []string{`JAVA_OPEN_PORT=8085`, `JAVA_EXECUTABLE_PATH=`, `TESTSERVER_IMAGE=` + obiTestImgJavaJar, `OTEL_SERVICE_NAME=greeting`}, true,
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	})), []string{`JAVA_OPEN_PORT=8085`, `JAVA_EXECUTABLE_PATH=`, `TESTSERVER_IMAGE=` + obiTestImgJavaJar, `OTEL_SERVICE_NAME=greeting`}, true,
 		st("Java RED metrics", testREDMetricsJavaHTTP))
 }
 
 // Same as Java Test suite, but searching the executable by port instead of executable name. We also run the jar version of Java instead of native image
 func TestSuite_Java_OpenPort(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "host",
-		Command:     []string{"--config=/configs/obi-config-java.yml"},
-		RunDir:      "run-java",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH": "${JAVA_EXECUTABLE_PATH}",
-			"OTEL_EBPF_OPEN_PORT":       "${JAVA_OPEN_PORT}",
-			"OTEL_SERVICE_NAME":         "${OTEL_SERVICE_NAME}",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-java.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	vOtelcol.DependsOn = nil
+	vOtelcol.Ports = nil
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Ports = nil
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "host",
+			Command:     []string{"--config=/configs/obi-config-java.yml"},
+			RunDir:      "run-java",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH": "${JAVA_EXECUTABLE_PATH}",
+				"OTEL_EBPF_OPEN_PORT":       "${JAVA_OPEN_PORT}",
+				"OTEL_SERVICE_NAME":         "${OTEL_SERVICE_NAME}",
+			},
+		}),
+		"otelcol":    vOtelcol,
+		"prometheus": vPrometheus,
+		"jaeger":     nil,
+	}), "compose-suite-java.yml")
 	compose.Env = append(compose.Env, `JAVA_OPEN_PORT=8085`, `JAVA_EXECUTABLE_PATH=`, `TESTSERVER_IMAGE=`+obiTestImgJavaJar, `OTEL_SERVICE_NAME=greeting`)
 	require.NoError(t, compose.Up())
 	t.Run("Java RED metrics", testREDMetricsJavaHTTP)
@@ -613,7 +648,10 @@ func TestSuite_Java_OpenPort(t *testing.T) {
 
 // Test that we can also instrument when running with host network mode
 func TestSuite_Java_Host_Network(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	vOtelcol.DependsOn = map[string]string{"obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Image:       "hatest-javaobi",
 			NetworkMode: "host",
@@ -628,14 +666,6 @@ func TestSuite_Java_Host_Network(t *testing.T) {
 				"OTEL_SERVICE_NAME":                  "${OTEL_SERVICE_NAME}",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image: "${TESTSERVER_IMAGE:?TESTSERVER_IMAGE must be set to a digest-pinned obi-testimg java reference}",
 			Ports: []string{"8086:8085"},
@@ -643,39 +673,45 @@ func TestSuite_Java_Host_Network(t *testing.T) {
 				"LOG_LEVEL": "DEBUG",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml"), []string{`TESTSERVER_IMAGE=` + obiTestImgJavaNative}, true,
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	})), []string{`TESTSERVER_IMAGE=` + obiTestImgJavaNative}, true,
 		st("Java RED metrics", testREDMetricsJavaHTTP))
 }
 
 func TestSuite_Rust(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Command:     []string{"--config=/configs/obi-config.yml"},
-		RunDir:      "run-rust",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
-			"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-rust.yml"), []string{`OTEL_EBPF_OPEN_PORT=8090`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8091:8090`, `TESTSERVER_IMAGE=` + obiTestImgRust}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Command:     []string{"--config=/configs/obi-config.yml"},
+			RunDir:      "run-rust",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
+				"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8090`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8091:8090`, `TESTSERVER_IMAGE=` + obiTestImgRust}, true,
 		st("Rust RED metrics", testREDMetricsRustHTTP))
 }
 
 func TestSuite_RustSSL(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Command:     []string{"--config=/configs/obi-config.yml"},
-		RunDir:      "run-rust",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
-			"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-rust.yml"), []string{`OTEL_EBPF_OPEN_PORT=8490`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8491:8490`, `TESTSERVER_IMAGE=` + obiTestImgRustSSL}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Command:     []string{"--config=/configs/obi-config.yml"},
+			RunDir:      "run-rust",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
+				"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8490`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8491:8490`, `TESTSERVER_IMAGE=` + obiTestImgRustSSL}, true,
 		st("Rust RED metrics", testREDMetricsRustHTTPS))
 }
 
@@ -683,18 +719,20 @@ func TestSuite_RustSSL(t *testing.T) {
 // We use this feature to implement our kprobes HTTP2 tests, with special http client settings that triggers the Go
 // client to attempt http connection.
 func TestSuite_RustHTTP2(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Command:     []string{"--config=/configs/obi-config.yml"},
-		RunDir:      "run-rust",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
-			"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-rust.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Command:     []string{"--config=/configs/obi-config.yml"},
+			RunDir:      "run-rust",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
+				"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_TRACE_PRINTER":             "json_indent",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8490`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8491:8490`, `TESTSERVER_IMAGE=`+obiTestImgRustSSL)
 
 	require.NoError(t, compose.Up())
@@ -704,45 +742,49 @@ func TestSuite_RustHTTP2(t *testing.T) {
 }
 
 func TestSuite_NodeJS(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigNode,
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-nodejs",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
-			"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-nodejs.yml"), []string{`OTEL_EBPF_OPEN_PORT=3030`, `OTEL_EBPF_EXECUTABLE_PATH=`, `NODE_APP=app`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigNode,
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-nodejs",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
+				"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=3030`, `OTEL_EBPF_EXECUTABLE_PATH=`, `NODE_APP=app`}, true,
 		st("NodeJS RED metrics", testREDMetricsNodeJSHTTP),
 		st("HTTP traces (kprobes)", testHTTPTracesKProbes),
 		st("HTTP nested traces large HTTPS (kprobes)", testHTTPTracesNestedNodeJSLargeHTTPS))
 }
 
 func TestSuite_NodeJSTLS(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigNode,
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-nodejs",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
-			"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-nodejs.yml"), []string{`OTEL_EBPF_OPEN_PORT=3033`, `OTEL_EBPF_EXECUTABLE_PATH=`, `NODE_APP=app_tls`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigNode,
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-nodejs",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS": "true",
+				"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=3033`, `OTEL_EBPF_EXECUTABLE_PATH=`, `NODE_APP=app_tls`}, true,
 		st("NodeJS SSL RED metrics", testREDMetricsNodeJSHTTPS))
 }
 
 func TestSuite_Rails(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, railsFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml"), []string{`OTEL_EBPF_OPEN_PORT=3040,443`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=3041:3040`, `TESTSERVER_IMAGE=` + obiTestImgRails}, true,
+	runSuite(t, docker.SuiteStackServices(t, railsFamilyStack()), []string{`OTEL_EBPF_OPEN_PORT=3040,443`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=3041:3040`, `TESTSERVER_IMAGE=` + obiTestImgRails}, true,
 		st("Rails RED metrics", testREDMetricsRailsHTTP),
 		st("Rails NGINX traces", testHTTPTracesNestedNginx))
 }
 
 func TestSuite_RailsNginxSupportFloor(t *testing.T) {
-	compose := docker.SuiteStackServices(t, railsFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+	compose := docker.SuiteStackServices(t, railsFamilyStack())
 	compose.Env = append(
 		compose.Env,
 		`OTEL_EBPF_OPEN_PORT=3040,443`,
@@ -760,7 +802,11 @@ func TestSuite_RailsNginxSupportFloor(t *testing.T) {
 }
 
 func TestSuite_RailsRuby302Puma5(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Ports = []string{"4317:4317", "4318:4318", "9464", "8888"}
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Ports = []string{"16686:16686", "4417:4317", "4418:4318"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML:  obiConfigRuby,
 			NetworkMode: "host",
@@ -771,9 +817,6 @@ func TestSuite_RailsRuby302Puma5(t *testing.T) {
 				"OTEL_EBPF_EXECUTABLE_PATH": "${OTEL_EBPF_EXECUTABLE_PATH}",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4417:4317", "4418:4318"},
-		},
 		"nginx": &docker.ServiceDef{
 			Image:         "nginx:latest@sha256:dec7a90bd0973b076832dc56933fe876bc014929e14b4ec49923951405370112",
 			ContainerName: "nginx_server",
@@ -784,13 +827,6 @@ func TestSuite_RailsRuby302Puma5(t *testing.T) {
 				"./components/rubytestserver/nginx/key.pem:/etc/nginx/key.pem:ro",
 			},
 			DependsOn: map[string]string{"testserver": "service_started"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317:4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
 		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-ruby302-puma5",
@@ -803,7 +839,9 @@ func TestSuite_RailsRuby302Puma5(t *testing.T) {
 				"OTEL_SERVICE_NAME":        "my-ruby-app",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+		"jaeger":  vJaeger,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=3040,443`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=3041:3040`)
 	require.NoError(t, compose.Up())
 	t.Run("Ruby/Puma support contract", func(t *testing.T) {
@@ -816,28 +854,38 @@ func TestSuite_RailsRuby302Puma5(t *testing.T) {
 }
 
 func TestSuite_RailsNginxSQL(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigRuby,
-		NetworkMode: "host",
-		Pid:         "host",
-		RunDir:      "run-ruby",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH": "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_OPEN_PORT":       "3040,443",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-ruby-nginx-sql.yml"), []string{`OTEL_EBPF_OPEN_PORT=3040,443`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Ports = []string{"4317:4317", "4318:4318", "9464", "8888"}
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Ports = []string{"16686:16686", "4417:4317", "4418:4318"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigRuby,
+			NetworkMode: "host",
+			Pid:         "host",
+			RunDir:      "run-ruby",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH": "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_OPEN_PORT":       "3040,443",
+			},
+		}),
+		"otelcol": vOtelcol,
+		"jaeger":  vJaeger,
+	}), "compose-suite-ruby-nginx-sql.yml"), []string{`OTEL_EBPF_OPEN_PORT=3040,443`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
 		st("Rails RED metrics", testREDMetricsRailsHTTP),
 		st("Rails NGINX SQL traces nested", testHTTPTracesNestedNginxSQL))
 }
 
 func TestSuite_RailsTLS(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, railsFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml"), []string{`OTEL_EBPF_OPEN_PORT=3043`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TESTSERVER_IMAGE=` + obiTestImgRailsSSL, `TEST_SERVICE_PORTS=3044:3043`}, true,
+	runSuite(t, docker.SuiteStackServices(t, railsFamilyStack()), []string{`OTEL_EBPF_OPEN_PORT=3043`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TESTSERVER_IMAGE=` + obiTestImgRailsSSL, `TEST_SERVICE_PORTS=3044:3043`}, true,
 		st("Rails SSL RED metrics", testREDMetricsRailsHTTPS))
 }
 
 func TestSuite_DotNet(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			BuildContext:    "../../..",
 			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile${INSTRUMENT_DOCKERFILE_SUFFIX}",
@@ -852,14 +900,6 @@ func TestSuite_DotNet(t *testing.T) {
 				"OTEL_EBPF_EXECUTABLE_PATH":   "${OTEL_EBPF_EXECUTABLE_PATH}",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver",
 			BuildContext:    "../../..",
@@ -867,14 +907,18 @@ func TestSuite_DotNet(t *testing.T) {
 			Ports:           []string{"5267:5266", "7034:7033"},
 			DependsOn:       map[string]string{"otelcol": "service_started"},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml"), []string{`OTEL_EBPF_OPEN_PORT=5266`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	})), []string{`OTEL_EBPF_OPEN_PORT=5266`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
 		st("DotNet RED metrics", testREDMetricsDotNetHTTP))
 }
 
 // Disabled for now as we randomly fail to register 3 events, but only get 2
 // Issue: https://github.com/grafana/beyla/issues/208
 func TestSuite_DotNetTLS(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:testserver",
 			Pid:         "service:testserver",
@@ -886,14 +930,6 @@ func TestSuite_DotNetTLS(t *testing.T) {
 				"OTEL_EBPF_EXECUTABLE_PATH":   "${OTEL_EBPF_EXECUTABLE_PATH}",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver",
 			BuildContext:    "../../..",
@@ -901,7 +937,9 @@ func TestSuite_DotNetTLS(t *testing.T) {
 			Ports:           []string{"5267:5266", "7034:7033"},
 			DependsOn:       map[string]string{"otelcol": "service_started"},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=7033`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	// Add these above if you want to get the trace_pipe output in the test logs: `INSTRUMENT_DOCKERFILE_SUFFIX=_dbg`, `INSTRUMENT_COMMAND_SUFFIX=_wrapper.sh`
 	require.NoError(t, compose.Up())
@@ -911,7 +949,9 @@ func TestSuite_DotNetTLS(t *testing.T) {
 }
 
 func TestSuite_Python(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:testserver",
 			Pid:         "service:testserver",
@@ -926,14 +966,6 @@ func TestSuite_Python(t *testing.T) {
 				"OTEL_EBPF_PROMETHEUS_FEATURES":      "application,application_span,application_service_graph",
 			},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-python",
 			BuildContext:    "../../..",
@@ -941,7 +973,9 @@ func TestSuite_Python(t *testing.T) {
 			Ports:           []string{"${TEST_SERVICE_PORTS}", "8999:8999"},
 			DependsOn:       map[string]string{"otelcol": "service_started"},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	}))
 	compose.Env = append(
 		compose.Env,
 		`OTEL_EBPF_OPEN_PORT=8380`,
@@ -958,20 +992,26 @@ func TestSuite_Python(t *testing.T) {
 }
 
 func TestSuite_PythonProm(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application,application_span_otel,application_service_graph",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":      "application,application_span,application_service_graph",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-python.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application,application_span_otel,application_service_graph",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":      "application,application_span,application_service_graph",
+			},
+		}),
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	}), "compose-suite-python.yml")
 	compose.Env = append(
 		compose.Env,
 		`OTEL_EBPF_OPEN_PORT=8380`,
@@ -986,52 +1026,28 @@ func TestSuite_PythonProm(t *testing.T) {
 	require.NoError(t, compose.Close())
 }
 
-func pythonSQLSuite(t *testing.T, name, fragment, dockerfile, image string, obiEnv map[string]string, tests func(t *testing.T)) {
+func pythonSQLSuite(t *testing.T, name, dockerfile, image string, sqlserver *docker.ServiceDef, obiEnv map[string]string, tests func(t *testing.T)) {
 	env := map[string]string{
-		"GOCOVERDIR":                          "/coverage",
-		"OTEL_EBPF_CONFIG_PATH":               "/configs/obi-config.yml",
-		"OTEL_EBPF_OPEN_PORT":                 "${OTEL_EBPF_OPEN_PORT}",
-		"OTEL_EBPF_EXECUTABLE_PATH":           "${OTEL_EBPF_EXECUTABLE_PATH}",
-		"OTEL_EBPF_DISCOVERY_POLL_INTERVAL":   "500ms",
-		"OTEL_EBPF_SERVICE_NAMESPACE":         "integration-test",
-		"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":  "5s",
-		"OTEL_EBPF_PROCESSES_INTERVAL":        "100ms",
-		"OTEL_EBPF_TRACES_INSTRUMENTATIONS":   "sql",
-		"OTEL_EBPF_METRICS_INSTRUMENTATIONS":  "sql",
-		"OTEL_EBPF_METRICS_FEATURES":          "application",
-		"OTEL_EBPF_TRACE_PRINTER":             "text",
-		"OTEL_EBPF_METRICS_INTERVAL":          "1s",
-		"OTEL_EBPF_BPF_BATCH_TIMEOUT":         "10ms",
-		"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT": "1ms",
-		"OTEL_EBPF_LOG_LEVEL":                 "DEBUG",
-		"OTEL_EBPF_BPF_DEBUG":                 "TRUE",
-		"OTEL_EBPF_HOSTNAME":                  "obi",
+		"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+		"OTEL_EBPF_OPEN_PORT":                "8080",
+		"OTEL_EBPF_EXECUTABLE_PATH":          "",
+		"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+		"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+		"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "sql",
+		"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "sql",
+		"OTEL_EBPF_METRICS_FEATURES":         "application",
 	}
 	for k, v := range obiEnv {
 		env[k] = v
 	}
-	compose, err := docker.ComposeStack(path.Join(pathOutput, "test-suite-"+name+".log"), &docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/${RUN_DIR:-run-default}:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env:       env,
-	},
-		"compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml",
-		"compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-family-sql.yml", fragment)
+	testserver := docker.Testserver("pythonsql", dockerfile, image, "8381:8080")
+	testserver.DependsOn["sqlserver"] = "service_started"
+	compose, err := docker.ComposeStackServices(path.Join(pathOutput, "test-suite-"+name+".log"), docker.StdStack(map[string]*docker.ServiceDef{
+		"obi":        docker.TestserverOBI("run-"+name, env),
+		"testserver": testserver,
+		"sqlserver":  sqlserver,
+	}))
 	require.NoError(t, err)
-
-	compose.Env = append(compose.Env,
-		`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`,
-		`RUN_DIR=run-`+name,
-		`TESTSERVER_CONTEXT=pythonsql`,
-		`TESTSERVER_DOCKERFILE=`+dockerfile,
-		`TESTSERVER_IMAGE=`+image)
 	require.NoError(t, compose.Up())
 	tests(t)
 	runWeaverValidation(t)
@@ -1039,25 +1055,53 @@ func pythonSQLSuite(t *testing.T, name, fragment, dockerfile, image string, obiE
 }
 
 func TestSuite_PythonPostgres(t *testing.T) {
-	pythonSQLSuite(t, "python-postgresql", "compose-frag-postgres.yml", "Dockerfile", "hatest-testserver-python-sql",
+	pythonSQLSuite(t, "python-postgresql", "Dockerfile", "hatest-testserver-python-sql",
+		&docker.ServiceDef{
+			Image:           "postgres",
+			BuildContext:    "../../../internal/test/integration/components/postgresql/",
+			BuildDockerfile: "Dockerfile",
+			Ports:           []string{"5432:5432"},
+			Env:             map[string]string{"POSTGRES_PASSWORD": "postgres"},
+		},
 		map[string]string{"OTEL_EBPF_BPF_BUFFER_SIZE_POSTGRES": "1024"},
 		func(t *testing.T) { t.Run("Python Postgres tests", testPythonPostgres) })
 }
 
 func TestSuite_PythonMySQL(t *testing.T) {
-	pythonSQLSuite(t, "python-mysql", "compose-frag-mysql.yml", "Dockerfile_mysql", "hatest-testserver-python-sql",
+	pythonSQLSuite(t, "python-mysql", "Dockerfile_mysql", "hatest-testserver-python-sql",
+		&docker.ServiceDef{
+			Image:           "mysql",
+			BuildContext:    "../../../internal/test/integration/components/mysqldb",
+			BuildDockerfile: "Dockerfile",
+			Ports:           []string{"3306:3306"},
+			Env: map[string]string{
+				"MYSQL_ROOT_PASSWORD": "p_ssW0rd",
+				"MYSQL_PASSWORD":      "p_ssW0rd",
+				"MYSQL_DATABASE":      "sakila",
+			},
+		},
 		map[string]string{"OTEL_EBPF_BPF_BUFFER_SIZE_MYSQL": "8192"},
 		func(t *testing.T) { t.Run("Python MySQL tests", testPythonMySQL) })
 }
 
 func TestSuite_PythonMSSQL(t *testing.T) {
-	pythonSQLSuite(t, "python-mssql", "compose-frag-mssql.yml", "Dockerfile_mssql", "hatest-testserver-python-mssql",
+	pythonSQLSuite(t, "python-mssql", "Dockerfile_mssql", "hatest-testserver-python-mssql",
+		&docker.ServiceDef{
+			Image:           "mssql",
+			BuildContext:    "../../../internal/test/integration/components/mssqldb",
+			BuildDockerfile: "Dockerfile",
+			Ports:           []string{"1433:1433"},
+			Env: map[string]string{
+				"ACCEPT_EULA":       "Y",
+				"MSSQL_SA_PASSWORD": "p_ssW0rd",
+			},
+		},
 		map[string]string{"OTEL_EBPF_BPF_BUFFER_SIZE_MSSQL": "8192"},
 		func(t *testing.T) { t.Run("Python MSSQL tests", testPythonMSSQL) })
 }
 
 func TestSuite_PythonKafka(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:testserver",
 			Pid:         "service:testserver",
@@ -1079,9 +1123,6 @@ func TestSuite_PythonKafka(t *testing.T) {
 				"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
 		"kafka": &docker.ServiceDef{
 			Image:         "docker.io/bitnamilegacy/kafka:3.9@sha256:55df55bfc7ed5980447387620afa3498eab3985a4d8c731013d82b3fa8b43bff",
 			ContainerName: "kafka-like",
@@ -1100,13 +1141,6 @@ func TestSuite_PythonKafka(t *testing.T) {
 				"KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP": "CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT",
 				"KAFKA_CFG_ZOOKEEPER_CONNECT":              "zookeeper:2181",
 			},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
 		},
 		"testserver": &docker.ServiceDef{
 			Image:           "${TESTSERVER_IMAGE}",
@@ -1127,12 +1161,12 @@ func TestSuite_PythonKafka(t *testing.T) {
 				"ALLOW_ANONYMOUS_LOGIN": "yes",
 			},
 		},
-	}, NamedVolumes: []string{"kafka-volume", "zookeeper-volume"}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=../../../internal/test/integration/components/pythonkafka/`, `TESTSERVER_DOCKERFILE=Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-python-kafka`, `RUN_DIR=run-python`}, true,
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=../../../internal/test/integration/components/pythonkafka/`, `TESTSERVER_DOCKERFILE=Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-python-kafka`, `RUN_DIR=run-python`}, true,
 		st("Python Kafka tests", testREDMetricsPythonKafkaOnly))
 }
 
 func TestSuite_GoKafkaTraceparent(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": &docker.OBI{
 			ConfigYAML: obiConfigGoKafkaTraceparent,
 			Networks:   []string{"shared"},
@@ -1209,7 +1243,11 @@ func TestSuite_GoKafkaTraceparent(t *testing.T) {
 				"ALLOW_ANONYMOUS_LOGIN": "yes",
 			},
 		},
-	}, NamedVolumes: []string{"kafka-tp-volume", "zookeeper-tp-volume"}, Networks: []string{"shared"}}, "compose-base.yml")
+		"otelcol":    nil,
+		"prometheus": nil,
+		"jaeger":     nil,
+		"weaver":     nil,
+	}))
 	// Discover by executable name: the Kafka broker and Zookeeper are Java processes
 	// (Zookeeper's admin server also listens on 8080), so port-based discovery is
 	// ambiguous under pid:host. Match only the Go "testserver" binary.
@@ -1220,64 +1258,70 @@ func TestSuite_GoKafkaTraceparent(t *testing.T) {
 }
 
 func TestSuite_PythonMQTT(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-mqtt",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "*",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "*",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-family-mqtt.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_DOCKERFILE=./internal/test/integration/components/pythonmqtt/Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-python-mqtt`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-mqtt",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "*",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "*",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_DOCKERFILE=./internal/test/integration/components/pythonmqtt/Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-python-mqtt`}, true,
 		st("Python MQTT publish tests", testREDMetricsPythonMQTT),
 		st("Python MQTT subscribe tests", testREDMetricsPythonMQTTSubscribe))
 }
 
 func TestSuite_GoMQTT(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-mqtt",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "*",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "*",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-family-mqtt.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_DOCKERFILE=./internal/test/integration/components/gomqtt/Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-go-mqtt`}, false,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-mqtt",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "*",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "*",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_DOCKERFILE=./internal/test/integration/components/gomqtt/Dockerfile`, `TESTSERVER_IMAGE=hatest-testserver-go-mqtt`}, false,
 		st("Go MQTT publish tests", testREDMetricsGoMQTT))
 }
 
 func TestSuite_GoSunRPC(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-sunrpc",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":      "application",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "sunrpc",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "sunrpc",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-go-sunrpc.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-sunrpc",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":      "application",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "sunrpc",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "sunrpc",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1288,7 +1332,10 @@ func TestSuite_GoSunRPC(t *testing.T) {
 }
 
 func TestSuite_JavaKafka(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Command = []string{"--query.ui-config=/etc/jaeger/ui-config.json"}
+	vJaeger.Volumes = append(vJaeger.Volumes, "./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:testserver",
 			Pid:         "service:testserver",
@@ -1305,13 +1352,6 @@ func TestSuite_JavaKafka(t *testing.T) {
 				"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Command: []string{"--query.ui-config=/etc/jaeger/ui-config.json"},
-			Ports:   []string{"16686:16686", "4317", "4318"},
-			Volumes: []string{
-				"./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json",
-			},
-		},
 		"kafka": &docker.ServiceDef{
 			Image:         "docker.io/bitnamilegacy/kafka:4.0.0@sha256:f45d5b813412e1ef7ce67b467309a84e4c6dc03d7626a0b6da867db9b69bd107",
 			ContainerName: "kafka-like",
@@ -1335,13 +1375,6 @@ func TestSuite_JavaKafka(t *testing.T) {
 				"KAFKA_KRAFT_CLUSTER_ID":                   "\"13fda84d-f438-4b56-921c-9f156c809a31\"",
 			},
 		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-java-kafka",
 			BuildContext:    "../../..",
@@ -1349,7 +1382,8 @@ func TestSuite_JavaKafka(t *testing.T) {
 			Ports:           []string{"${TEST_SERVICE_PORTS}"},
 			DependsOn:       map[string]string{"kafka": "service_started", "otelcol": "service_started"},
 		},
-	}, NamedVolumes: []string{"kafka-volume"}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"jaeger": vJaeger,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1359,23 +1393,32 @@ func TestSuite_JavaKafka(t *testing.T) {
 }
 
 func TestSuite_JavaKafkaTLS(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-java",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_LOG_LEVEL":                "INFO",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
-			"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-java-kafka-400-tls.yml")
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Command = []string{"--query.ui-config=/etc/jaeger/ui-config.json"}
+	vJaeger.Volumes = []string{"./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Image:           "hatest-obi-b",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile-with-javaagent",
+			NetworkMode:     "service:testserver",
+			Pid:             "service:testserver",
+			RunDir:          "run-java",
+			DependsOn:       map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_LOG_LEVEL":                "INFO",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
+				"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
+			},
+		}),
+		"jaeger": vJaeger,
+	}), "compose-suite-java-kafka-400-tls.yml")
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1385,23 +1428,29 @@ func TestSuite_JavaKafkaTLS(t *testing.T) {
 }
 
 func TestSuite_JavaKafkaLargeBuffer(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-java",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_KAFKA":    "1024",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
-			"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-java-kafka-400-lb.yml")
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Command = []string{"--query.ui-config=/etc/jaeger/ui-config.json"}
+	vJaeger.Volumes = []string{"./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-java",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_KAFKA":    "1024",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
+				"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
+			},
+		}),
+		"jaeger": vJaeger,
+	}), "compose-suite-java-kafka-400-lb.yml")
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1411,23 +1460,25 @@ func TestSuite_JavaKafkaLargeBuffer(t *testing.T) {
 }
 
 func TestSuite_NodeRdkafka(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-node-rdkafka",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_KAFKA":    "65536",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
-			"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-node-rdkafka.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-node-rdkafka",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_KAFKA":    "65536",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "kafka",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "kafka",
+				"OTEL_KAFKA_TOPIC_UUID_CACHE_SIZE":   "1000",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1437,7 +1488,7 @@ func TestSuite_NodeRdkafka(t *testing.T) {
 }
 
 func TestSuite_PythonAsyncUvloop_3_9(t *testing.T) {
-	compose := docker.SuiteStackServices(t, uvloopFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+	compose := docker.SuiteStackServices(t, uvloopFamilyStack())
 	compose.Env = append(compose.Env, `UVLOOP_DOCKERFILE=Dockerfile-3.9`)
 	require.NoError(t, compose.Up())
 
@@ -1450,7 +1501,7 @@ func TestSuite_PythonAsyncUvloop_3_9(t *testing.T) {
 }
 
 func TestSuite_PythonAsyncUvloop_3_14(t *testing.T) {
-	compose := docker.SuiteStackServices(t, uvloopFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+	compose := docker.SuiteStackServices(t, uvloopFamilyStack())
 	compose.Env = append(compose.Env, `UVLOOP_DOCKERFILE=Dockerfile-3.14`)
 	require.NoError(t, compose.Up())
 
@@ -1463,21 +1514,23 @@ func TestSuite_PythonAsyncUvloop_3_14(t *testing.T) {
 }
 
 func TestSuite_PythonRedis(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigRedis,
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "redis",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "redis",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-python-redis.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigRedis,
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "redis",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "redis",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1487,22 +1540,24 @@ func TestSuite_PythonRedis(t *testing.T) {
 }
 
 func TestSuite_NodeBullMQ(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigRedis,
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-nodejs-bullmq",
-		DependsOn:   map[string]string{"testserver": "service_healthy"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_TCP":      "4096",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "redis",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "redis",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-nodejs-bullmq.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigRedis,
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-nodejs-bullmq",
+			DependsOn:   map[string]string{"testserver": "service_healthy"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_TCP":      "4096",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "redis",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "redis",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=3040`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8382:3040`)
 	require.NoError(t, compose.Up())
 	t.Run("Node BullMQ blocking Redis worker", func(t *testing.T) {
@@ -1514,7 +1569,7 @@ func TestSuite_NodeBullMQ(t *testing.T) {
 }
 
 func TestSuite_Aerospike(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"aerospike": &docker.ServiceDef{
 			Image:        "aerospike/aerospike-server:8.1.2.3@sha256:73c78ec8c2010dbc83ffb4b1249abbdfad3a66173492f46fa54996d0608f122d",
 			Ports:        []string{"3000"},
@@ -1554,27 +1609,29 @@ func TestSuite_Aerospike(t *testing.T) {
 			Ports:           []string{"${TEST_SERVICE_PORTS}"},
 			DependsOn:       map[string]string{"aerospike": "service_started", "otelcol": "service_started"},
 		},
-	}}, "compose-frag-weaver.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8390:8080`}, true,
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8390:8080`}, true,
 		st("Aerospike RED metrics and traces", testREDMetricsAerospikeOnly))
 }
 
 func TestSuite_PythonMongo(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "mongo",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "mongo",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-python-mongo.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "mongo",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "mongo",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1584,24 +1641,26 @@ func TestSuite_PythonMongo(t *testing.T) {
 }
 
 func TestSuite_PythonCouchbase(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "2048",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_HTTP_SQLPP_ENABLED":       "true",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "http,couchbase",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
-			"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "http,couchbase",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-python-couchbase.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "2048",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_HTTP_SQLPP_ENABLED":       "true",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_METRICS_INSTRUMENTATIONS": "http,couchbase",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":     "true",
+				"OTEL_EBPF_TRACES_INSTRUMENTATIONS":  "http,couchbase",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1616,19 +1675,21 @@ func TestSuite_PythonCouchbase(t *testing.T) {
 }
 
 func TestSuite_PythonSQLSSL(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python-sql",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-python-sql-ssl.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python-sql",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1638,20 +1699,26 @@ func TestSuite_PythonSQLSSL(t *testing.T) {
 }
 
 func TestSuite_PythonTLS(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_METRICS_FEATURES":         "application,application_span_otel,application_service_graph",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":      "application,application_span,application_service_graph",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml", "compose-suite-python.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_METRICS_FEATURES":         "application,application_span_otel,application_service_graph",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":      "application,application_span,application_service_graph",
+			},
+		}),
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	}), "compose-suite-python.yml")
 	compose.Env = append(
 		compose.Env,
 		`OTEL_EBPF_OPEN_PORT=8380`,
@@ -1667,122 +1734,132 @@ func TestSuite_PythonTLS(t *testing.T) {
 }
 
 func TestSuite_PythonSelfReference(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigWithJaeger,
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":             "1024",
-			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
-			"OTEL_EBPF_BPF_MAX_TRANSACTION_TIME":         "500ms",
-			"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-			"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
-			"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
-			"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-python-self.yml"), []string{`OTEL_EBPF_OPEN_PORT=7771`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigWithJaeger,
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":             "1024",
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
+				"OTEL_EBPF_BPF_MAX_TRANSACTION_TIME":         "500ms",
+				"OTEL_EBPF_EXECUTABLE_PATH":                  "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
+				"OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT":        "0ms",
+				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=7771`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
 		st("Python Traces with self-references", testHTTPTracesNestedSelfCalls),
 		st("Python Traces transaction too long", testHTTPTracesNestedCallsTooLong))
 }
 
 func TestSuite_PythonGraphQL(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/${RUN_DIR}:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_HTTP_GRAPHQL_ENABLED":     "true",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-family-python-payload.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythongraphql`, `TESTSERVER_IMAGE=hatest-testserver-python-graphql`, `RUN_DIR=run-python-graphql`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/${RUN_DIR}:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_HTTP_GRAPHQL_ENABLED":     "true",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythongraphql`, `TESTSERVER_IMAGE=hatest-testserver-python-graphql`, `RUN_DIR=run-python-graphql`}, true,
 		st("Python GraphQL", testPythonGraphQL))
 }
 
 func TestSuite_PythonJsonRPC(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/${RUN_DIR}:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_HTTP_JSONRPC_ENABLED":     "true",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-family-python-payload.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythonjsonrpc`, `TESTSERVER_IMAGE=hatest-testserver-python-jsonrpc`, `RUN_DIR=run-python-jsonrpc`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/${RUN_DIR}:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_HTTP_JSONRPC_ENABLED":     "true",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythonjsonrpc`, `TESTSERVER_IMAGE=hatest-testserver-python-jsonrpc`, `RUN_DIR=run-python-jsonrpc`}, true,
 		st("Python JSON-RPC server span", testPythonJSONRPCServer),
 		st("Python JSON-RPC RPC metrics", testPythonJSONRPCMetrics))
 }
 
 func TestSuite_PythonMCP(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/${RUN_DIR}:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
-			"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_HTTP_MCP_ENABLED":         "true",
-			"OTEL_EBPF_METRICS_FEATURES":         "application",
-			"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-family-python-payload.yml"), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythonmcp`, `TESTSERVER_IMAGE=hatest-testserver-python-mcp`, `RUN_DIR=run-python-mcp`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/${RUN_DIR}:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":     "1024",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT": "5s",
+				"OTEL_EBPF_CONFIG_PATH":              "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":          "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_HTTP_MCP_ENABLED":         "true",
+				"OTEL_EBPF_METRICS_FEATURES":         "application",
+				"OTEL_EBPF_PROCESSES_INTERVAL":       "100ms",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=8080`, `OTEL_EBPF_EXECUTABLE_PATH=`, `TEST_SERVICE_PORTS=8381:8080`, `TESTSERVER_CONTEXT=pythonmcp`, `TESTSERVER_IMAGE=hatest-testserver-python-mcp`, `RUN_DIR=run-python-mcp`}, true,
 		st("Python MCP server span", testPythonMCPServer),
 		st("Python MCP initialize", testPythonMCPInitialize))
 }
 
 func TestSuite_PythonElasticsearch(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:testserver",
-		Pid:         "service:testserver",
-		RunDir:      "run-python-elasticsearch",
-		DependsOn:   map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":       "1024",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":   "5s",
-			"OTEL_EBPF_CONFIG_PATH":                "/configs/obi-config.yml",
-			"OTEL_EBPF_EXECUTABLE_PATH":            "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_HTTP_ELASTICSEARCH_ENABLED": "true",
-			"OTEL_EBPF_LOG_CONFIG":                 "yaml",
-			"OTEL_EBPF_METRICS_FEATURES":           "application",
-			"OTEL_EBPF_PROCESSES_INTERVAL":         "100ms",
-			"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":       "true",
-			"OTEL_EBPF_TRACE_PRINTER":              "json_indent",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-elasticsearch.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			NetworkMode: "service:testserver",
+			Pid:         "service:testserver",
+			RunDir:      "run-python-elasticsearch",
+			DependsOn:   map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_BUFFER_SIZE_HTTP":       "1024",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":   "5s",
+				"OTEL_EBPF_CONFIG_PATH":                "/configs/obi-config.yml",
+				"OTEL_EBPF_EXECUTABLE_PATH":            "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_HTTP_ELASTICSEARCH_ENABLED": "true",
+				"OTEL_EBPF_LOG_CONFIG":                 "yaml",
+				"OTEL_EBPF_METRICS_FEATURES":           "application",
+				"OTEL_EBPF_PROCESSES_INTERVAL":         "100ms",
+				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":       "true",
+				"OTEL_EBPF_TRACE_PRINTER":              "json_indent",
+			},
+		}),
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1797,7 +1874,7 @@ func TestSuite_PythonElasticsearch(t *testing.T) {
 }
 
 func TestSuite_PythonAWSS3(t *testing.T) {
-	compose := docker.SuiteStackServices(t, awsFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+	compose := docker.SuiteStackServices(t, awsFamilyStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1807,7 +1884,7 @@ func TestSuite_PythonAWSS3(t *testing.T) {
 }
 
 func TestSuite_PythonAWSSQS(t *testing.T) {
-	compose := docker.SuiteStackServices(t, awsFamilyStack(), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+	compose := docker.SuiteStackServices(t, awsFamilyStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`)
 
 	require.NoError(t, compose.Up())
@@ -1817,56 +1894,63 @@ func TestSuite_PythonAWSSQS(t *testing.T) {
 }
 
 func TestSuite_NodeJSDist(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigWithJaegerHost,
-		NetworkMode: "host",
-		Pid:         "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"/sys/fs/cgroup:/sys/fs/cgroup",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-nodejsdist:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver_b": "service_started", "testserver_r": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-			"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
-			"OTEL_EBPF_OPEN_PORT":                        "5001,5006",
-			"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-nodejs-dist.yml"), []string{`OTEL_EBPF_OPEN_PORT=`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigWithJaegerHost,
+			NetworkMode: "host",
+			Pid:         "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"/sys/fs/cgroup:/sys/fs/cgroup",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-nodejsdist:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver_b": "service_started", "testserver_r": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
+				"OTEL_EBPF_OPEN_PORT":                        "5001,5006",
+				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+			},
+		}),
+	})), []string{`OTEL_EBPF_OPEN_PORT=`, `OTEL_EBPF_EXECUTABLE_PATH=`}, true,
 		st("NodeJS Distributed Traces with multiple chained calls", testHTTPTracesNestedNodeJSDistCalls))
 }
 
 func TestSuite_DisableKeepAlives(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	require.NoError(t, compose.Up())
 
 	config := ti.DefaultOBIConfig()
@@ -1886,30 +1970,35 @@ func TestSuite_DisableKeepAlives(t *testing.T) {
 }
 
 func TestSuite_OverrideServiceName(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml")
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml")
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-override-svcname")
 	require.NoError(t, compose.Up())
 
@@ -1929,7 +2018,42 @@ func TestSuite_OverrideServiceName(t *testing.T) {
 }
 
 func TestSuiteNodeClient(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigAerospike,
+			NetworkMode: "service:nodeclient",
+			Pid:         "service:nodeclient",
+			Command:     []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			RunDir:      "run-nodeclient",
+			DependsOn:   map[string]string{"nodeclient": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_AUTO_TARGET_LANGUAGE":             "nodejs",
+				"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "true",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+			},
+		}),
+		"nodeclient": &docker.ServiceDef{
+			Image:           "hatest-nodeclient",
+			BuildContext:    "../../..",
+			BuildDockerfile: "internal/test/integration/components/nodeclient/Dockerfile",
+			Command:         []string{"node", "${NODE_APP}.js"},
+			DependsOn:       map[string]string{"otelcol": "service_started"},
+			Env: map[string]string{
+				"LOG_LEVEL": "DEBUG",
+			},
+		},
+	}))
+	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=node`, `NODE_APP=client`, `PROM_CONFIG_SUFFIX=`)
+	require.NoError(t, compose.Up())
+	t.Run("Node Client RED metrics", func(t *testing.T) {
+		testNodeClientWithMethodAndStatusCode(t, "GET", 301, 80, "0000000000000000")
+	})
+	runWeaverValidation(t)
+	require.NoError(t, compose.Close())
+}
+
+func TestSuiteNodeClientTLS(t *testing.T) {
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:nodeclient",
 			Pid:         "service:nodeclient",
@@ -1942,49 +2066,7 @@ func TestSuiteNodeClient(t *testing.T) {
 				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"nodeclient": &docker.ServiceDef{
-			Image:           "hatest-nodeclient",
-			BuildContext:    "../../..",
-			BuildDockerfile: "internal/test/integration/components/nodeclient/Dockerfile",
-			Command:         []string{"node", "${NODE_APP}.js"},
-			DependsOn:       map[string]string{"otelcol": "service_started"},
-			Env: map[string]string{
-				"LOG_LEVEL": "DEBUG",
-			},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
-	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=node`, `NODE_APP=client`, `PROM_CONFIG_SUFFIX=`)
-	require.NoError(t, compose.Up())
-	t.Run("Node Client RED metrics", func(t *testing.T) {
-		testNodeClientWithMethodAndStatusCode(t, "GET", 301, 80, "0000000000000000")
-	})
-	runWeaverValidation(t)
-	require.NoError(t, compose.Close())
-}
-
-func TestSuiteNodeClientTLS(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		NetworkMode: "service:nodeclient",
-		Pid:         "service:nodeclient",
-		Command:     []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		RunDir:      "run-nodeclient",
-		DependsOn:   map[string]string{"nodeclient": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_AUTO_TARGET_LANGUAGE":             "nodejs",
-			"OTEL_EBPF_BPF_TRACK_REQUEST_HEADERS":        "true",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-nodeclient.yml")
+	}), "compose-suite-nodeclient.yml")
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=node`, `NODE_APP=client_tls`, `PROM_CONFIG_SUFFIX=`)
 	require.NoError(t, compose.Up())
 	t.Run("Node Client RED metrics", func(t *testing.T) {
@@ -1995,63 +2077,75 @@ func TestSuiteNodeClientTLS(t *testing.T) {
 }
 
 func TestSuiteNoRoutes(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml"), []string{"INSTRUMENTER_CONFIG_SUFFIX=-no-route"}, true,
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml"), []string{"INSTRUMENTER_CONFIG_SUFFIX=-no-route"}, true,
 		st("RED metrics", testREDMetricsHTTPNoRoute))
 }
 
 func TestSuiteNoRoutesLowCardinality(t *testing.T) {
-	runSuite(t, docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		Pid:     "host",
-		Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
-		Ports:   []string{"8999:8999"},
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
-		},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
-			"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
-			"OTEL_EBPF_LOG_FORMAT":                                "json",
-			"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
-			"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
-			"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
-			"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
-			"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
-			"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
-			"OTEL_EBPF_TRACE_PRINTER":                             "json",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-default.yml"), []string{"INSTRUMENTER_CONFIG_SUFFIX=-no-route-lc"}, true,
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			Pid:     "host",
+			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
+			Ports:   []string{"8999:8999"},
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security${SECURITY_CONFIG_SUFFIX}:/sys/kernel/security",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-base${TESTSERVER_DOCKERFILE_SUFFIX}:/var/run/obi",
+			},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH":                           "${OTEL_EBPF_EXECUTABLE_PATH}",
+				"OTEL_EBPF_EXTRA_SPAN_RESOURCE_ATTRIBUTES":            "service.version",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT":          "8999",
+				"OTEL_EBPF_LOG_FORMAT":                                "json",
+				"OTEL_EBPF_METRICS_FEATURES":                          featuresFull,
+				"OTEL_EBPF_PROCESSES_INTERVAL":                        "100ms",
+				"OTEL_EBPF_PROMETHEUS_EXTRA_SPAN_RESOURCE_ATTRIBUTES": "service.version",
+				"OTEL_EBPF_PROMETHEUS_FEATURES":                       featuresFull,
+				"OTEL_EBPF_RENAME_UNRESOLVED_HOSTS":                   "",
+				"OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS":                  "${OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS}",
+				"OTEL_EBPF_TRACE_PRINTER":                             "json",
+			},
+		}),
+		"otelcol": vOtelcol,
+	}), "compose-suite-default.yml"), []string{"INSTRUMENTER_CONFIG_SUFFIX=-no-route-lc"}, true,
 		st("RED metrics", testREDMetricsHTTPNoRouteLowCardinality))
 }
 
 func TestSuite_Elixir(t *testing.T) {
-	runSuite(t, docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	runSuite(t, docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML:  obiConfigElixir,
 			NetworkMode: "service:testserver",
@@ -2059,14 +2153,6 @@ func TestSuite_Elixir(t *testing.T) {
 			RunDir:      "run-elixir",
 			DependsOn:   map[string]string{"testserver": "service_started"},
 		}),
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-elixir",
 			BuildContext:    "../../..",
@@ -2074,12 +2160,14 @@ func TestSuite_Elixir(t *testing.T) {
 			Ports:           []string{"4000:4000"},
 			DependsOn:       map[string]string{"otelcol": "service_started"},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml"), nil, true,
+		"otelcol": vOtelcol,
+		"jaeger":  nil,
+	})), nil, true,
 		st("Elixir RED metrics", testREDMetricsElixirHTTP))
 }
 
 func TestSuite_LogEnricherHTTP(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8380`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2090,7 +2178,7 @@ func TestSuite_LogEnricherHTTP(t *testing.T) {
 }
 
 func TestSuite_LogEnricherGoGRPC(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=50051`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2104,7 +2192,7 @@ func TestSuite_LogEnricherGoGRPC(t *testing.T) {
 }
 
 func TestSuite_LogEnricherNodeJS(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=3030`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2115,7 +2203,7 @@ func TestSuite_LogEnricherNodeJS(t *testing.T) {
 }
 
 func TestSuite_LogEnricherJava(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8085`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2126,7 +2214,7 @@ func TestSuite_LogEnricherJava(t *testing.T) {
 }
 
 func TestSuite_LogEnricherRuby(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=3040`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2140,7 +2228,7 @@ func TestSuite_LogEnricherRuby(t *testing.T) {
 }
 
 func TestSuite_LogEnricherDotNet(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=5266`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2151,7 +2239,7 @@ func TestSuite_LogEnricherDotNet(t *testing.T) {
 }
 
 func TestSuite_LogEnricherPythonAsync(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8391`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2168,7 +2256,7 @@ func TestSuite_LogEnricherPythonAsync(t *testing.T) {
 }
 
 func TestSuite_LogEnricherMultiSegWritev(t *testing.T) {
-	compose := docker.SuiteStackServices(t, logEnricherStack(), "compose-base.yml")
+	compose := docker.SuiteStackServices(t, logEnricherStack())
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=8388`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2188,7 +2276,10 @@ func TestSuite_LogEnricherMultiSegWritev(t *testing.T) {
 // and protocol_http.h:__obi_continue_protocol_http_tp() had problematic bitwise operations that
 // can change or corrupt the traceparent header when parsing a 1KB+ HTTP request.
 func TestSuite_LargeHTTPRequest(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config.yml"}
+	vOtelcol.DependsOn = map[string]string{"prometheus": "service_started"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:httpproxyserver",
 			Pid:         "service:httpproxyserver",
@@ -2220,18 +2311,9 @@ func TestSuite_LargeHTTPRequest(t *testing.T) {
 				"OTEL_SERVICE_NAME": "httpproxyserver",
 			},
 		},
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml")
+		"otelcol": vOtelcol,
+		"weaver":  nil,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_OPEN_PORT=3030`, `OTEL_EBPF_EXECUTABLE_PATH=`)
 	require.NoError(t, compose.Up())
 
@@ -2290,7 +2372,11 @@ func KernelLockdownMode() bool {
 }
 
 func logEnricherStack() docker.Stack {
-	return docker.Stack{Services: map[string]*docker.ServiceDef{
+	s := docker.StdStack(map[string]*docker.ServiceDef{
+		"otelcol":    nil,
+		"prometheus": nil,
+		"jaeger":     nil,
+		"weaver":     nil,
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML: obiConfigLogEnricher,
 			Networks:   []string{"shared"},
@@ -2404,11 +2490,17 @@ func logEnricherStack() docker.Stack {
 				"RAILS_MAX_THREADS": "2",
 			},
 		},
-	}, Networks: []string{"shared"}}
+	})
+	s.Networks = []string{"shared"}
+	return s
 }
 
 func railsFamilyStack() docker.Stack {
-	return docker.Stack{Services: map[string]*docker.ServiceDef{
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Ports = []string{"16686:16686", "4417:4317", "4418:4318"}
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Ports = []string{"4317:4317", "4318:4318", "9464", "8888"}
+	return docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML:  obiConfigRuby,
 			NetworkMode: "host",
@@ -2419,9 +2511,7 @@ func railsFamilyStack() docker.Stack {
 				"OTEL_EBPF_EXECUTABLE_PATH": "${OTEL_EBPF_EXECUTABLE_PATH}",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4417:4317", "4418:4318"},
-		},
+		"jaeger": vJaeger,
 		"nginx": &docker.ServiceDef{
 			Image:         "${NGINX_IMAGE:-nginx:latest@sha256:dec7a90bd0973b076832dc56933fe876bc014929e14b4ec49923951405370112}",
 			ContainerName: "nginx_server",
@@ -2433,13 +2523,7 @@ func railsFamilyStack() docker.Stack {
 			},
 			DependsOn: map[string]string{"testserver": "service_started"},
 		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317:4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
+		"otelcol": vOtelcol,
 		"testserver": &docker.ServiceDef{
 			Image:     "${TESTSERVER_IMAGE:?TESTSERVER_IMAGE must be set to a digest-pinned obi-testimg rails reference}",
 			Ports:     []string{"${TEST_SERVICE_PORTS}"},
@@ -2449,11 +2533,15 @@ func railsFamilyStack() docker.Stack {
 				"OTEL_SERVICE_NAME":        "my-ruby-app",
 			},
 		},
-	}}
+	})
 }
 
 func uvloopFamilyStack() docker.Stack {
-	return docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	return docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Pid:     "host",
 			Command: []string{"--config=/configs/obi-config.yml"},
@@ -2476,17 +2564,8 @@ func uvloopFamilyStack() docker.Stack {
 				"OTEL_EBPF_PROMETHEUS_FEATURES":                       "application,application_span_otel,application_process,application_service_graph,ebpf,application_host",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"},
-			Ports:   []string{"9090:9090"},
-		},
+		"otelcol":    vOtelcol,
+		"prometheus": vPrometheus,
 		"pythonasync": &docker.ServiceDef{
 			Image:           "hatest-pythonasync-uvloop",
 			BuildContext:    "../../..",
@@ -2506,11 +2585,15 @@ func uvloopFamilyStack() docker.Stack {
 			BuildDockerfile: "internal/test/integration/components/testserver/Dockerfile",
 			Ports:           []string{"8085:8080"},
 		},
-	}}
+	})
 }
 
 func awsFamilyStack() docker.Stack {
-	return docker.Stack{Services: map[string]*docker.ServiceDef{
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Ports = []string{"16686:16686", "14317:4317", "14318:4318"}
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-debug.yml"}
+	return docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			NetworkMode: "service:testserver",
 			Pid:         "service:testserver",
@@ -2530,22 +2613,13 @@ func awsFamilyStack() docker.Stack {
 				"OTEL_EBPF_PROTOCOL_DEBUG_PRINT":      "true",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "14317:4317", "14318:4318"},
-		},
+		"jaeger": vJaeger,
 		"localstack": &docker.ServiceDef{
 			Image:         "localstack/localstack:4.14@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a",
 			ContainerName: "localstack",
 			Ports:         []string{"4566:4566"},
 		},
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-debug.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Ports: []string{"9090:9090"},
-		},
+		"otelcol": vOtelcol,
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-python-aws-client",
 			BuildContext:    "../../../internal/test/integration/components/pythonawsclient/",
@@ -2553,5 +2627,5 @@ func awsFamilyStack() docker.Stack {
 			Ports:           []string{"${TEST_SERVICE_PORTS}"},
 			DependsOn:       map[string]string{"localstack": "service_started", "otelcol": "service_started"},
 		},
-	}}
+	})
 }

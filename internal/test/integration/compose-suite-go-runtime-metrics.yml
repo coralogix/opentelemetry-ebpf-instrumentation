@@ -11,26 +11,3 @@ services:
     depends_on:
       otelcol:
         condition: service_started
-
-  prometheus:
-    command:
-      - --config.file=/etc/prometheus/prometheus-config-promscrape${PROM_CONFIG_SUFFIX}.yml
-      - --web.enable-lifecycle
-      - --web.route-prefix=/
-    ports:
-      - "9090:9090"
-
-  # OpenTelemetry Collector
-  otelcol:
-    command: ["--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"]
-    ports:
-      - "4317" # OTLP over gRPC receiver
-      - "4318:4318" # OTLP over HTTP receiver
-      - "9464" # Prometheus exporter
-      - "8888" # metrics endpoint
-    depends_on:
-      prometheus:
-        condition: service_started
-      weaver:
-        condition: service_healthy
-

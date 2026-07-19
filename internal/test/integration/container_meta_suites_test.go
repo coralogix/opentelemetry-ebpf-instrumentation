@@ -21,7 +21,11 @@ import (
 )
 
 func TestSuite_DockerMetadata(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML: obiConfigContainerMeta,
 			Pid:        "host",
@@ -42,17 +46,6 @@ func TestSuite_DockerMetadata(t *testing.T) {
 				"OTEL_EBPF_TRACE_PRINTER":                    "json",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"},
-			Ports:   []string{"9090:9090"},
-		},
 		"testserver-as-in-compose": &docker.ServiceDef{
 			Image:           "hatest-testserver",
 			BuildContext:    "../../..",
@@ -63,7 +56,9 @@ func TestSuite_DockerMetadata(t *testing.T) {
 				"OTEL_RESOURCE_ATTRIBUTES": "service.version=1.0.0",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol":    vOtelcol,
+		"prometheus": vPrometheus,
+	}))
 	require.NoError(t, compose.Up())
 
 	t.Run("OTEL metrics are decorated with container metadata", func(t *testing.T) {

@@ -188,7 +188,9 @@ func testBodyExtractionContentTypeHeader(t *testing.T) {
 }
 
 func TestSuiteBodyExtraction(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			Pid:     "host",
 			Command: []string{"--config=/configs/obi-config${INSTRUMENTER_CONFIG_SUFFIX}.yml"},
@@ -213,13 +215,6 @@ func TestSuiteBodyExtraction(t *testing.T) {
 				"OTEL_EBPF_TRACE_PRINTER":                             "json",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318", "9464", "8888"},
-			DependsOn: map[string]string{"jaeger": "service_started", "obi": "service_started", "prometheus": "service_started", "weaver": "service_healthy"},
-		},
 		"pingclient": &docker.ServiceDef{
 			Image:           "hatest-pingclient",
 			BuildContext:    "../../..",
@@ -227,10 +222,6 @@ func TestSuiteBodyExtraction(t *testing.T) {
 			Env: map[string]string{
 				"LOG_LEVEL": "DEBUG",
 			},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config${PROM_CONFIG_SUFFIX}.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"},
-			Ports:   []string{"9090:9090"},
 		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver",
@@ -242,7 +233,8 @@ func TestSuiteBodyExtraction(t *testing.T) {
 				"OTEL_RESOURCE_ATTRIBUTES": "service.version=1.0.0",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol": vOtelcol,
+	}))
 	compose.Env = append(compose.Env, "INSTRUMENTER_CONFIG_SUFFIX=-http-enrichment-body")
 	compose.Env = append(compose.Env, "OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS=true")
 	require.NoError(t, compose.Up())

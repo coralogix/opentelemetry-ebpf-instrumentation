@@ -19,7 +19,11 @@ import (
 const jvmRuntimeMetricsHostPort = "8386"
 
 func TestJVMRuntimeMetrics(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.Command = []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"}
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--enable-feature=exemplar-storage", "--web.route-prefix=/"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": &docker.OBI{
 			ConfigYAML: obiConfigJvmRuntimeMetrics,
 			Pid:        "host",
@@ -47,15 +51,6 @@ func TestJVMRuntimeMetrics(t *testing.T) {
 				"OTEL_SERVICE_NAME":                 "jvm-runtime",
 			},
 		},
-		"otelcol": &docker.ServiceDef{
-			Command:   []string{"--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"},
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config-promscrape.yml", "--web.enable-lifecycle", "--web.route-prefix=/"},
-			Ports:   []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-jvm-runtime-metrics",
 			BuildContext:    "../../..",
@@ -67,7 +62,10 @@ func TestJVMRuntimeMetrics(t *testing.T) {
 				"LOG_LEVEL": "DEBUG",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
+		"otelcol":    vOtelcol,
+		"prometheus": vPrometheus,
+		"jaeger":     nil,
+	}))
 	compose.Env = append(compose.Env, `TEST_SERVICE_PORTS=`+jvmRuntimeMetricsHostPort+`:8085`)
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() {

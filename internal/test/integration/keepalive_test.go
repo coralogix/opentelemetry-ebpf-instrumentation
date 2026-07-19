@@ -15,7 +15,7 @@ import (
 )
 
 func TestExistingSocketsDetection(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": &docker.OBI{
 			ConfigYAML:  obiConfigKeepalive,
 			NetworkMode: "service:keepaliveclient",
@@ -40,7 +40,11 @@ func TestExistingSocketsDetection(t *testing.T) {
 			BuildDockerfile: "internal/test/integration/components/tpinjector-server/Dockerfile",
 			Ports:           []string{"8080:8080"},
 		},
-	}}, "compose-base.yml")
+		"otelcol":    nil,
+		"prometheus": nil,
+		"jaeger":     nil,
+		"weaver":     nil,
+	}))
 	require.NoError(t, compose.Up())
 
 	waitForTestComponentsNoMetrics(t, "http://localhost:8080/smoke")

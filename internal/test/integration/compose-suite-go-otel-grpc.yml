@@ -10,33 +10,3 @@ services:
       LOG_LEVEL: DEBUG
       OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "${APP_OTEL_METRICS_ENDPOINT}"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "${APP_OTEL_TRACES_ENDPOINT}"
-
-  otelcol:
-    command: ["--config=/etc/otelcol-config/otelcol-config.yml"]
-    ports:
-      - "4317" # OTLP over gRPC receiver
-      - "4318" # OTLP over HTTP receiver
-      - "9464" # Prometheus exporter
-      - "8888" # metrics endpoint
-    depends_on:
-      obi:
-        condition: service_started
-      prometheus:
-        condition: service_started
-      jaeger:
-        condition: service_started
-
-
-  prometheus:
-    command:
-      - --config.file=/etc/prometheus/prometheus-config-promscrape.yml
-      - --web.enable-lifecycle
-      - --web.route-prefix=/
-    ports:
-      - "9090:9090"
-
-  jaeger:
-    ports:
-      - "16686:16686" # Query frontend
-      - "4317" # OTEL GRPC traces collector
-      - "4318" # OTEL HTTP traces collector

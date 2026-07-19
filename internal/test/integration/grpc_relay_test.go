@@ -45,7 +45,9 @@ var expectedRelayServices = []string{
 // by sending a known traceparent to the first Go hop and verifying it arrives
 // at the last hop with the same trace ID.
 func TestSuite_GRPCRelay(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vJaeger := docker.StdServices()["jaeger"]
+	vJaeger.Ports = []string{"16686:16686", "4317:4317", "4318:4318"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML: obiConfigGrpcRelay,
 			Cgroup:     "host",
@@ -127,9 +129,6 @@ func TestSuite_GRPCRelay(t *testing.T) {
 				"HEALTH_PORT": "8094",
 			},
 		},
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317:4317", "4318:4318"},
-		},
 		"java-relay": &docker.ServiceDef{
 			Image:           "hatest-grpc-relay-java",
 			BuildContext:    "../../..",
@@ -167,7 +166,11 @@ func TestSuite_GRPCRelay(t *testing.T) {
 				"NEXT_HOP":    "go-grpc-to-http:50060",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-jaeger.yml")
+		"jaeger":     vJaeger,
+		"otelcol":    nil,
+		"prometheus": nil,
+		"weaver":     nil,
+	}))
 	if !KernelLockdownMode() {
 		compose.Env = append(compose.Env, `SECURITY_CONFIG_SUFFIX=_none`)
 	}

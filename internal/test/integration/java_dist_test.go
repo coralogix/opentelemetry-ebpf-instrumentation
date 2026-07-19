@@ -76,29 +76,31 @@ func testJavaNestedTracesPlainHTTP(t *testing.T, slug string) {
 }
 
 func TestJavaNestedTraces(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigWithJaegerHost,
-		NetworkMode: "host",
-		Pid:         "host",
-		Volumes: []string{
-			"./configs/:/configs",
-			"./system/sys/kernel/security:/sys/kernel/security",
-			"/sys/fs/cgroup:/sys/fs/cgroup",
-			"../../../testoutput:/coverage",
-			"../../../testoutput/run-nodejsdist:/var/run/obi",
-		},
-		DependsOn: map[string]string{"testserver": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
-			"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
-			"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
-			"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
-			"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
-			"OTEL_EBPF_OPEN_PORT":                        "8080",
-			"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-java-dist.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigWithJaegerHost,
+			NetworkMode: "host",
+			Pid:         "host",
+			Volumes: []string{
+				"./configs/:/configs",
+				"./system/sys/kernel/security:/sys/kernel/security",
+				"/sys/fs/cgroup:/sys/fs/cgroup",
+				"../../../testoutput:/coverage",
+				"../../../testoutput/run-nodejsdist:/var/run/obi",
+			},
+			DependsOn: map[string]string{"testserver": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_BPF_CONTEXT_PROPAGATION":          "all",
+				"OTEL_EBPF_BPF_HTTP_REQUEST_TIMEOUT":         "5s",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PATH": "/metrics",
+				"OTEL_EBPF_INTERNAL_METRICS_PROMETHEUS_PORT": "8999",
+				"OTEL_EBPF_JAVA_ROUTE_HARVEST_DELAY":         "10s",
+				"OTEL_EBPF_METRICS_FEATURES":                 "application,application_span_otel,application_service_graph",
+				"OTEL_EBPF_OPEN_PORT":                        "8080",
+				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
+			},
+		}),
+	}))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
@@ -123,7 +125,11 @@ func TestJavaNestedTraces(t *testing.T) {
 }
 
 func TestJavaMalformedIoctlFailsClosed(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vOtelcol := docker.StdServices()["otelcol"]
+	vOtelcol.DependsOn = map[string]string{"prometheus": "service_started", "weaver": "service_healthy"}
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML:      obiConfigWithJaegerHost,
 			Image:           "hatest-obi-b",
@@ -151,17 +157,6 @@ func TestJavaMalformedIoctlFailsClosed(t *testing.T) {
 				"OTEL_EBPF_PROCESSES_INTERVAL":               "100ms",
 			},
 		}),
-		"jaeger": &docker.ServiceDef{
-			Ports: []string{"16686:16686", "4317", "4318"},
-		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"},
-			Ports:   []string{"9090:9090"},
-		},
 		"testserver": &docker.ServiceDef{
 			Image:           "hatest-java-dist-netty-tls-malicious",
 			BuildContext:    "../../..",
@@ -172,7 +167,9 @@ func TestJavaMalformedIoctlFailsClosed(t *testing.T) {
 				"OTEL_SERVICE_NAME": "testserver",
 			},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml")
+		"otelcol":    vOtelcol,
+		"prometheus": vPrometheus,
+	}))
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() {

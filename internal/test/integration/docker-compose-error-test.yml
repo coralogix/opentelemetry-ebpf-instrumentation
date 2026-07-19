@@ -88,7 +88,6 @@ services:
       weaver:
         condition: service_healthy
 
-
   weaver:
     extends:
       file: components/weaver/service.yml

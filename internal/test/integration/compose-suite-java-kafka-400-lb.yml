@@ -111,35 +111,6 @@ services:
       kafkakafkakafkakafka000000000000000000000000000003:
         condition: service_started
 
-  otelcol:
-    ports:
-      - "4317" # OTLP over gRPC receiver
-      - "4318:4318" # OTLP over HTTP receiver
-      - "9464" # Prometheus exporter
-      - "8888" # metrics endpoint
-    depends_on:
-      prometheus:
-        condition: service_started
-      jaeger:
-        condition: service_started
-      weaver:
-        condition: service_healthy
-
-
-  prometheus:
-    ports:
-      - "9090:9090"
-
-  jaeger:
-    ports:
-      - "16686:16686" # Query frontend
-      - "4317" # OTEL GRPC traces collector
-      - "4318" # OTEL HTTP traces collector
-    volumes:
-      - ./configs/jaeger-ui-config.json:/etc/jaeger/ui-config.json
-    command: ["--query.ui-config=/etc/jaeger/ui-config.json"]
-
-
 volumes:
   kafka1_data:
   kafka2_data:

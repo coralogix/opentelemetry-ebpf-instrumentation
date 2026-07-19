@@ -24,7 +24,8 @@ import (
 
 // composeArgs prepends the standard compose invocation with one -f per layered file
 func (c *Compose) composeArgs(args ...string) []string {
-	cmdArgs := []string{"compose", "--ansi", "never"}
+	intDir := filepath.Join(tools.ProjectDir(), "internal", "test", "integration")
+	cmdArgs := []string{"compose", "--ansi", "never", "--project-directory", intDir}
 	for _, p := range c.Paths {
 		cmdArgs = append(cmdArgs, "-f", p)
 	}
@@ -173,6 +174,31 @@ func logPathFor(t testing.TB) string {
 	return filepath.Join(tools.ProjectDir(), "testoutput", "test-"+slug+".log")
 }
 
+// TestserverOBI is the obi definition for the most common suite shape: obi
+// sharing the test server's network and pid namespaces, with the standard
+// volume set. env carries only suite-specific settings; StdOBI fills the rest
+func TestserverOBI(runDir string, env map[string]string) *OBI {
+	return StdOBI(OBI{
+		NetworkMode: "service:testserver",
+		Pid:         "service:testserver",
+		RunDir:      runDir,
+		DependsOn:   map[string]string{"testserver": "service_started"},
+		Env:         env,
+	})
+}
+
+// Testserver is a ServiceDef for a test server built from an
+// internal/test/integration/components directory
+func Testserver(component, dockerfile, image string, ports ...string) *ServiceDef {
+	return &ServiceDef{
+		BuildContext:    "../../../internal/test/integration/components/" + component + "/",
+		BuildDockerfile: dockerfile,
+		Image:           image,
+		Ports:           ports,
+		DependsOn:       map[string]string{"otelcol": "service_started"},
+	}
+}
+
 // SuiteStack is ComposeStack with the log file derived from the test name
 func SuiteStack(t testing.TB, obi *OBI, composeFiles ...string) *Compose {
 	t.Helper()
@@ -200,7 +226,96 @@ func StdOBI(o OBI) *OBI {
 	env := maps.Clone(stdOBIEnv)
 	maps.Copy(env, o.Env)
 	o.Env = env
+	if o.BuildContext == "" && o.Image == "" {
+		o.BuildContext = "../../.."
+		o.BuildDockerfile = "./internal/test/integration/components/obi/Dockerfile"
+		o.Image = "hatest-obi"
+	}
+	if o.Privileged == nil {
+		o.Privileged = Bool(true)
+	}
 	return &o
+}
+
+// StdServices returns the standard infrastructure: a wired OpenTelemetry
+// collector, prometheus, jaeger and the weaver semconv validator. StdStack
+// merges these under a suite's own services; set an entry to nil to omit it
+func StdServices() map[string]*ServiceDef {
+	return map[string]*ServiceDef{
+		"otelcol": {
+			Image:         "otel/opentelemetry-collector-contrib:0.156.0@sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108",
+			ContainerName: "otel-col",
+			MemoryLimit:   "125M",
+			Restart:       "unless-stopped",
+			Command:       []string{"--config=/etc/otelcol-config/otelcol-config-weaver.yml"},
+			Volumes:       []string{"./configs/:/etc/otelcol-config"},
+			Ports:         []string{"4317", "4318:4318", "9464", "8888"},
+			DependsOn: map[string]string{
+				"prometheus": "service_started",
+				"jaeger":     "service_started",
+				"weaver":     "service_healthy",
+			},
+		},
+		"prometheus": {
+			Image:         "quay.io/prometheus/prometheus:v3.13.0@sha256:c6b27ea434f8389bfe233fbc7be381cf50587c286e871bc842008f5a1b1908a7",
+			ContainerName: "prometheus",
+			Command: []string{
+				"--config.file=/etc/prometheus/prometheus-config${PROM_CONFIG_SUFFIX:-}.yml",
+				"--web.enable-lifecycle",
+				"--enable-feature=exemplar-storage",
+				"--web.route-prefix=/",
+			},
+			Volumes: []string{"./configs/:/etc/prometheus"},
+			Ports:   []string{"9090:9090"},
+		},
+		"jaeger": {
+			Image: "jaegertracing/all-in-one:1.60@sha256:4fd2d70fa347d6a47e79fcb06b1c177e6079f92cba88b083153d56263082135e",
+			Env:   map[string]string{"COLLECTOR_OTLP_ENABLED": "true", "LOG_LEVEL": "debug"},
+			Ports: []string{"16686:16686", "4317", "4318"},
+		},
+		"weaver": {
+			Image:         "otel/weaver:v0.24.1@sha256:263964a7d444e77812f7a2d654e17683c4760a968c91278acdb7a44c20ccd572",
+			ContainerName: "weaver",
+			User:          "0:0",
+			WorkingDir:    "/obi-registry",
+			Command: []string{"registry", "live-check", "--registry", "/obi-registry",
+				"--include-unreferenced", "--inactivity-timeout", "300",
+				"--admin-port", "4320", "--format", "json",
+				"--diagnostic-format", "json", "--output", "/tmp/weaver-out"},
+			Volumes: []string{"/tmp/obi-weaver-out:/tmp/weaver-out", "../../../schemas/obi:/obi-registry:ro"},
+			Ports:   []string{"4320:4320"},
+			Healthcheck: &Healthcheck{
+				Test:        []string{"CMD-SHELL", "wget --timeout=1 -q -O /dev/null http://127.0.0.1:4317/ 2>&1 | grep -qv refused"},
+				Interval:    "5s",
+				Timeout:     "2s",
+				Retries:     60,
+				StartPeriod: "90s",
+			},
+		},
+	}
+}
+
+// StdStack merges the standard infrastructure under the given services.
+// Suite entries win; a nil entry removes the service entirely
+func StdStack(services map[string]*ServiceDef) Stack {
+	merged := StdServices()
+	maps.Copy(merged, services)
+	for k, v := range merged {
+		if v == nil {
+			delete(merged, k)
+		}
+	}
+	// drop dependencies on services removed via nil entries
+	for _, svc := range merged {
+		for dep := range svc.DependsOn {
+			if _, present := merged[dep]; !present && dep != "obi" && dep != "testserver" {
+				if _, wasNil := services[dep]; wasNil || services[dep] == nil {
+					delete(svc.DependsOn, dep)
+				}
+			}
+		}
+	}
+	return Stack{Services: merged}
 }
 
 // ComposeStack builds a suite from layered compose files (base, family,
@@ -303,6 +418,9 @@ func renderStackOverlay(projectRoot, logFile string, stack Stack) (string, error
 	var sb strings.Builder
 	sb.WriteString("services:\n")
 	for _, name := range slices.Sorted(maps.Keys(stack.Services)) {
+		if stack.Services[name] == nil {
+			continue
+		}
 		writeService(&sb, name, stack.Services[name])
 	}
 	if len(stack.NamedVolumes) > 0 {

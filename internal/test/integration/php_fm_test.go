@@ -112,16 +112,18 @@ func testREDMetricsPHPFPM(t *testing.T) {
 }
 
 func TestPHPFM(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigPhp,
-		NetworkMode: "host",
-		Pid:         "host",
-		RunDir:      "run-php",
-		DependsOn:   map[string]string{"nginx": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
-		},
-	}), "compose-base.yml", "compose-infra.yml", "compose-suite-php-fpm.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:  obiConfigPhp,
+			NetworkMode: "host",
+			Pid:         "host",
+			RunDir:      "run-php",
+			DependsOn:   map[string]string{"nginx": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
+			},
+		}),
+	}))
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
@@ -244,16 +246,21 @@ func testTracesPHPFPM(t *testing.T) {
 }
 
 func TestPHPFMUnixSock(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigPhp,
-		NetworkMode: "host",
-		Pid:         "host",
-		RunDir:      "run-php",
-		DependsOn:   map[string]string{"nginx": "service_started", "otelcol": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-php-fpm-sock.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:      obiConfigPhp,
+			Image:           "hatest-javaobi",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile",
+			NetworkMode:     "host",
+			Pid:             "host",
+			RunDir:          "run-php",
+			DependsOn:       map[string]string{"nginx": "service_started", "otelcol": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
+			},
+		}),
+	}), "compose-suite-php-fpm-sock.yml")
 	// we are going to setup discovery directly in the configuration file
 	compose.Env = append(compose.Env, `OTEL_EBPF_EXECUTABLE_PATH=`, `OTEL_EBPF_OPEN_PORT=`)
 	require.NoError(t, compose.Up())
@@ -266,16 +273,21 @@ func TestPHPFMUnixSock(t *testing.T) {
 }
 
 func TestPHPFMUnixSockNginxSupportFloor(t *testing.T) {
-	compose := docker.SuiteStack(t, docker.StdOBI(docker.OBI{
-		ConfigYAML:  obiConfigPhp,
-		NetworkMode: "host",
-		Pid:         "host",
-		RunDir:      "run-php",
-		DependsOn:   map[string]string{"nginx": "service_started", "otelcol": "service_started"},
-		Env: map[string]string{
-			"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
-		},
-	}), "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-jaeger.yml", "compose-frag-weaver.yml", "compose-suite-php-fpm-sock.yml")
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
+		"obi": docker.StdOBI(docker.OBI{
+			ConfigYAML:      obiConfigPhp,
+			Image:           "hatest-javaobi",
+			BuildContext:    "../../..",
+			BuildDockerfile: "./internal/test/integration/components/obi/Dockerfile",
+			NetworkMode:     "host",
+			Pid:             "host",
+			RunDir:          "run-php",
+			DependsOn:       map[string]string{"nginx": "service_started", "otelcol": "service_started"},
+			Env: map[string]string{
+				"OTEL_EBPF_EXECUTABLE_PATH": "(nginx|php-fpm)",
+			},
+		}),
+	}), "compose-suite-php-fpm-sock.yml")
 	compose.Env = append(
 		compose.Env,
 		`OTEL_EBPF_EXECUTABLE_PATH=`,

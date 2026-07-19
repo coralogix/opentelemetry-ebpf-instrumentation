@@ -30,23 +30,6 @@ services:
       testserver:
         condition: service_started
 
-  otelcol:
-    command: ["--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"]
-    ports:
-      - "4317" # OTLP over gRPC receiver
-      - "4318:4318" # OTLP over HTTP receiver
-      - "9464" # Prometheus exporter
-      - "8888" # metrics endpoint
-    depends_on:
-      prometheus:
-        condition: service_started
-      weaver:
-        condition: service_healthy
-
-  prometheus:
-    ports:
-      - "9090:9090"
-
   # pumba adds a 100ms delay to the testclient so the RTT test can assert avg RTT >= 100ms
   pumba:
     image: ghcr.io/alexei-led/pumba@sha256:b1226a1db9a82fdb74eb39ae36ef25ac576910edb569ae94dad3b640340656e8

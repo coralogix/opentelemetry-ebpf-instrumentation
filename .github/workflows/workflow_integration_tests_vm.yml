@@ -152,7 +152,7 @@ jobs:
         with:
           path: compiled-tests/docker-images.tar
           # OBI binary bakes bpf/cmd/pkg sources; hash them too or source changes reuse stale images.
-          key: vm-docker-images-${{ hashFiles('internal/test/integration/compose-suite-multiexec*.yml', 'internal/test/integration/compose-base.yml', 'internal/test/integration/**/Dockerfile*', 'bpf/**', 'cmd/**', 'pkg/**', 'go.mod', 'go.sum') }}
+          key: vm-docker-images-${{ hashFiles('internal/test/integration/compose-suite-multiexec*.yml', 'internal/test/integration/**/Dockerfile*', 'bpf/**', 'cmd/**', 'pkg/**', 'go.mod', 'go.sum') }}
 
       - name: Pre-build Docker images
         if: steps.docker-images-cache.outputs.cache-hit != 'true'

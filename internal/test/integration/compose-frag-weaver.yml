@@ -1,9 +1,0 @@
-services:
-  weaver:
-    extends:
-      file: components/weaver/service.yml
-      service: weaver
-    volumes:
-      - ../../../schemas/obi:/obi-registry:ro
-
-  # Prometheus

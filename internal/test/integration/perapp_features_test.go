@@ -17,7 +17,9 @@ import (
 )
 
 func TestPerAppFeatures(t *testing.T) {
-	compose := docker.SuiteStackServices(t, docker.Stack{Services: map[string]*docker.ServiceDef{
+	vPrometheus := docker.StdServices()["prometheus"]
+	vPrometheus.Command = []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"}
+	compose := docker.SuiteStackServices(t, docker.StdStack(map[string]*docker.ServiceDef{
 		"obi": docker.StdOBI(docker.OBI{
 			ConfigYAML: obiConfigPerapp,
 			Pid:        "host",
@@ -43,14 +45,6 @@ func TestPerAppFeatures(t *testing.T) {
 			Command:         []string{"node", "app.js"},
 			Ports:           []string{"3031:3030"},
 		},
-		"otelcol": &docker.ServiceDef{
-			Ports:     []string{"4317", "4318:4318", "9464", "8888"},
-			DependsOn: map[string]string{"prometheus": "service_started", "weaver": "service_healthy"},
-		},
-		"prometheus": &docker.ServiceDef{
-			Command: []string{"--config.file=/etc/prometheus/prometheus-config-perapp.yml", "--web.enable-lifecycle", "--web.route-prefix=/", "--log.level=debug"},
-			Ports:   []string{"9090:9090"},
-		},
 		"pytestserver": &docker.ServiceDef{
 			Image:           "hatest-testserver-python",
 			BuildContext:    "../../..",
@@ -75,7 +69,9 @@ func TestPerAppFeatures(t *testing.T) {
 			Image: "ghcr.io/open-telemetry/obi-testimg:rails-0.1.0@sha256:7a72159a113b9044378c42f7ea27ab00673c6a0ebfe3ac205cc006f46606b36c",
 			Ports: []string{"3041:3040"},
 		},
-	}}, "compose-base.yml", "compose-frag-otelcol.yml", "compose-frag-prometheus.yml", "compose-frag-weaver.yml")
+		"prometheus": vPrometheus,
+		"jaeger":     nil,
+	}))
 	require.NoError(t, compose.Up())
 
 	t.Run("OTEL exporter", func(t *testing.T) {
