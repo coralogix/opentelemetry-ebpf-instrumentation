@@ -91,25 +91,6 @@ func connect(addr string, port int) (net.Conn, error) {
 	return conn, nil
 }
 
-func connectWait(ip string, port int, timeout time.Duration, interval time.Duration) (net.Conn, error) {
-	deadline := time.Now().Add(timeout)
-
-	for {
-		conn, err := connect(ip, port)
-
-		if err == nil {
-			return conn, nil
-		}
-
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for %s:%d", ip, port)
-		}
-
-		time.Sleep(interval)
-		continue
-	}
-}
-
 func httpGet(conn net.Conn, path string) ([]byte, error) {
 	return httpGetWithTimeout(conn, path, inspectorRequestTimeout)
 }
@@ -257,10 +238,15 @@ func sendEvaluateWithTimeout(wsConn *websocket.Conn, exp string, id int, timeout
 	return nil
 }
 
-func (i *NodeInjector) injectFileWS(wsConn *websocket.Conn) error {
-	defer func() {
-		_ = sendEvaluate(wsConn, "process._debugEnd();", 2)
-	}()
+// injectFileWS evaluates the agent in the target process. closeInspector is set
+// only when we opened the inspector ourselves; an inspector that was already
+// open belongs to someone else and must not be closed.
+func (i *NodeInjector) injectFileWS(wsConn *websocket.Conn, closeInspector bool) error {
+	if closeInspector {
+		defer func() {
+			_ = sendEvaluate(wsConn, "process._debugEnd();", 2)
+		}()
+	}
 
 	script := string(_extractorBytes)
 
@@ -275,7 +261,7 @@ func (i *NodeInjector) injectFileWS(wsConn *websocket.Conn) error {
 	return nil
 }
 
-func (i *NodeInjector) injectViaConn(conn net.Conn) error {
+func (i *NodeInjector) injectViaConn(conn net.Conn, closeInspector bool) error {
 	wsURL, err := i.requestDebuggerURL(conn)
 	if err != nil {
 		conn.Close()
@@ -290,5 +276,5 @@ func (i *NodeInjector) injectViaConn(conn net.Conn) error {
 		return fmt.Errorf("failed to connect to inspector WebSocket: %w", err)
 	}
 
-	return i.injectFileWS(wsConn)
+	return i.injectFileWS(wsConn, closeInspector)
 }

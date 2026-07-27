@@ -18,6 +18,12 @@ import (
 	"go.opentelemetry.io/obi/pkg/obi"
 )
 
+const (
+	inspectorHost         = "127.0.0.1"
+	inspectorOpenTimeout  = 5 * time.Second
+	inspectorPollInterval = 200 * time.Millisecond
+)
+
 type NodeInjector struct {
 	log *slog.Logger
 	cfg *obi.Config
@@ -60,20 +66,23 @@ func (i *NodeInjector) attachAgent(pid int, elfFile *elf.File) error {
 }
 
 // injectFile attempts to connect to the Node.js inspector and inject the
-// agent. It first tries to connect directly (in case the inspector is already
-// open, e.g. via --inspect flag), validating with /json/version. If that fails,
-// it checks for a custom SIGUSR1 handler and either sends SIGUSR1 to open the
-// inspector or bails out.
+// agent. It first looks for an inspector that is already open (e.g. the app was
+// started with --inspect), validating with /json/version, and injects into it
+// without closing it afterwards. Otherwise it checks for a custom SIGUSR1
+// handler and either signals the process to open its inspector - discovering
+// the port that appears for this specific pid - or bails out.
 func (i *NodeInjector) injectFile(pid int, elfFile *elf.File) error {
-	conn, err := connect("127.0.0.1", 9229)
-	if err == nil {
-		// Validate this is actually a Node.js inspector, not some other
-		// service that happens to listen on port 9229.
-		if i.isNodeInspector(conn) {
-			i.log.Debug("Node.js inspector already open, injecting directly", "pid", pid)
-			return i.injectViaConn(conn)
-		}
-		conn.Close()
+	portsBefore, err := listeningTCPPorts(pid)
+	if err != nil {
+		i.log.Debug("couldn't enumerate listening ports, falling back to probing the default inspector port",
+			"pid", pid, "error", err)
+
+		portsBefore = map[int]struct{}{}
+	}
+
+	if conn, port, ok := i.findOpenInspector(pid, portsBefore); ok {
+		i.log.Debug("Node.js inspector already open, injecting directly", "pid", pid, "port", port)
+		return i.injectViaConn(conn, false)
 	}
 
 	if elfFile != nil {
@@ -99,17 +108,95 @@ func (i *NodeInjector) injectFile(pid int, elfFile *elf.File) error {
 		return fmt.Errorf("error enabling node inspector: %w", err)
 	}
 
-	conn, err = connectWait("127.0.0.1", 9229, 5*time.Second, 200*time.Millisecond)
+	conn, port, err := i.waitForOpenedInspector(pid, portsBefore, inspectorOpenTimeout, inspectorPollInterval)
 	if err != nil {
 		return fmt.Errorf("failed to connect to inspector after SIGUSR1: %w", err)
 	}
 
-	return i.injectViaConn(conn)
+	i.log.Debug("opened Node.js inspector", "pid", pid, "port", port)
+
+	return i.injectViaConn(conn, true)
 }
 
-// isNodeInspector validates that a connection to port 9229 is actually a
-// Node.js inspector by requesting /json/version and checking for a valid
-// JSON response.
+// findOpenInspector looks for an inspector already listening for this pid,
+// probing only ports it listens on that an --inspect flag could have configured.
+func (i *NodeInjector) findOpenInspector(pid int, listening map[int]struct{}) (net.Conn, int, bool) {
+	for _, port := range candidateInspectorPorts(pid) {
+		if len(listening) > 0 {
+			if _, ok := listening[port]; !ok {
+				continue
+			}
+		}
+
+		conn, err := connect(inspectorHost, port)
+		if err != nil {
+			continue
+		}
+
+		if i.isNodeInspector(conn) {
+			return conn, port, true
+		}
+
+		conn.Close()
+	}
+
+	return nil, 0, false
+}
+
+// waitForOpenedInspector waits for the inspector opened by SIGUSR1 to appear as
+// a new listening port of this pid, which copes with --inspect-port (including
+// port 0) and confirms the inspector belongs to the pid that was signalled.
+func (i *NodeInjector) waitForOpenedInspector(
+	pid int,
+	before map[int]struct{},
+	timeout time.Duration,
+	interval time.Duration,
+) (net.Conn, int, error) {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		current, err := listeningTCPPorts(pid)
+		if err != nil {
+			if conn, ok := i.dialInspector(defaultInspectorPort); ok {
+				return conn, defaultInspectorPort, nil
+			}
+		}
+
+		for port := range current {
+			if _, existed := before[port]; existed {
+				continue
+			}
+
+			if conn, ok := i.dialInspector(port); ok {
+				return conn, port, nil
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return nil, 0, fmt.Errorf("timed out waiting for the inspector of pid %d", pid)
+		}
+
+		time.Sleep(interval)
+	}
+}
+
+func (i *NodeInjector) dialInspector(port int) (net.Conn, bool) {
+	conn, err := connect(inspectorHost, port)
+	if err != nil {
+		return nil, false
+	}
+
+	if i.isNodeInspector(conn) {
+		return conn, true
+	}
+
+	conn.Close()
+
+	return nil, false
+}
+
+// isNodeInspector validates that a connection is actually a Node.js inspector
+// by requesting /json/version and checking for a valid JSON response.
 func (i *NodeInjector) isNodeInspector(conn net.Conn) bool {
 	resp, err := httpGet(conn, "/json/version")
 	if err != nil {
