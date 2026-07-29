@@ -105,8 +105,17 @@ func (c *Compose) Stop() error {
 	return c.command("stop", "--timeout", stopTimeout)
 }
 
+// Remove tears the project down completely: containers, the default network,
+// anonymous volumes, and any orphaned containers left attached to the project
+// network by an earlier crashed step. `compose rm` would remove only the
+// declared, already-stopped containers and leave a leaked one holding its
+// published host port — which fails the next suite's `compose up` with
+// "port is already allocated".
 func (c *Compose) Remove() error {
-	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path, "rm", "-f", "-v"}
+	cmdArgs := []string{
+		"compose", "--ansi", "never", "-f", c.Path,
+		"down", "--remove-orphans", "--volumes", "--timeout", stopTimeout,
+	}
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Env = c.Env
 

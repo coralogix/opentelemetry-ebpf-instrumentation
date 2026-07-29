@@ -126,6 +126,9 @@ jobs:
       - name: Build test tools
         run: make prereqs
 
+      - name: Enable docker init default
+        uses: ./.github/actions/docker-init-default
+
       - name: Verify OBI compiles
         run: docker build -f internal/test/integration/components/obi/Dockerfile .
 

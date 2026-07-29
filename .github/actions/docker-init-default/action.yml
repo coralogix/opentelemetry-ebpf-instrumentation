@@ -1,0 +1,21 @@
+name: Enable docker init default
+description: >-
+  Run an init (tini) as PID 1 in every container so `docker compose down` reaps
+  zombie processes and never leaves a container holding a published host port,
+  which would fail the next suite's `compose up` with "port is already allocated".
+runs:
+  using: composite
+  steps:
+    - name: Enable docker daemon init default
+      shell: bash
+      run: |
+        sudo mkdir -p /etc/docker
+        if [ -f /etc/docker/daemon.json ]; then
+          merged=$(sudo jq '. + {init: true}' /etc/docker/daemon.json)
+        else
+          merged='{"init": true}'
+        fi
+        echo "$merged" | sudo tee /etc/docker/daemon.json >/dev/null
+        sudo systemctl restart docker
+        for _ in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+        docker info --format 'docker init binary: {{.InitBinary}}'

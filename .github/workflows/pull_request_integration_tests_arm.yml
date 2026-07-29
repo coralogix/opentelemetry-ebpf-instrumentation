@@ -173,6 +173,9 @@ jobs:
       - name: Build test tools
         run: make prereqs
 
+      - name: Enable docker init default
+        uses: ./.github/actions/docker-init-default
+
       - name: Restore base images
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
         with:
