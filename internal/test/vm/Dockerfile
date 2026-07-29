@@ -19,16 +19,7 @@ RUN apk update && apk add --no-cache \
     iptables \
     iptables-legacy \
     make \
-    openrc \
-    tini
-
-# Run an init (tini) as PID 1 in every container. Without it a container whose
-# main process leaves a zombie child can't be killed on `compose down`, survives
-# teardown holding its published host port, and fails the next suite's
-# `compose up` with "port is already allocated". Alpine's docker package has no
-# bundled docker-init, so point init-path at the tini binary explicitly.
-RUN mkdir -p /etc/docker && \
-    printf '{ "init": true, "init-path": "/sbin/tini" }\n' > /etc/docker/daemon.json
+    openrc
 
 # Default iptables symlink to legacy; modules-load may relink to nft on
 # RHEL kernels that lack CONFIG_IP_NF_NAT modules.
