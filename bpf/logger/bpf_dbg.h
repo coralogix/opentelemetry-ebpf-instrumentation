@@ -20,6 +20,7 @@
 
 #include <common/globals.h>
 #include <common/pin_internal.h>
+#include <common/scratch_mem.h>
 
 typedef struct log_info {
     u64 pid;
@@ -39,13 +40,19 @@ enum bpf_func_id___x {
     BPF_FUNC_trace_vprintk___x = 177,
 };
 
+// Scratch memory, not a bpf_ringbuf_reserve() record: is_spillable_regtype() gained
+// PTR_TO_MEM only in 744ea4e3885e (5.11, backported to 5.10.y), so on older kernels the
+// reserved pointer reloads from the stack as a scalar once the helper calls below force a
+// spill. A map value pointer spills correctly.
+SCRATCH_MEM_TYPED(log_info, log_info_t);
+
 #define bpf_dbg_printk(fmt, args...)                                                               \
     do {                                                                                           \
         if (!g_bpf_debug) {                                                                        \
             break;                                                                                 \
         }                                                                                          \
         bpf_printk(fmt, ##args);                                                                   \
-        log_info_t *__trace__ = bpf_ringbuf_reserve(&debug_events, sizeof(log_info_t), 0);         \
+        log_info_t *__trace__ = log_info_mem();                                                    \
         if (!__trace__) {                                                                          \
             break;                                                                                 \
         }                                                                                          \
@@ -63,7 +70,7 @@ enum bpf_func_id___x {
         struct task_struct *task = (struct task_struct *)bpf_get_current_task();                   \
         __trace__->pid = (u32)BPF_CORE_READ(task, pid);                                            \
         BPF_CORE_READ_STR_INTO(&__trace__->comm, task, comm);                                      \
-        bpf_ringbuf_submit(__trace__, 0);                                                          \
+        bpf_ringbuf_output(&debug_events, __trace__, sizeof(*__trace__), 0);                       \
     } while (0)
 
 #define bpf_dbg_enter() bpf_dbg_printk("%s entered", __FUNCTION__)
