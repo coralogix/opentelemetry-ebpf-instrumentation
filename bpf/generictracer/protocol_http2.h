@@ -6,8 +6,10 @@
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 
+#include <common/globals.h>
 #include <common/h2_defs.h>
 #include <common/iov_iter.h>
+#include <common/scratch_mem.h>
 #include <common/http_buf_size.h>
 #include <common/ringbuf.h>
 #include <common/trace_lifecycle.h>
@@ -31,6 +33,10 @@
 
 // These are bit flags, if you add any use power of 2 values
 enum { http2_conn_flag_ssl = WITH_SSL, http2_conn_flag_new = 0x2 };
+
+// decoder scratch buffers, kept off the BPF stack
+SCRATCH_MEM_SIZED(h2_tp_huff_win, k_h2_tp_huff_window)
+SCRATCH_MEM_SIZED(h2_tp_huff_out, k_hpack_value_len_tp)
 
 static __always_inline grpc_frames_ctx_t *grpc_ctx() {
     return bpf_map_lookup_elem(&grpc_frames_ctx_mem, &(int){0});
@@ -388,8 +394,101 @@ int obi_protocol_http2_grpc_handle_start_frame_server(void *ctx) {
 
     u32 hpack_off;
     const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
-    if (!parse_hpack_traceparent(h2g_info->data + hpack_off, hpack_len, &tp_p->tp)) {
-        find_trace_for_server_request(&g_ctx->stream.pid_conn.conn, &tp_p->tp, EVENT_HTTP_REQUEST);
+    g_ctx->huff.next = k_h2_huff_then_finalize;
+
+    if (parse_hpack_traceparent(h2g_info->data + hpack_off, hpack_len, &tp_p->tp, &g_ctx->huff)) {
+        bpf_tail_call(
+            ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+        return 0;
+    }
+
+    // without bpf_loop the decode program is a dummy, so skip the detour entirely
+    if (g_bpf_loop_enabled) {
+        // name matched, value compressed: decoding needs its own program
+        if (g_ctx->huff.len) {
+            bpf_tail_call(
+                ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_huffman);
+            return 0;
+        }
+
+        bpf_tail_call(
+            ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_huffscan);
+        return 0;
+    }
+
+    bpf_tail_call(ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+    return 0;
+}
+
+// SERVER huffscan: an indexed name leaves nothing to fingerprint, so locate the compressed
+// value alone; ranked above the connection heuristic, unlike the weak fingerprint in finalize
+SEC("kprobe/http2")
+int obi_protocol_http2_grpc_handle_start_frame_server_huffscan(void *ctx) {
+    grpc_frames_ctx_t *g_ctx = grpc_ctx();
+    if (!g_ctx) {
+        return 0;
+    }
+    http2_grpc_request_t *h2g_info = http2_info_mem();
+    if (!h2g_info) {
+        return 0;
+    }
+    tp_info_pid_t *tp_p = tp_info_mem();
+    if (!tp_p) {
+        return 0;
+    }
+
+    u32 hpack_off;
+    const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
+    g_ctx->huff.next = k_h2_huff_then_finalize;
+
+    if (find_hpack_traceparent_huffman(h2g_info->data + hpack_off, hpack_len, &g_ctx->huff)) {
+        bpf_tail_call(
+            ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_huffman);
+        return 0;
+    }
+
+    bpf_tail_call(ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+    return 0;
+}
+
+// SERVER huffman: decodes the value the scan located, in its own tail-call program
+SEC("kprobe/http2")
+int obi_protocol_http2_grpc_handle_start_frame_server_huffman(void *ctx) {
+    // needs bpf_loop; without it the block keeps its existing fallback
+    if (!g_bpf_loop_enabled) {
+        bpf_tail_call(
+            ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
+        return 0;
+    }
+
+    grpc_frames_ctx_t *g_ctx = grpc_ctx();
+    if (!g_ctx) {
+        return 0;
+    }
+    http2_grpc_request_t *h2g_info = http2_info_mem();
+    if (!h2g_info) {
+        return 0;
+    }
+    tp_info_pid_t *tp_p = tp_info_mem();
+    if (!tp_p) {
+        return 0;
+    }
+
+    u32 hpack_off;
+    const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
+    unsigned char *w = h2_tp_huff_win_mem();
+    unsigned char *out = h2_tp_huff_out_mem();
+    if (!w || !out) {
+        return 0;
+    }
+
+    (void)try_parse_tp_huffman_value(
+        h2g_info->data + hpack_off, hpack_len, &g_ctx->huff, w, out, &tp_p->tp);
+
+    if (g_ctx->huff.next == k_h2_huff_then_commit) {
+        bpf_tail_call(
+            ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_commit);
+        return 0;
     }
 
     bpf_tail_call(ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_finalize);
@@ -399,6 +498,10 @@ int obi_protocol_http2_grpc_handle_start_frame_server(void *ctx) {
 // SERVER finalize: dyn-table traceparent scan, then tail-calls commit
 SEC("kprobe/http2")
 int obi_protocol_http2_grpc_handle_start_frame_server_finalize(void *ctx) {
+    grpc_frames_ctx_t *g_ctx = grpc_ctx();
+    if (!g_ctx) {
+        return 0;
+    }
     http2_grpc_request_t *h2g_info = http2_info_mem();
     if (!h2g_info) {
         return 0;
@@ -409,9 +512,14 @@ int obi_protocol_http2_grpc_handle_start_frame_server_finalize(void *ctx) {
     }
 
     if (!valid_trace(tp_p->tp.trace_id)) {
+        find_trace_for_server_request(&g_ctx->stream.pid_conn.conn, &tp_p->tp, EVENT_HTTP_REQUEST);
+    }
+
+    if (!valid_trace(tp_p->tp.trace_id)) {
         u32 hpack_off;
         const u32 hpack_len = h2_hpack_window(h2g_info, &hpack_off);
-        find_hpack_traceparent_value(h2g_info->data + hpack_off, hpack_len, &tp_p->tp);
+        // a miss leaves tp invalid and commit assigns a new trace id
+        (void)find_hpack_traceparent_value(h2g_info->data + hpack_off, hpack_len, &tp_p->tp);
     }
 
     bpf_tail_call(ctx, &jump_table, k_tail_protocol_http2_grpc_handle_start_frame_server_commit);

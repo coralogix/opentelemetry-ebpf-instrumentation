@@ -878,3 +878,27 @@ func BenchmarkIsHTTP2(b *testing.B) {
 		}
 	}
 }
+
+// A desynced HPACK dynamic table can hand :path another field's value; anything
+// that is not an absolute path must degrade to "*", never become a metric label
+func TestValidPathRequiresAbsolutePath(t *testing.T) {
+	valid := []string{
+		"/ipservice.IPService/GetIpV4Info",
+		"/relay.Relay/Relay",
+		"/",
+	}
+	for _, p := range valid {
+		assert.True(t, validPath.MatchString(p), p)
+	}
+
+	invalid := []string{
+		"00-001f6ca4dd49f899e999ea3a7c0f1dab-9e5179d7828a4f85-02",
+		"application/grpc",
+		"*",
+		"",
+		"grpc-timeout",
+	}
+	for _, p := range invalid {
+		assert.False(t, validPath.MatchString(p), p)
+	}
+}

@@ -39,7 +39,9 @@ const (
 const initialHeaderTableSize = 4096
 
 var (
-	validPath        = regexp.MustCompile(`^[A-Za-z0-9\-/._~]+$`)
+	// anchored to '/': a desynced HPACK dynamic table can resolve :path to another
+	// field's value (e.g. a traceparent), which must degrade to "*", not a label
+	validPath        = regexp.MustCompile(`^/[A-Za-z0-9\-/._~]*$`)
 	validContentType = regexp.MustCompile(`^[A-Za-z\-/\+]+$`)
 )
 

@@ -758,6 +758,12 @@ func FixupSpec(spec *ebpf.CollectionSpec, overrideKernelVersion bool) {
 			spec.Programs["obi_uprobe_readMimeHeader"] = dummy
 		}
 
+		// The huffman decode's bpf_loop callback trips the same func_info validation;
+		// the BPF side skips the detour to it when g_bpf_loop_enabled=false
+		if _, ok := spec.Programs["obi_protocol_http2_grpc_handle_start_frame_server_huffman"]; ok {
+			spec.Programs["obi_protocol_http2_grpc_handle_start_frame_server_huffman"] = dummy
+		}
+
 		// gotracer's HTTP/1 client traceparent injection scans the request
 		// headers with a bpf_loop in obi_uprobe_writeSubset_returns. Swap it for
 		// the bounded-scan legacy variant so the bpf_loop subprog isn't part of
