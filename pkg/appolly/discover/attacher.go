@@ -168,7 +168,6 @@ func (ta *traceAttacher) getTracer(ie *ebpf.Instrumentable) bool {
 
 		// allowing the tracer to forward traces from the new PID and its children processes
 		ta.monitorPIDs(tracer, ie)
-		ta.Metrics.InstrumentProcess(ie.FileInfo.ExecutableName())
 		if tracer.Type == ebpf.Generic {
 			// We need to do this because generic tracers have shared libraries. For example,
 			// a python executable can run an SSL and non-SSL application, so it's not enough
@@ -177,6 +176,10 @@ func (ta *traceAttacher) getTracer(ie *ebpf.Instrumentable) bool {
 			ok = ta.updateTracerProbes(tracer, ie)
 		} else {
 			ta.monitorPIDs(ta.reusableGoTracer, ie)
+		}
+		// only count the process once its probes are actually attached
+		if ok {
+			ta.Metrics.InstrumentProcess(ie.FileInfo.ExecutableName())
 		}
 		ta.log.Debug(".done", "success", ok)
 		return ok
@@ -365,6 +368,8 @@ func (ta *traceAttacher) reuseTracer(tracer *ebpf.ProcessTracer, ie *ebpf.Instru
 
 	if err := tracer.NewExecutable(exe, ie); err != nil {
 		ta.log.Debug("Failed to attach uprobes for new executable", "pid", ie.FileInfo.Pid(), "error", err)
+		ta.Metrics.InstrumentationError(ie.FileInfo.ExecutableName(), imetrics.InstrumentationErrorAttachingUprobe)
+		return false
 	}
 
 	ta.log.Debug("reusing Generic tracer for",
@@ -386,6 +391,8 @@ func (ta *traceAttacher) reuseTracer(tracer *ebpf.ProcessTracer, ie *ebpf.Instru
 func (ta *traceAttacher) updateTracerProbes(tracer *ebpf.ProcessTracer, ie *ebpf.Instrumentable) bool {
 	if err := tracer.NewExecutableInstance(ie); err != nil {
 		ta.log.Debug("Failed to attach uprobes", "pid", ie.FileInfo.Pid(), "error", err)
+		ta.Metrics.InstrumentationError(ie.FileInfo.ExecutableName(), imetrics.InstrumentationErrorAttachingUprobe)
+		return false
 	}
 
 	ta.log.Debug("reusing Generic tracer for",

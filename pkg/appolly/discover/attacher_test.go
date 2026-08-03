@@ -6,6 +6,7 @@ package discover
 import (
 	"context"
 	"io"
+	"log/slog"
 	"testing"
 
 	cebpf "github.com/cilium/ebpf"
@@ -21,6 +22,7 @@ import (
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
 	"go.opentelemetry.io/obi/pkg/internal/goexec"
+	"go.opentelemetry.io/obi/pkg/internal/helpers/maps"
 	"go.opentelemetry.io/obi/pkg/internal/testutil"
 	"go.opentelemetry.io/obi/pkg/obi"
 	"go.opentelemetry.io/obi/pkg/pipe/msg"
@@ -225,4 +227,42 @@ func startDeletedTyperPipeline(
 			}
 		}
 	}()
+}
+
+// Deleting one executable must only tear down the tracer registered under its
+// own {device, inode} key, never a same-inode sibling from another filesystem.
+func TestNotifyProcessDeletion_DistinguishesDevicesForSameInode(t *testing.T) {
+	tracerEventsQu := msg.NewQueue[Event[*ebpf.Instrumentable]](msg.ChannelBufferLen(10))
+	tracerEvents := tracerEventsQu.Subscribe()
+
+	firstFile := execpkg.New(execpkg.Init{CmdExePath: "/bin/test", Pid: 41, Dev: 100, Ino: 1234, Ns: 17})
+	secondFile := execpkg.New(execpkg.Init{CmdExePath: "/bin/test", Pid: 42, Dev: 200, Ino: 1234, Ns: 17})
+
+	firstProgram := &recordingTracer{}
+	firstTracer := &ebpf.ProcessTracer{Type: ebpf.Go, Programs: []ebpf.Tracer{firstProgram}}
+	secondProgram := &recordingTracer{}
+	secondTracer := &ebpf.ProcessTracer{Type: ebpf.Go, Programs: []ebpf.Tracer{secondProgram}}
+
+	ta := &traceAttacher{
+		log:                slog.Default(),
+		Metrics:            imetrics.NoopReporter{},
+		existingTracers:    map[ebpf.ExecutableKey]executableTracer{},
+		processInstances:   maps.MultiCounter[ebpf.ExecutableKey]{},
+		OutputTracerEvents: tracerEventsQu,
+	}
+	ta.existingTracers[executableKey(firstFile)] = executableTracer{tracer: firstTracer, generation: 1}
+	ta.processInstances.Inc(executableKey(firstFile))
+	ta.existingTracers[executableKey(secondFile)] = executableTracer{tracer: secondTracer, generation: 2}
+	ta.processInstances.Inc(executableKey(secondFile))
+
+	ta.notifyProcessDeletion(&ebpf.Instrumentable{FileInfo: firstFile})
+
+	ev := testutil.ReadChannel(t, tracerEvents, testTimeout)
+	require.Equal(t, EventDeleted, ev.Type)
+	assert.Same(t, firstTracer, ev.Obj.Tracer)
+	assert.Equal(t, uint64(1), ev.Obj.ExecutableGeneration)
+	assert.Equal(t, []blockedPID{{pid: 41, ns: 17}}, firstProgram.blocked)
+	assert.Empty(t, secondProgram.blocked)
+	assert.Len(t, ta.existingTracers, 1)
+	assert.Contains(t, ta.existingTracers, executableKey(secondFile))
 }
