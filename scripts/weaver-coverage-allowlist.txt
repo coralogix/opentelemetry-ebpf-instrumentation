@@ -1,6 +1,10 @@
-# Telemetry OBI can emit but that the integration matrix cannot trigger, so it
-# is excluded from the weaver-coverage denominator instead of failing the gate.
-# One metric name or attribute per line; '#' starts a comment.
+# OTLP telemetry OBI can emit but that the integration matrix cannot trigger,
+# so it is excluded from the weaver-coverage denominator instead of failing the
+# gate. One metric name or attribute per line; '#' starts a comment.
+#
+# Prometheus-only signals (obi.bpf.*, obi.otel.*, … — imetrics has no OTLP
+# reporter) are NOT listed here: they are dropped at the source, in
+# scripts/weaver-schema-denominator.sh, because coverage is an OTLP question.
 #
 # Keep this list minimal and justified. Prefer adding a suite that exercises the
 # signal over allowlisting it. Calibrate from the weaver-coverage-aggregate

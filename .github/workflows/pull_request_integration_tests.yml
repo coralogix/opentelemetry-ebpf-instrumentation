@@ -394,10 +394,30 @@ jobs:
           pattern: weaver-reports-*-${{ github.run_number }}
           path: ./all-weaver-reports
 
-      - name: Aggregate coverage and emit summary
+      - name: Fetch upstream semconv registry
+        run: ./scripts/fetch-upstream-semconv.sh
+
+      - name: Derive coverage denominator from the OBI schema
         run: |
           mkdir -p /tmp/weaver-coverage
-          go run ./cmd/obi-telemetry-surface -output /tmp/weaver-coverage/intended.json
+          WEAVERIMAGE=$(awk '$4=="weaver"{print $2}' dependencies.Dockerfile)
+          ./scripts/weaver-schema-denominator.sh \
+            docker "$WEAVERIMAGE" "$(pwd)/schemas/obi" \
+            /tmp/weaver-coverage/intended.json
+
+      - name: Drift guard — code emits nothing the schema omits
+        run: |
+          go run ./cmd/obi-telemetry-surface -output /tmp/weaver-coverage/code-emitted.json
+          missing=$(jq -n \
+            --slurpfile schema /tmp/weaver-coverage/intended.json \
+            --slurpfile code /tmp/weaver-coverage/code-emitted.json '
+            [ $code[0].metric_names[] | select(. as $m | ($schema[0].metric_names | index($m)) | not) ]')
+          if [ "$(printf '%s' "$missing" | jq "length")" -gt 0 ]; then
+            echo "::warning title=Schema drift::code emits OTLP metrics the schema does not declare: $missing"
+          fi
+
+      - name: Aggregate coverage and emit summary
+        run: |
           # Report-only for now: emits the coverage summary and gap list without
           # failing the build. Drop --no-fail to enforce once the allowlist is
           # calibrated from a full matrix run.

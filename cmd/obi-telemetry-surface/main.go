@@ -3,14 +3,15 @@
 
 // obi-telemetry-surface prints the code-derived set of telemetry OBI can emit:
 // the metric names and metric attributes enumerated from the attribute-selection
-// registry with every feature group enabled. It is the denominator for the
-// weaver telemetry-coverage aggregate: every name it lists must be observed by
-// at least one weaver live-check across the integration suite.
+// registry with every feature group enabled. The coverage denominator is
+// resolved from the OBI schema (see scripts/weaver-schema-denominator.sh); this
+// tool is the drift guard that keeps the schema honest — every OTLP metric the
+// code emits must be declared in the schema, or the aggregate warns.
 //
 // Usage:
 //
-//	go run ./cmd/obi-telemetry-surface > intended-telemetry.json
-//	go run ./cmd/obi-telemetry-surface -output intended-telemetry.json
+//	go run ./cmd/obi-telemetry-surface > code-emitted.json
+//	go run ./cmd/obi-telemetry-surface -output code-emitted.json
 package main
 
 import (
