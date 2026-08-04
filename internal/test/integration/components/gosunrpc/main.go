@@ -22,6 +22,7 @@ const (
 	msgReply          = 1
 	replyAccepted     = 0
 	authNull          = 0
+	authUnix          = 1
 	rmLastFrag        = 0x80000000
 )
 
@@ -69,7 +70,7 @@ func handleSunRPC(w http.ResponseWriter, _ *http.Request) {
 	}
 	defer conn.Close()
 
-	call := buildCallRecord(42, programPortmapper, rpcVersion, 0, authNull, nil)
+	call := buildCallRecord(42, programPortmapper, rpcVersion, 0, authUnix, buildAuthSysCred("obi-test", 0, 0))
 	if _, err := conn.Write(wrapTCPRecord(call)); err != nil {
 		http.Error(w, "sunrpc write failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -184,6 +185,21 @@ func buildCallRecord(xid, prog, vers, proc, authFlavor uint32, authBody []byte) 
 	msg = appendU32(msg, msgCall)
 	msg = append(msg, body...)
 	return msg
+}
+
+func buildAuthSysCred(machinename string, uid, gid uint32) []byte {
+	stamp := uint32(0)
+	body := appendU32(nil, stamp)
+	body = appendU32(body, uint32(len(machinename)))
+	body = append(body, machinename...)
+	for len(body)%4 != 0 {
+		body = append(body, 0)
+	}
+	body = appendU32(body, uid)
+	body = appendU32(body, gid)
+	gidsCount := uint32(0)
+	body = appendU32(body, gidsCount)
+	return body
 }
 
 func buildAcceptedReplyRecord(xid uint32, acceptStat uint32) []byte {
