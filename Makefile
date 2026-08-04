@@ -164,6 +164,24 @@ lint-schema: fetch-upstream-semconv
 	@echo "### Linting OBI semantic-convention registry"
 	@./scripts/lint-schema.sh $(OCI_BIN) $(WEAVERIMAGE) "$(CURDIR)/schemas/obi"
 
+# Aggregate the per-suite weaver reports into a telemetry-coverage report,
+# measuring the observed telemetry against the schema-resolved denominator.
+# All logic lives in cmd/obi-weaver-coverage; the denominator is resolved from
+# schemas/obi here so CI needs nothing but `make weaver-coverage`.
+WEAVER_REPORTS_DIR ?= ./all-weaver-reports
+WEAVER_COVERAGE_OUT ?= /tmp/weaver-coverage
+.PHONY: weaver-coverage
+weaver-coverage: fetch-upstream-semconv
+	@echo "### Aggregating weaver telemetry coverage"
+	@mkdir -p "$(WEAVER_COVERAGE_OUT)"
+	@go run ./cmd/obi-weaver-coverage \
+		--schema "$(CURDIR)/schemas/obi" \
+		--oci-bin $(OCI_BIN) \
+		--weaver-image $(WEAVERIMAGE) \
+		--in "$(WEAVER_REPORTS_DIR)" \
+		--out-md "$(WEAVER_COVERAGE_OUT)/coverage.md" \
+		--out-json "$(WEAVER_COVERAGE_OUT)/coverage.json"
+
 .PHONY: lint-dependency-policy
 lint-dependency-policy:
 	@echo "### Linting dependency integrity policy"
