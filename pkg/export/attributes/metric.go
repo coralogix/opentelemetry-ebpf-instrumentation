@@ -241,6 +241,52 @@ var (
 	}
 )
 
+var AllMetrics = []Name{
+	NetworkFlow,
+	NetworkFlowPackets,
+	NetworkInterZone,
+	HTTPServerRequestSize,
+	HTTPServerResponseSize,
+	HTTPClientRequestSize,
+	HTTPClientResponseSize,
+	HTTPServerDuration,
+	HTTPClientDuration,
+	RPCServerDuration,
+	RPCClientDuration,
+	DBClientDuration,
+	MessagingPublishDuration,
+	MessagingProcessDuration,
+	GPUCudaKernelLaunchCalls,
+	GPUCudaGraphLaunchCalls,
+	GPUCudaKernelGridSize,
+	GPUCudaKernelBlockSize,
+	GPUCudaMemoryAllocations,
+	GPUCudaMemoryCopies,
+	DNSLookupDuration,
+	GenAIClientInputTokenUsage,
+	GenAIClientOutputTokenUsage,
+	GenAIClientOperationDuration,
+	GoRuntimeMemoryLimit,
+	GoRuntimeMemoryGCGoal,
+	GoRuntimeMemoryGCCycles,
+	GoRuntimeMemoryUsed,
+	GoRuntimeMemoryAllocated,
+	GoRuntimeMemoryAllocations,
+	GoRuntimeCPUTime,
+	GoRuntimeGoroutineCount,
+	GoRuntimeProcessorLimit,
+	GoRuntimeConfigGOGC,
+	JVMMemoryUsed,
+	JVMMemoryCommitted,
+	JVMMemoryLimit,
+	JVMMemoryUsedAfterLastGC,
+	Resource,
+	StatTCPRtt,
+	StatTCPFailedConnections,
+	StatTCPRetransmits,
+	StatTCPIo,
+}
+
 // normalizeMetric will facilitate the user-input in the attributes.enable section.
 // The user can specify the Prometheus or OTEL notation, and can include or not
 // the units and aggregations for the metrics. OBI will accept all the inputs

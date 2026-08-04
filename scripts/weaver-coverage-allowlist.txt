@@ -1,0 +1,18 @@
+# Telemetry OBI can emit but that the integration matrix cannot trigger, so it
+# is excluded from the weaver-coverage denominator instead of failing the gate.
+# One metric name or attribute per line; '#' starts a comment.
+#
+# Keep this list minimal and justified. Prefer adding a suite that exercises the
+# signal over allowlisting it. Calibrate from the weaver-coverage-aggregate
+# artifact of a full matrix run: anything reported as an uncovered gap is either
+# a missing test (fix the test) or genuinely untriggerable here (add it here).
+#
+# Candidates observed to be untriggerable on GPU-less GitHub runners — uncomment
+# once confirmed against a full run:
+# gpu.cuda.kernel.launch.calls
+# gpu.cuda.graph.launch.calls
+# gpu.cuda.kernel.grid.size
+# gpu.cuda.kernel.block.size
+# gpu.cuda.memory.allocations
+# gpu.cuda.memory.copies
+# cuda.memcpy.kind
