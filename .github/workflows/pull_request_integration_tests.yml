@@ -418,16 +418,14 @@ jobs:
 
       - name: Aggregate coverage and emit summary
         run: |
-          # Report-only for now: emits the coverage summary and gap list without
-          # failing the build. Drop --no-fail to enforce once the allowlist is
-          # calibrated from a full matrix run.
-          bash ./scripts/weaver-coverage-aggregate.sh \
+          # Report-only for now: emits the coverage summary and the list of
+          # never-observed metrics/attributes without failing the build. Add
+          # --fail-on-gap to enforce once the reported gaps are understood.
+          go run ./cmd/obi-weaver-coverage \
             --in ./all-weaver-reports \
             --intended /tmp/weaver-coverage/intended.json \
-            --allowlist ./scripts/weaver-coverage-allowlist.txt \
             --out-md /tmp/weaver-coverage/coverage.md \
-            --out-json /tmp/weaver-coverage/coverage.json \
-            --no-fail
+            --out-json /tmp/weaver-coverage/coverage.json
 
       - name: Upload coverage summary
         if: always()

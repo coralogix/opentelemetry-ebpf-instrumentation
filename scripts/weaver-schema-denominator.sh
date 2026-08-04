@@ -6,7 +6,7 @@
 # metric names and attributes the schema resolves to WITHOUT
 # --include-unreferenced, i.e. exactly what OBI declares plus what it `ref`s
 # from upstream. This is OBI's OTLP contract, and it is the single source of
-# truth the coverage gate measures against (see weaver-coverage-aggregate.sh).
+# truth the coverage gate measures against (see cmd/obi-weaver-coverage).
 #
 # Prometheus-only signals still declared in the schema for documentation
 # (obi.bpf.*, obi.otel.*, … — imetrics has no OTLP reporter) never reach
