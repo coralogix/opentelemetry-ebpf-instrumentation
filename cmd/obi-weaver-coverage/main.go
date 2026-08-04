@@ -26,18 +26,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"go.opentelemetry.io/obi/pkg/export/attributes"
 )
-
-// promOnly matches obi.* metrics OBI emits over Prometheus only (imetrics has
-// no OTLP reporter), so weaver never observes them and they are not part of the
-// OTLP coverage denominator. The OTLP obi.* signals are obi.network.* /
-// obi.stat.*, which do not match.
-var promOnly = regexp.MustCompile(`^obi\.(bpf|ebpf|otel|kube|avoided|instrumentation|instrumented|internal)\.`)
 
 type resolvedGroup struct {
 	Type       string `json:"type"`
@@ -68,7 +61,7 @@ func parseDenominator(resolved []byte) (Surface, error) {
 	metrics := map[string]struct{}{}
 	attrs := map[string]struct{}{}
 	for _, g := range groups {
-		if g.Type == "metric" && g.MetricName != "" && !promOnly.MatchString(g.MetricName) {
+		if g.Type == "metric" && g.MetricName != "" {
 			metrics[g.MetricName] = struct{}{}
 		}
 		for _, a := range g.Attributes {

@@ -140,7 +140,7 @@ func TestLoadReportsEmptyDir(t *testing.T) {
 	assert.Empty(t, reports)
 }
 
-func TestParseDenominatorExtractsMetricsAndAttributesDropsPromOnly(t *testing.T) {
+func TestParseDenominatorExtractsAllMetricsAndAttributes(t *testing.T) {
 	resolved := []byte(`{"groups":[
 		{"type":"metric","metric_name":"http.server.request.duration","attributes":[
 			{"name":"http.request.method"},{"name":"server.address"}]},
@@ -153,8 +153,10 @@ func TestParseDenominatorExtractsMetricsAndAttributesDropsPromOnly(t *testing.T)
 	got, err := parseDenominator(resolved)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"http.server.request.duration", "obi.network.flow.bytes"}, got.MetricNames,
-		"OTLP obi.* kept, Prometheus-only obi.bpf.*/obi.internal.* dropped")
+	assert.Equal(t, []string{
+		"http.server.request.duration", "obi.bpf.probe.executions",
+		"obi.internal.build.info", "obi.network.flow.bytes",
+	}, got.MetricNames, "OBI internal metrics are OTLP-emitted (metrics_internal.go) and belong in the denominator")
 	assert.Equal(t, []string{"http.request.method", "server.address", "src.address", "url.path"}, got.MetricAttributes)
 }
 
@@ -172,11 +174,3 @@ func TestParseDenominatorUnwrapsRegistryAndFallsBackAttrKey(t *testing.T) {
 		"attribute name falls back to id then ref")
 }
 
-func TestPromOnlyRegexMatchesInternalNotOTLPObi(t *testing.T) {
-	for _, prom := range []string{"obi.bpf.probe.executions", "obi.otel.metric.exports", "obi.kube.cache.forward.lag", "obi.internal.build.info"} {
-		assert.True(t, promOnly.MatchString(prom), prom)
-	}
-	for _, otlp := range []string{"obi.network.flow.bytes", "obi.stat.tcp.rtt", "http.server.request.duration"} {
-		assert.False(t, promOnly.MatchString(otlp), otlp)
-	}
-}
