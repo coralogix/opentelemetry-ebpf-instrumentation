@@ -70,7 +70,7 @@ groups:
     metric_name: go.goroutine.count
     brief: OBI-emitted go.goroutine.count
     instrument: updowncounter
-    unit: "By"
+    unit: "{goroutine}"
     stability: development
     attributes:
       - ref: container.id
