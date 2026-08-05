@@ -403,22 +403,22 @@ jobs:
       - name: Download sibling-workflow weaver reports for this commit
         env:
           GH_TOKEN: ${{ github.token }}
-          # For pull_request events github.sha is the merge commit, but sibling
-          # runs' head_sha is the PR head — query by that.
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.ref || github.sha }}
+          # Sibling runs are matched by the PR branch via gh run list, which is
+          # reliable; the runs API head_sha filter lags and misses fresh runs.
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          siblings=("OATS tests")
+          siblings=("pull_request_oats_test.yml")
           for wf in "${siblings[@]}"; do
             run_id=""
             run_status=""
             for attempt in $(seq 1 10); do
-              read -r run_id run_status <<<"$(gh api \
-                "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
-                --jq --arg name "$wf" '[.workflow_runs[] | select(.name == $name)] | sort_by(.created_at) | last | "\(.id) \(.status)"' 2>/dev/null)"
+              read -r run_id run_status <<<"$(gh run list --repo "$REPO" \
+                --branch "$HEAD_BRANCH" --workflow "$wf" --limit 1 \
+                --json databaseId,status --jq '.[0] | "\(.databaseId) \(.status)"' 2>/dev/null)"
               if [ -z "${run_id:-}" ] || [ "$run_id" = "null" ]; then
-                echo "no '${wf}' run for ${HEAD_SHA} yet (attempt ${attempt}/10)"; sleep 30; continue
+                echo "no '${wf}' run for ${HEAD_BRANCH} yet (attempt ${attempt}/10)"; sleep 30; continue
               fi
               if [ "$run_status" = "completed" ]; then break; fi
               echo "'${wf}' run ${run_id} still ${run_status} (attempt ${attempt}/10); waiting"; sleep 30
