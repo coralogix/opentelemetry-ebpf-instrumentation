@@ -173,4 +173,3 @@ func TestParseDenominatorUnwrapsRegistryAndFallsBackAttrKey(t *testing.T) {
 	assert.Equal(t, []string{"db.system.name", "error.type"}, got.MetricAttributes,
 		"attribute name falls back to id then ref")
 }
-
