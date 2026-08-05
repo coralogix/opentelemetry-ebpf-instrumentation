@@ -394,37 +394,39 @@ jobs:
           pattern: weaver-reports-*-${{ github.run_number }}
           path: ./all-weaver-reports
 
-      # Also union the OATS suites' weaver reports (genai, etc.) for this commit.
-      # OATS runs as a separate workflow, so its artifacts are invisible to
-      # download-artifact above; fetch them from that run via the API. Best
-      # effort: wait briefly for the OATS run to finish, then add its reports to
-      # the same directory. (The k8s suite is intentionally not fetched yet — it
-      # is not merged; add it here once it is.)
-      - name: Download OATS weaver reports for this commit
+      # Also union weaver reports from the sibling weaver-wired workflow(s) for
+      # this commit. They run as separate workflows, so download-artifact above
+      # cannot see their artifacts; fetch them from those runs via the API. Best
+      # effort: wait briefly for each to finish, then add its reports to the same
+      # directory. (k8s is intentionally excluded here — its suite is not merged
+      # on this branch; add "Integration tests K8S" to `siblings` once it is.)
+      - name: Download sibling-workflow weaver reports for this commit
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ inputs.ref || github.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
-          oats_id=""
-          for attempt in $(seq 1 10); do
-            read -r oats_id oats_status <<<"$(gh api \
-              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
-              --jq '[.workflow_runs[] | select(.name == "OATS tests")] | sort_by(.created_at) | last | "\(.id) \(.status)"' 2>/dev/null)"
-            if [ -z "${oats_id:-}" ] || [ "$oats_id" = "null" ]; then
-              echo "no OATS run for ${HEAD_SHA} yet (attempt ${attempt}/10)"; sleep 30; continue
+          siblings=("OATS tests")
+          for wf in "${siblings[@]}"; do
+            run_id=""
+            run_status=""
+            for attempt in $(seq 1 10); do
+              read -r run_id run_status <<<"$(gh api \
+                "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
+                --jq --arg name "$wf" '[.workflow_runs[] | select(.name == $name)] | sort_by(.created_at) | last | "\(.id) \(.status)"' 2>/dev/null)"
+              if [ -z "${run_id:-}" ] || [ "$run_id" = "null" ]; then
+                echo "no '${wf}' run for ${HEAD_SHA} yet (attempt ${attempt}/10)"; sleep 30; continue
+              fi
+              if [ "$run_status" = "completed" ]; then break; fi
+              echo "'${wf}' run ${run_id} still ${run_status} (attempt ${attempt}/10); waiting"; sleep 30
+            done
+            if [ -n "${run_id:-}" ] && [ "$run_id" != "null" ]; then
+              gh run download "$run_id" --repo "$REPO" --dir ./all-weaver-reports \
+                --pattern 'weaver-reports-*' 2>/dev/null \
+                || echo "'${wf}' run ${run_id} has no weaver-reports-* artifacts"
             fi
-            if [ "$oats_status" = "completed" ]; then break; fi
-            echo "OATS run ${oats_id} still ${oats_status} (attempt ${attempt}/10); waiting"; sleep 30
           done
-          if [ -n "${oats_id:-}" ] && [ "$oats_id" != "null" ]; then
-            gh run download "$oats_id" --repo "$REPO" --dir ./all-weaver-reports \
-              --pattern 'weaver-reports-oats-*' 2>/dev/null \
-              || echo "OATS run ${oats_id} has no weaver-reports-oats-* artifacts"
-          else
-            echo "no OATS run found for ${HEAD_SHA}; aggregating integration reports only"
-          fi
           echo "weaver report files collected: $(find ./all-weaver-reports -name 'weaver-report-*.json' | wc -l)"
 
       # Report-only for now: emits the coverage summary and the list of
