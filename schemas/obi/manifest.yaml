@@ -10,8 +10,10 @@ description: |
     `target_info` heritage, emitted in OTel dot notation over OTLP) and the
     `instance` / `job` scrape-convention attributes
   - Span metrics matching the OTel collector-contrib `spanmetricsconnector`
-    output, using the OTel-canonical `traces_span_metrics_*` names (emitted
-    when the `application_span_otel` metrics feature is enabled)
+    output, in both naming schemes: the OTel-canonical
+    `traces_span_metrics_*` names (emitted when the `application_span_otel`
+    metrics feature is enabled) and the legacy Grafana-style
+    `traces_spanmetrics_*` names (OBI's default `application_span` feature)
   - Service-graph metrics matching the OTel collector-contrib
     `servicegraphconnector` output (emitted when the
     `application_service_graph` metrics feature is enabled)
