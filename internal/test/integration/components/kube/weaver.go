@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -186,6 +188,7 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 	// times before declaring the tap pipeline broken.
 	adminURL := fmt.Sprintf("http://%s/stop", addr)
 	var report *weavercheck.Report
+	var rawReport []byte
 	for attempt := 1; ; attempt++ {
 		select {
 		case <-time.After(weaverK8sDrainWindow):
@@ -193,7 +196,12 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		}
 
 		var err error
-		report, err = weavercheck.FetchReport(ctx, adminURL)
+		rawReport, err = weavercheck.FetchRawReport(ctx, adminURL)
+		if err != nil {
+			t.Errorf("%v", err)
+			return
+		}
+		report, err = weavercheck.Parse(rawReport)
 		if err != nil {
 			t.Errorf("%v", err)
 			return
@@ -216,6 +224,17 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		}
 	}
 
+	// Archive the raw report so cmd/obi-weaver-coverage can union the k8s suite's
+	// telemetry with the other weaver-wired suites.
+	if k.logsDir != "" {
+		reportPath := filepath.Join(k.logsDir, fmt.Sprintf("weaver-report-%s.json", k.clusterName))
+		if err := os.WriteFile(reportPath, rawReport, 0o644); err != nil {
+			t.Logf("warn: failed to archive weaver report to %s: %v", reportPath, err)
+		} else {
+			t.Logf("weaver report saved to %s", reportPath)
+		}
+	}
+
 	// A dropped export may have carried the sole sample of a violating shape, so
 	// any drop during the suite — or an unreadable counter — makes the report
 	// untrustworthy.
@@ -231,8 +250,8 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 	}
 
 	if k.weaverRequireSpans && report.Statistics.TotalEntitiesByType["span"] == 0 {
-		t.Errorf("weaver report has no span entities — OBI's trace export is not reaching weaver "+
-			"(is OTEL_EXPORTER_OTLP_TRACES_ENDPOINT pointed at the tapped otelcol rather than "+
+		t.Errorf("weaver report has no span entities — OBI's trace export is not reaching weaver " +
+			"(is OTEL_EXPORTER_OTLP_TRACES_ENDPOINT pointed at the tapped otelcol rather than " +
 			"straight at jaeger?); span semconv violations would otherwise go unvalidated")
 	}
 
