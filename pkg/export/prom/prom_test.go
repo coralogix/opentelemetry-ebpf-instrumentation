@@ -232,10 +232,10 @@ func TestAppMetrics_ByInstrumentation(t *testing.T) {
 				"messaging_process_duration_seconds",
 				"gpu_cuda_kernel_launch_calls_total",
 				"gpu_cuda_graph_launch_calls_total",
-				"gpu_cuda_kernel_grid_size_total",
-				"gpu_cuda_kernel_block_size_total",
+				"gpu_cuda_kernel_grid_size",
+				"gpu_cuda_kernel_block_size",
 				"gpu_cuda_memory_allocations_bytes_total",
-				"gpu_cuda_memory_copies_bytes_total",
+				"gpu_cuda_memory_copies_bytes",
 			},
 			unexpected: []string{},
 		},
@@ -993,7 +993,7 @@ func TestSanitizeUTF8ForPrometheus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sanitizeUTF8ForPrometheus(tt.input)
+			result := attributes.SanitizeUTF8(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

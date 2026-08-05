@@ -106,12 +106,12 @@ var (
 	}
 	GPUCudaKernelGridSize = Name{
 		Section: "gpu.cuda.kernel.grid.size",
-		Prom:    "gpu_cuda_kernel_grid_size_total",
+		Prom:    "gpu_cuda_kernel_grid_size",
 		OTEL:    "gpu.cuda.kernel.grid.size",
 	}
 	GPUCudaKernelBlockSize = Name{
 		Section: "gpu.cuda.kernel.block.size",
-		Prom:    "gpu_cuda_kernel_block_size_total",
+		Prom:    "gpu_cuda_kernel_block_size",
 		OTEL:    "gpu.cuda.kernel.block.size",
 	}
 	GPUCudaMemoryAllocations = Name{
@@ -121,7 +121,7 @@ var (
 	}
 	GPUCudaMemoryCopies = Name{
 		Section: "gpu.cuda.memory.copies",
-		Prom:    "gpu_cuda_memory_copies_bytes_total",
+		Prom:    "gpu_cuda_memory_copies_bytes",
 		OTEL:    "gpu.cuda.memory.copies",
 	}
 	DNSLookupDuration = Name{
@@ -236,12 +236,12 @@ var (
 	}
 	StatTCPFailedConnections = Name{
 		Section: "obi.stat.tcp.failed.connections",
-		Prom:    "obi_stat_tcp_failed_connections",
+		Prom:    "obi_stat_tcp_failed_connections_total",
 		OTEL:    "obi.stat.tcp.failed.connections",
 	}
 	StatTCPRetransmits = Name{
 		Section: "obi.stat.tcp.retransmits",
-		Prom:    "obi_stat_tcp_retransmits",
+		Prom:    "obi_stat_tcp_retransmits_total",
 		OTEL:    "obi.stat.tcp.retransmits",
 	}
 	StatTCPIo = Name{

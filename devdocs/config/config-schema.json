@@ -1833,6 +1833,12 @@
         "buckets": {
           "$ref": "#/$defs/Buckets"
         },
+        "disable_target_info": {
+          "type": "boolean",
+          "description": "Stops OBI from exporting its own target.info metric, for collectors that already synthesize target_info from resource attributes when re-exporting in Prometheus format. traces.target.info and traces.host.info have no counterpart and are unaffected.",
+          "default": false,
+          "x-env-var": "OTEL_EBPF_METRICS_DISABLE_TARGET_INFO"
+        },
         "endpoint": {
           "type": "string",
           "format": "uri",

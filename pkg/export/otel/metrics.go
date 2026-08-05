@@ -419,6 +419,10 @@ func (mr *MetricsReporter) spanMetricOptions() []metric.Option {
 }
 
 func (mr *MetricsReporter) setupTargetInfo(meter instrument.Meter) error {
+	if mr.cfg.DisableTargetInfo {
+		return nil
+	}
+
 	var err error
 	mr.targetInfo, err = meter.Int64UpDownCounter(TargetInfo, instrument.WithDescription("Target metadata"))
 	if err != nil {
@@ -555,7 +559,7 @@ func (mr *MetricsReporter) setupOtelMeters(m *Metrics, meter instrument.Meter) e
 		m.gpuKernelBlockSize = NewExpirer[*request.Span, instrument.Float64Histogram, float64](
 			m.ctx, gpuKernelBlockSize, mr.attrGPUKernelBlockSize, timeNow, mr.cfg.TTL)
 
-		gpuMemoryCopySize, err := meter.Float64Histogram(attributes.GPUCudaMemoryCopies.OTEL, instrument.WithUnit("1"))
+		gpuMemoryCopySize, err := meter.Float64Histogram(attributes.GPUCudaMemoryCopies.OTEL, instrument.WithUnit("By"))
 		if err != nil {
 			return fmt.Errorf("creating gpu memcpy size histogram: %w", err)
 		}
@@ -1110,6 +1114,10 @@ func (r *Metrics) record(span *request.Span, mr *MetricsReporter) {
 }
 
 func (mr *MetricsReporter) createTargetInfo(attrs *attribute.Set) {
+	if mr.targetInfo == nil {
+		return
+	}
+
 	mlog().Debug("Creating target.info")
 
 	attrOpt := instrument.WithAttributeSet(*attrs)
@@ -1118,7 +1126,7 @@ func (mr *MetricsReporter) createTargetInfo(attrs *attribute.Set) {
 }
 
 func (mr *MetricsReporter) deleteTargetInfo(attrs *attribute.Set) {
-	if attrs == nil {
+	if attrs == nil || mr.targetInfo == nil {
 		return
 	}
 
