@@ -228,7 +228,11 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 	// telemetry with the other weaver-wired suites.
 	if k.logsDir != "" {
 		reportPath := filepath.Join(k.logsDir, fmt.Sprintf("weaver-report-%s.json", k.clusterName))
-		if err := os.WriteFile(reportPath, rawReport, 0o644); err != nil {
+		// validateWeaver runs before exportLogs (which creates logsDir), so the
+		// directory may not exist yet on a clean run — create it before writing.
+		if err := os.MkdirAll(k.logsDir, 0o755); err != nil {
+			t.Logf("warn: failed to create weaver report dir %s: %v", k.logsDir, err)
+		} else if err := os.WriteFile(reportPath, rawReport, 0o644); err != nil {
 			t.Logf("warn: failed to archive weaver report to %s: %v", reportPath, err)
 		} else {
 			t.Logf("weaver report saved to %s", reportPath)
