@@ -402,7 +402,9 @@ jobs:
       - name: Download sibling-workflow weaver reports for this commit
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ inputs.ref || github.sha }}
+          # For pull_request events github.sha is the merge commit, but sibling
+          # runs' head_sha is the PR head — query by that.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.ref || github.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -uo pipefail
