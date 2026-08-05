@@ -34,6 +34,11 @@ data:
       endpoint: http://otelcol:4318
     otel_traces_export:
       endpoint: http://jaeger:4318
+    # Export OBI's own internal metrics over OTLP to the weaver-tapped otelcol
+    # so obi.kube.cache.forward.lag (recorded by the metadata Store on post-sync
+    # informer events) is observed by weaver's live-check.
+    internal_metrics:
+      exporter: otel
 ---
 apiVersion: apps/v1
 kind: DaemonSet
