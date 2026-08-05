@@ -13,7 +13,7 @@ name: Weaver coverage (combined)
 # complete number. Suites that have not finished yet for the commit simply
 # contribute no reports that round.
 
-on:
+on: # zizmor: ignore[dangerous-triggers] cross-workflow artifact aggregation requires workflow_run; the job checks out the trusted default branch (never the PR head) and only consumes PR reports as data artifacts, so no untrusted code runs in this privileged context
   workflow_run:
     workflows:
       - "Integration tests"
@@ -37,9 +37,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Check out the trusted default branch, NOT the workflow_run head SHA: this
+      # is a privileged context (pull-requests: write), so it must never execute
+      # untrusted PR code. Only weaver reports — pure data — are pulled from the
+      # PR's runs, as artifacts below. The coverage tool and schema therefore
+      # come from the default branch; the denominator reflects its semconv
+      # registry, which is exactly right once a schema change has merged.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
@@ -47,6 +53,7 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Collect weaver reports from all suites for this commit
+        id: collect
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -66,14 +73,14 @@ jobs:
           done
           count=$(find all-weaver-reports -name 'weaver-report-*.json' | wc -l | tr -d ' ')
           echo "collected ${count} weaver report file(s)"
-          echo "REPORT_COUNT=${count}" >> "$GITHUB_ENV"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
 
       - name: Aggregate coverage
-        if: env.REPORT_COUNT != '0'
+        if: steps.collect.outputs.count != '0'
         run: make weaver-coverage WEAVER_REPORTS_DIR=all-weaver-reports WEAVER_COVERAGE_OUT=weaver-coverage-out
 
       - name: Upload coverage summary
-        if: env.REPORT_COUNT != '0'
+        if: steps.collect.outputs.count != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: weaver-coverage-combined-${{ github.event.workflow_run.id }}
@@ -81,7 +88,7 @@ jobs:
           retention-days: 30
 
       - name: Post coverage to the PR
-        if: env.REPORT_COUNT != '0'
+        if: steps.collect.outputs.count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
