@@ -48,7 +48,7 @@ exporters:
       insecure: true
     sending_queue:
       enabled: true
-      queue_size: 500
+      queue_size: 10000
     retry_on_failure:
       enabled: false
 service:
