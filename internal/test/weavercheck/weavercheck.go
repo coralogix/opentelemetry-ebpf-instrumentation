@@ -96,6 +96,19 @@ func Parse(rawReport []byte) (*Report, error) {
 // transport-agnostic and logging-agnostic (returns an error rather than failing
 // a test).
 func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
+	raw, err := FetchRawReport(ctx, adminURL)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(raw)
+}
+
+// FetchRawReport stops the weaver live-check container via its admin /stop
+// endpoint and returns the raw report JSON from the response body, before
+// parsing. Callers that need to archive the report verbatim (so the coverage
+// aggregate can read its seen_* statistics, which the parsed Report does not
+// carry) use this; FetchReport wraps it with Parse.
+func FetchRawReport(ctx context.Context, adminURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building weaver /stop request: %w", err)
@@ -115,7 +128,7 @@ func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading weaver /stop response body: %w", err)
 	}
-	return Parse(raw)
+	return raw, nil
 }
 
 // Validate logs the full advisory breakdown and asserts that weaver reported no
