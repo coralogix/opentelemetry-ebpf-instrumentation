@@ -86,9 +86,11 @@ type MetricsConfig struct {
 
 	AllowServiceGraphSelfReferences bool `yaml:"allow_service_graph_self_references" env:"OTEL_EBPF_ALLOW_SERVICE_GRAPH_SELF_REFERENCES"`
 
-	// DisableTargetInfo stops OBI from exporting its own target.info metric, for collectors that
-	// already synthesize target_info from resource attributes when re-exporting in Prometheus
-	// format. traces.target.info and traces.host.info have no counterpart and are unaffected.
+	// DisableTargetInfo stops OBI from exporting its own target.info metric. Collectors that
+	// re-export OTLP metrics in Prometheus format also synthesize target_info from resource
+	// attributes, which yields a second target_info series per job/instance and makes the
+	// usual `on(job, instance) group_left` join against it ambiguous.
+	// traces.target.info and traces.host.info have no counterpart and are unaffected.
 	DisableTargetInfo bool `yaml:"disable_target_info" env:"OTEL_EBPF_METRICS_DISABLE_TARGET_INFO"`
 
 	// OTLPEndpointProvider allows overriding the OTLP Endpoint. It needs to return an endpoint and
