@@ -4,8 +4,9 @@
 package attributes
 
 import (
-	"os"
-	"regexp"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,11 +14,33 @@ import (
 )
 
 func TestAllMetricsMatchesDeclarations(t *testing.T) {
-	src, err := os.ReadFile("metric.go")
+	file, err := parser.ParseFile(token.NewFileSet(), "metric.go", nil, 0)
 	require.NoError(t, err)
 
-	declared := regexp.MustCompile(`(?m)^\t[A-Z][A-Za-z0-9]* = Name\{`).FindAllString(string(src), -1)
-	assert.Len(t, AllMetrics, len(declared),
+	declared := 0
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, val := range vs.Values {
+				lit, ok := val.(*ast.CompositeLit)
+				if !ok {
+					continue
+				}
+				if id, ok := lit.Type.(*ast.Ident); ok && id.Name == "Name" {
+					declared++
+				}
+			}
+		}
+	}
+
+	assert.Equal(t, len(AllMetrics), declared,
 		"every Name{...} declared in metric.go must be listed in AllMetrics")
 }
 

@@ -101,19 +101,27 @@ func resolveSchema(ociBin, image, schemaPath string) ([]byte, error) {
 	return out, nil
 }
 
-// driftWarnings reports OTLP metrics the code emits (attributes.AllMetrics) that
+// driftWarnings reports telemetry the code emits (metric names from
+// attributes.AllMetrics, attribute names from the maximal attribute groups) that
 // the schema-resolved denominator does not declare — the schema drifting behind
 // the code. Connector metrics live outside AllMetrics, so only the code→schema
 // direction is checked.
-func driftWarnings(denominator Surface) []string {
-	declared := map[string]struct{}{}
-	for _, m := range denominator.MetricNames {
-		declared[m] = struct{}{}
+func driftWarnings(denominator Surface) (metricNames, metricAttributes []string) {
+	metricNames = notDeclared(attributes.EmittedMetricNames(), denominator.MetricNames)
+	metricAttributes = notDeclared(attributes.EmittedMetricAttributes(), denominator.MetricAttributes)
+	return metricNames, metricAttributes
+}
+
+// notDeclared returns the emitted names absent from declared, sorted.
+func notDeclared(emitted, declared []string) []string {
+	have := make(map[string]struct{}, len(declared))
+	for _, d := range declared {
+		have[d] = struct{}{}
 	}
 	var missing []string
-	for _, m := range attributes.EmittedMetricNames() {
-		if _, ok := declared[m]; !ok {
-			missing = append(missing, m)
+	for _, e := range emitted {
+		if _, ok := have[e]; !ok {
+			missing = append(missing, e)
 		}
 	}
 	sort.Strings(missing)
@@ -224,8 +232,8 @@ func (r Result) Markdown() string {
 		}
 		b.WriteString("\n")
 	}
-	gaps("Uncovered metric names", r.MetricNames)
-	gaps("Uncovered metric attributes", r.MetricAttributes)
+	gaps("Metric names", r.MetricNames)
+	gaps("Metric attributes", r.MetricAttributes)
 	return b.String()
 }
 
@@ -295,9 +303,14 @@ func denominator(schema, ociBin, image, intendedPath string) (Surface, error) {
 	if err != nil {
 		return Surface{}, err
 	}
-	if missing := driftWarnings(surface); len(missing) > 0 {
+	metricDrift, attrDrift := driftWarnings(surface)
+	if len(metricDrift) > 0 {
 		fmt.Printf("::warning title=Schema drift::code emits OTLP metrics the schema does not declare: %s\n",
-			strings.Join(missing, ", "))
+			strings.Join(metricDrift, ", "))
+	}
+	if len(attrDrift) > 0 {
+		fmt.Printf("::warning title=Schema drift::code emits metric attributes the schema does not declare: %s\n",
+			strings.Join(attrDrift, ", "))
 	}
 	return surface, nil
 }

@@ -12,6 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNotDeclaredReportsEmittedNamesAbsentFromSchema(t *testing.T) {
+	assert.Equal(t, []string{"a", "c"}, notDeclared([]string{"c", "a", "b"}, []string{"b"}))
+	assert.Empty(t, notDeclared([]string{"a"}, []string{"a", "b"}))
+	assert.Empty(t, notDeclared(nil, []string{"a"}))
+}
+
 func TestObservedUnionsCountPositiveKeysAcrossReports(t *testing.T) {
 	reports := []Report{
 		{Statistics: Statistics{
@@ -85,9 +91,9 @@ func TestMarkdownReportsTableAndGaps(t *testing.T) {
 
 	assert.Contains(t, md, "## Weaver telemetry coverage")
 	assert.Contains(t, md, "| metric names | 1 | 2 | 50.0% |")
-	assert.Contains(t, md, "**Uncovered metric names — 1 never observed")
+	assert.Contains(t, md, "**Metric names — 1 never observed")
 	assert.Contains(t, md, "- `B`")
-	assert.Contains(t, md, "**Uncovered metric attributes — 1 never observed")
+	assert.Contains(t, md, "**Metric attributes — 1 never observed")
 	assert.Contains(t, md, "- `x`")
 }
 
@@ -102,7 +108,7 @@ func TestMarkdownAllCovered(t *testing.T) {
 
 	md := res.Markdown()
 
-	assert.Contains(t, md, "**Uncovered metric names:** all covered ✅")
+	assert.Contains(t, md, "**Metric names:** all covered ✅")
 	assert.Contains(t, md, "| metric names | 1 | 1 | 100.0% |")
 }
 
