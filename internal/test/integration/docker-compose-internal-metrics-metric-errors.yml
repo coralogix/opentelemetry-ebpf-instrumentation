@@ -1,0 +1,94 @@
+services:
+  # Holds the collector down for a fixed window so OBI's early metric exports
+  # fail deterministically (rather than relying on an incidental startup race).
+  gate:
+    image: busybox:1.37.0
+    command: ["sh", "-c", "sleep 25"]
+
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/testserver/Dockerfile
+    image: hatest-testserver
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+    environment:
+      - LOG_LEVEL=DEBUG
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security:/sys/kernel/security
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-internal-metrics-metric-errors:/var/run/obi
+      - /sys/kernel/tracing:/sys/kernel/tracing:rw
+    image: hatest-obi
+    privileged: true
+    pid: "host"
+    environment:
+      OTEL_EBPF_CONFIG_PATH: /configs/obi-config-internal-metrics-metric-errors.yml
+      GOCOVERDIR: "/coverage"
+      OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms
+      OTEL_EBPF_SERVICE_NAMESPACE: "integration-test"
+      OTEL_EBPF_METRICS_INTERVAL: "1s"
+      OTEL_EBPF_BPF_METRIC_SCRAPE_INTERVAL: "1s"
+      OTEL_EBPF_LOG_LEVEL: "DEBUG"
+      OTEL_EBPF_BPF_DEBUG: "TRUE"
+      OTEL_EBPF_HOSTNAME: "obi"
+      OTEL_EBPF_PROCESSES_INTERVAL: "100ms"
+      OTEL_EBPF_OPEN_PORT: "8080"
+      OTEL_EBPF_METRICS_FEATURES: "application"
+    # Intentionally does NOT depend on otelcol, so OBI starts exporting while the
+    # collector is still gated down and its exports fail.
+    depends_on:
+      testserver:
+        condition: service_started
+
+  prometheus:
+    image: quay.io/prometheus/prometheus:v3.13.0@sha256:c6b27ea434f8389bfe233fbc7be381cf50587c286e871bc842008f5a1b1908a7
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus-config-internal-metrics.yml
+      - --web.enable-lifecycle
+      - --web.route-prefix=/
+    volumes:
+      - ./configs/:/etc/prometheus
+    ports:
+      - "9090:9090"
+
+  # Comes up only after the gate's window elapses (and weaver is healthy). Until
+  # then OBI's metric exports to :4318 are refused, incrementing the error
+  # counter; afterwards metrics fan out to prometheus (scraped) and to weaver.
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.158.0@sha256:c5918f78992ee73b0d6f0e599423ac5ec52dd5d9726733114d6eca53d5a32ed5
+    container_name: otel-col
+    deploy:
+      resources:
+        limits:
+          memory: 125M
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-config/otelcol-config-weaver-no-jaeger.yml"]
+    volumes:
+      - ./configs/:/etc/otelcol-config
+    ports:
+      - "4317"
+      - "4318:4318"
+      - "9464"
+      - "8888"
+    depends_on:
+      gate:
+        condition: service_completed_successfully
+      prometheus:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+  weaver:
+    extends:
+      file: components/weaver/service.yml
+      service: weaver
+    volumes:
+      - ../../../schemas/obi:/obi-registry:ro

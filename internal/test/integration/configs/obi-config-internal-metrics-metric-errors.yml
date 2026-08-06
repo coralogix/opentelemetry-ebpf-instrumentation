@@ -1,0 +1,14 @@
+# OBI config for the internal-metrics metric-export-error weaver suite. OBI's
+# metrics endpoint points at the collector, which is held down for the first
+# ~25s by a gate container while OBI (which does not wait for it) keeps trying
+# to export and fails, incrementing obi.otel.metric.export.errors. Once the
+# collector comes up, the now-non-zero counter is exported over the same otel
+# internal-metrics path to weaver for semantic-convention live-check.
+otel_metrics_export:
+  endpoint: http://otelcol:4318
+internal_metrics:
+  exporter: otel
+attributes:
+  select:
+    "*":
+      include: ["*"]
