@@ -28,8 +28,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"go.opentelemetry.io/obi/pkg/export/attributes"
 )
 
 type resolvedGroup struct {
@@ -99,33 +97,6 @@ func resolveSchema(ociBin, image, schemaPath string) ([]byte, error) {
 		return nil, fmt.Errorf("running weaver registry resolve: %w", err)
 	}
 	return out, nil
-}
-
-// driftWarnings reports telemetry the code emits (metric names from
-// attributes.AllMetrics, attribute names from the maximal attribute groups) that
-// the schema-resolved denominator does not declare — the schema drifting behind
-// the code. Connector metrics live outside AllMetrics, so only the code→schema
-// direction is checked.
-func driftWarnings(denominator Surface) (metricNames, metricAttributes []string) {
-	metricNames = notDeclared(attributes.EmittedMetricNames(), denominator.MetricNames)
-	metricAttributes = notDeclared(attributes.EmittedMetricAttributes(), denominator.MetricAttributes)
-	return metricNames, metricAttributes
-}
-
-// notDeclared returns the emitted names absent from declared, sorted.
-func notDeclared(emitted, declared []string) []string {
-	have := make(map[string]struct{}, len(declared))
-	for _, d := range declared {
-		have[d] = struct{}{}
-	}
-	var missing []string
-	for _, e := range emitted {
-		if _, ok := have[e]; !ok {
-			missing = append(missing, e)
-		}
-	}
-	sort.Strings(missing)
-	return missing
 }
 
 type Surface struct {
@@ -302,15 +273,6 @@ func denominator(schema, ociBin, image, intendedPath string) (Surface, error) {
 	surface, err := parseDenominator(resolved)
 	if err != nil {
 		return Surface{}, err
-	}
-	metricDrift, attrDrift := driftWarnings(surface)
-	if len(metricDrift) > 0 {
-		fmt.Printf("::warning title=Schema drift::code emits OTLP metrics the schema does not declare: %s\n",
-			strings.Join(metricDrift, ", "))
-	}
-	if len(attrDrift) > 0 {
-		fmt.Printf("::warning title=Schema drift::code emits metric attributes the schema does not declare: %s\n",
-			strings.Join(attrDrift, ", "))
 	}
 	return surface, nil
 }

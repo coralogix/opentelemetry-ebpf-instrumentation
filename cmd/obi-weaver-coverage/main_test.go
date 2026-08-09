@@ -12,12 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNotDeclaredReportsEmittedNamesAbsentFromSchema(t *testing.T) {
-	assert.Equal(t, []string{"a", "c"}, notDeclared([]string{"c", "a", "b"}, []string{"b"}))
-	assert.Empty(t, notDeclared([]string{"a"}, []string{"a", "b"}))
-	assert.Empty(t, notDeclared(nil, []string{"a"}))
-}
-
 func TestObservedUnionsCountPositiveKeysAcrossReports(t *testing.T) {
 	reports := []Report{
 		{Statistics: Statistics{
