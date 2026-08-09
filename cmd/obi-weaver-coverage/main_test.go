@@ -10,7 +10,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/obi/pkg/export/attributes"
 )
+
+func TestMetricDriftFlagsEmittedButUndeclaredMetrics(t *testing.T) {
+	// A denominator that declares every emitted metric → no drift.
+	assert.Empty(t, metricDrift(Surface{MetricNames: attributes.EmittedMetricNames()}))
+
+	// A denominator missing emitted metrics → each surfaces as drift.
+	drift := metricDrift(Surface{MetricNames: []string{"http.server.request.duration"}})
+	assert.NotEmpty(t, drift)
+	assert.Contains(t, drift, "go.memory.limit")
+	assert.NotContains(t, drift, "http.server.request.duration")
+}
 
 func TestObservedUnionsCountPositiveKeysAcrossReports(t *testing.T) {
 	reports := []Report{

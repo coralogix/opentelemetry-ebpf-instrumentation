@@ -59,6 +59,31 @@ groups:
       - ref: server.port
       - ref: service.name
       - ref: service.namespace
+  - id: metric.obi.go.config.gogc
+    type: metric
+    metric_name: go.config.gogc
+    brief: OBI-emitted go.config.gogc
+    instrument: updowncounter
+    unit: "%"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.cpu.time
+    type: metric
+    metric_name: go.cpu.time
+    brief: OBI-emitted go.cpu.time
+    instrument: counter
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: go.cpu.state
+      - ref: service.name
+      - ref: service.namespace
   - id: metric.obi.go.goroutine.count
     type: metric
     metric_name: go.goroutine.count
@@ -71,12 +96,109 @@ groups:
       - ref: container.name
       - ref: service.name
       - ref: service.namespace
+  - id: metric.obi.go.memory.allocated
+    type: metric
+    metric_name: go.memory.allocated
+    brief: OBI-emitted go.memory.allocated
+    instrument: counter
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.memory.allocations
+    type: metric
+    metric_name: go.memory.allocations
+    brief: OBI-emitted go.memory.allocations
+    instrument: counter
+    unit: "{allocation}"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.memory.gc.cycles
+    type: metric
+    metric_name: go.memory.gc.cycles
+    brief: OBI-emitted go.memory.gc.cycles
+    instrument: counter
+    unit: "{gc_cycle}"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
   - id: metric.obi.go.memory.gc.goal
     type: metric
     metric_name: go.memory.gc.goal
     brief: OBI-emitted go.memory.gc.goal
     instrument: updowncounter
     unit: "By"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.memory.gc.pause.duration
+    type: metric
+    metric_name: go.memory.gc.pause.duration
+    brief: OBI-emitted go.memory.gc.pause.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.memory.limit
+    type: metric
+    metric_name: go.memory.limit
+    brief: OBI-emitted go.memory.limit
+    instrument: updowncounter
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.memory.used
+    type: metric
+    metric_name: go.memory.used
+    brief: OBI-emitted go.memory.used
+    instrument: updowncounter
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: go.memory.type
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.processor.limit
+    type: metric
+    metric_name: go.processor.limit
+    brief: OBI-emitted go.processor.limit
+    instrument: updowncounter
+    unit: "{thread}"
+    stability: development
+    attributes:
+      - ref: container.id
+      - ref: container.name
+      - ref: service.name
+      - ref: service.namespace
+  - id: metric.obi.go.schedule.duration
+    type: metric
+    metric_name: go.schedule.duration
+    brief: OBI-emitted go.schedule.duration
+    instrument: histogram
+    unit: "s"
     stability: development
     attributes:
       - ref: container.id

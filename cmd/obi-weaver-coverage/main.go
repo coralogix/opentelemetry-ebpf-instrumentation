@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"go.opentelemetry.io/obi/pkg/export/attributes"
 )
 
 type resolvedGroup struct {
@@ -100,6 +102,26 @@ func resolveSchema(ociBin, image, schemaPath string) ([]byte, error) {
 		return nil, fmt.Errorf("running weaver registry resolve: %w\n%s", err, stderr.String())
 	}
 	return out, nil
+}
+
+// metricDrift returns the OTLP metrics the code emits (attributes.EmittedMetricNames)
+// that the schema-resolved denominator does not declare. A metric missing from
+// the denominator can never surface as a coverage gap, so denominator() enforces
+// an empty result as a hard failure. Connector metrics live outside AllMetrics,
+// so only the code→schema direction is checked.
+func metricDrift(denominator Surface) []string {
+	declared := make(map[string]struct{}, len(denominator.MetricNames))
+	for _, m := range denominator.MetricNames {
+		declared[m] = struct{}{}
+	}
+	var missing []string
+	for _, m := range attributes.EmittedMetricNames() {
+		if _, ok := declared[m]; !ok {
+			missing = append(missing, m)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type Surface struct {
@@ -276,6 +298,12 @@ func denominator(schema, ociBin, image, intendedPath string) (Surface, error) {
 	surface, err := parseDenominator(resolved)
 	if err != nil {
 		return Surface{}, err
+	}
+	if missing := metricDrift(surface); len(missing) > 0 {
+		fmt.Printf("::error title=Schema drift::code emits OTLP metrics the registry does not declare: %s\n",
+			strings.Join(missing, ", "))
+		return Surface{}, fmt.Errorf("schema drift: %d OTLP metric(s) emitted by code but absent from the registry (%s); "+
+			"declare them so they count toward coverage", len(missing), strings.Join(missing, ", "))
 	}
 	return surface, nil
 }
