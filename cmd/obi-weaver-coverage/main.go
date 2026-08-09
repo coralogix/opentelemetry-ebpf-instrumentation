@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -92,9 +93,11 @@ func resolveSchema(ociBin, image, schemaPath string) ([]byte, error) {
 		image, "registry", "resolve",
 		"--registry", "/obi-registry",
 		"--format", "json")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running weaver registry resolve: %w", err)
+		return nil, fmt.Errorf("running weaver registry resolve: %w\n%s", err, stderr.String())
 	}
 	return out, nil
 }
@@ -311,6 +314,10 @@ func main() {
 			if err := os.WriteFile(*outJSON, []byte(empty), 0o644); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
+		}
+		if *failOnGap {
+			fmt.Fprintf(os.Stderr, "weaver telemetry coverage: no weaver reports found under %s; every denominator entry is unobserved\n", *in)
+			os.Exit(1)
 		}
 		return
 	}
