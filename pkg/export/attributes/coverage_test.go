@@ -81,3 +81,12 @@ func TestEmittedMetricNamesNonEmpty(t *testing.T) {
 		assert.NotEqual(t, "resource", n, "resource is an attribute-selection section, not a metric")
 	}
 }
+
+func TestEmittedMetricAttributesExcludesSpanAndPromAttrs(t *testing.T) {
+	attrs := EmittedMetricAttributes()
+	require.NotEmpty(t, attrs)
+	assert.Contains(t, attrs, "http.request.method")
+	assert.NotContains(t, attrs, "db.query.text", "span attribute must not be in the metric surface")
+	assert.NotContains(t, attrs, "instance", "prometheus scrape label must not be in the OTLP surface")
+	assert.NotContains(t, attrs, "job", "prometheus scrape label must not be in the OTLP surface")
+}

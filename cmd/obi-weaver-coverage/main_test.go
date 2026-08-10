@@ -25,6 +25,16 @@ func TestMetricDriftFlagsEmittedButUndeclaredMetrics(t *testing.T) {
 	assert.NotContains(t, drift, "http.server.request.duration")
 }
 
+func TestAttributeDriftFlagsEmittedButUndeclaredAttributes(t *testing.T) {
+	// A denominator that declares every emitted attribute → no drift.
+	assert.Empty(t, attributeDrift(Surface{MetricAttributes: attributes.EmittedMetricAttributes()}))
+
+	// A denominator missing emitted attributes → each surfaces as drift.
+	drift := attributeDrift(Surface{MetricAttributes: []string{"http.request.method"}})
+	assert.NotEmpty(t, drift)
+	assert.NotContains(t, drift, "http.request.method")
+}
+
 func TestObservedUnionsCountPositiveKeysAcrossReports(t *testing.T) {
 	reports := []Report{
 		{Statistics: Statistics{

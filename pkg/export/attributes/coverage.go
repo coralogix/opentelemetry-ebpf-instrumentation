@@ -5,10 +5,50 @@ package attributes // import "go.opentelemetry.io/obi/pkg/export/attributes"
 
 import (
 	"sort"
+
+	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
 )
 
 var nonEmittedMetricSections = map[Section]struct{}{
 	Resource.Section: {},
+}
+
+// prometheus-only attributes: `instance` and `job` are scrape labels the
+// Prometheus exporter synthesizes; they are never emitted over OTLP, so they
+// are not part of the OTLP contract the coverage denominator describes.
+// (service.namespace, though grouped with them in attr_defs.go, IS emitted as
+// an OTLP resource attribute, so it is not excluded.)
+var prometheusOnlyAttributes = map[attr.Name]struct{}{
+	attr.Instance: {},
+	attr.Job:      {},
+}
+
+var internalSelectorNames = map[attr.Name]struct{}{
+	attr.GenAITokenTypeOutput: {},
+	attr.DBResponseError:      {},
+	attr.GenAIResponseError:   {},
+}
+
+func maximalAttrGroups() AttrGroups {
+	var g AttrGroups
+	for _, bit := range []AttrGroups{
+		GroupKubernetes, GroupContainer, GroupPrometheus, GroupHTTPRoutes,
+		GroupNetIfaceDirection, GroupNetCIDR, GroupTraces, GroupApp, GroupNet,
+		GroupNetKube, GroupAppKube, GroupServerInfo, GroupHTTPClientInfo,
+		GroupGRPCClientInfo, GroupHTTPCommon, GroupHost, GroupMessaging,
+		GroupNetGeoIP, GroupStats, GroupStatsKube,
+	} {
+		g.Add(bit)
+	}
+	return g
+}
+
+// nonMetricAttributeSections hold attributes that never appear on a metric
+// datapoint: Resource is the resource attribute set, and Traces is the span
+// attribute set (db.query.text, url.query, graphql.document, gen_ai.* content)
+// emitted by tracesgen. Neither is part of the metric-coverage contract.
+var nonMetricAttributeSections = map[Section]struct{}{
+	Traces.Section: {},
 }
 
 // EmittedMetricNames is the set of OTLP metric names OBI emits, derived from
@@ -24,6 +64,32 @@ func EmittedMetricNames() []string {
 		}
 		if m.OTEL != "" {
 			seen[m.OTEL] = struct{}{}
+		}
+	}
+	return sortedKeys(seen)
+}
+
+// EmittedMetricAttributes is the set of attribute names OBI can attach to its
+// OTLP metrics (the maximal attribute groups, minus the Prometheus-only and
+// internal-selector attributes). It is the attribute analogue of
+// EmittedMetricNames used to fail when the code emits an attribute the registry
+// does not declare.
+func EmittedMetricAttributes() []string {
+	defs := getDefinitions(maximalAttrGroups(), GroupAttributes{})
+	seen := map[string]struct{}{}
+	for section := range defs {
+		if _, skip := nonMetricAttributeSections[section]; skip {
+			continue
+		}
+		grp := defs[section]
+		for name := range grp.All() {
+			if _, internal := internalSelectorNames[name]; internal {
+				continue
+			}
+			if _, prom := prometheusOnlyAttributes[name]; prom {
+				continue
+			}
+			seen[string(name)] = struct{}{}
 		}
 	}
 	return sortedKeys(seen)

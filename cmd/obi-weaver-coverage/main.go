@@ -110,14 +110,26 @@ func resolveSchema(ociBin, image, schemaPath string) ([]byte, error) {
 // an empty result as a hard failure. Connector metrics live outside AllMetrics,
 // so only the code→schema direction is checked.
 func metricDrift(denominator Surface) []string {
-	declared := make(map[string]struct{}, len(denominator.MetricNames))
-	for _, m := range denominator.MetricNames {
-		declared[m] = struct{}{}
+	return notDeclared(attributes.EmittedMetricNames(), denominator.MetricNames)
+}
+
+// attributeDrift returns the attributes OBI can attach to its OTLP metrics
+// (attributes.EmittedMetricAttributes) that the resolved denominator does not
+// declare. Same rationale as metricDrift: an emitted attribute absent from the
+// denominator can never surface as a coverage gap.
+func attributeDrift(denominator Surface) []string {
+	return notDeclared(attributes.EmittedMetricAttributes(), denominator.MetricAttributes)
+}
+
+func notDeclared(emitted, declared []string) []string {
+	have := make(map[string]struct{}, len(declared))
+	for _, d := range declared {
+		have[d] = struct{}{}
 	}
 	var missing []string
-	for _, m := range attributes.EmittedMetricNames() {
-		if _, ok := declared[m]; !ok {
-			missing = append(missing, m)
+	for _, e := range emitted {
+		if _, ok := have[e]; !ok {
+			missing = append(missing, e)
 		}
 	}
 	sort.Strings(missing)
@@ -299,11 +311,19 @@ func denominator(schema, ociBin, image, intendedPath string) (Surface, error) {
 	if err != nil {
 		return Surface{}, err
 	}
-	if missing := metricDrift(surface); len(missing) > 0 {
+	metricMissing := metricDrift(surface)
+	attrMissing := attributeDrift(surface)
+	if len(metricMissing) > 0 {
 		fmt.Printf("::error title=Schema drift::code emits OTLP metrics the registry does not declare: %s\n",
-			strings.Join(missing, ", "))
-		return Surface{}, fmt.Errorf("schema drift: %d OTLP metric(s) emitted by code but absent from the registry (%s); "+
-			"declare them so they count toward coverage", len(missing), strings.Join(missing, ", "))
+			strings.Join(metricMissing, ", "))
+	}
+	if len(attrMissing) > 0 {
+		fmt.Printf("::error title=Schema drift::code emits metric attributes the registry does not declare: %s\n",
+			strings.Join(attrMissing, ", "))
+	}
+	if len(metricMissing) > 0 || len(attrMissing) > 0 {
+		return Surface{}, fmt.Errorf("schema drift: %d metric(s) and %d attribute(s) emitted by code but absent from the "+
+			"registry; declare them so they count toward coverage", len(metricMissing), len(attrMissing))
 	}
 	return surface, nil
 }
