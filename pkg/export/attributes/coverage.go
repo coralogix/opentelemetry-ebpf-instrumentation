@@ -71,7 +71,7 @@ func EmittedMetricNames() []string {
 
 // EmittedMetricAttributes is the set of attribute names OBI can attach to its
 // OTLP metrics (the maximal attribute groups, minus the Prometheus-only and
-// internal-selector attributes). It is the attribute analogue of
+// internal-selector attributes). It is the attribute-level counterpart of
 // EmittedMetricNames used to fail when the code emits an attribute the registry
 // does not declare.
 func EmittedMetricAttributes() []string {
