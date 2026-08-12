@@ -111,12 +111,12 @@ groups:
         type: string
         stability: development
         brief: Autonomous System Number of the source endpoint, from GeoIP lookup.
-        examples: ["15169"]
+        examples: ["AS15169"]
       - id: dst.asn
         type: string
         stability: development
         brief: Autonomous System Number of the destination endpoint, from GeoIP lookup.
-        examples: ["15169"]
+        examples: ["AS15169"]
       - id: src.country
         type: string
         stability: development
