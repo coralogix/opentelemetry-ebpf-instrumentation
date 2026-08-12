@@ -95,6 +95,43 @@ func EmittedMetricAttributes() []string {
 	return sortedKeys(seen)
 }
 
+// EmittedAttributesByMetric maps each OTLP metric name to the attribute names
+// its section makes selectable (default and opt-in), minus prometheus scrape
+// labels and internal selectors. This is the universe a metric may emit; the
+// caller narrows it to what is actually attached to the datapoint by
+// intersecting with the metric's attribute getters (a catch-all getter serves
+// every name, an explicit span getter serves only its datapoint attributes,
+// leaving resource attributes for target.info). It backs a test that asserts
+// every attribute a metric emits is ref'd in that metric's registry group.
+func EmittedAttributesByMetric() map[string][]string {
+	defs := getDefinitions(maximalAttrGroups(), GroupAttributes{})
+	out := map[string][]string{}
+	for _, m := range AllMetrics {
+		if m.OTEL == "" {
+			continue
+		}
+		if _, skip := nonEmittedMetricSections[m.Section]; skip {
+			continue
+		}
+		grp, ok := defs[m.Section]
+		if !ok {
+			continue
+		}
+		seen := map[string]struct{}{}
+		for name := range grp.All() {
+			if _, skip := internalSelectorNames[name]; skip {
+				continue
+			}
+			if _, skip := prometheusOnlyAttributes[name]; skip {
+				continue
+			}
+			seen[string(name)] = struct{}{}
+		}
+		out[m.OTEL] = sortedKeys(seen)
+	}
+	return out
+}
+
 func sortedKeys(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for k := range set {

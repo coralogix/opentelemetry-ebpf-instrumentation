@@ -42,6 +42,9 @@ groups:
     stability: development
     brief: >
       Count of CUDA kernel launches observed (cudaLaunchKernel).
+    attributes:
+      - ref: service.name
+      - ref: service.namespace
 
   - id: metric.gpu_cuda_graph_launch_calls
     type: metric
@@ -51,6 +54,9 @@ groups:
     stability: development
     brief: >
       Count of CUDA graph launches observed (cudaGraphLaunch).
+    attributes:
+      - ref: service.name
+      - ref: service.namespace
 
   - id: metric.gpu_cuda_memory_allocations
     type: metric
@@ -60,6 +66,9 @@ groups:
     stability: development
     brief: >
       Bytes requested through CUDA device memory allocations (cudaMalloc).
+    attributes:
+      - ref: service.name
+      - ref: service.namespace
 
   - id: metric.gpu_cuda_kernel_grid_size
     type: metric
@@ -69,6 +78,9 @@ groups:
     stability: development
     brief: >
       Distribution of CUDA kernel launch grid sizes (grid.x * grid.y * grid.z).
+    attributes:
+      - ref: service.name
+      - ref: service.namespace
 
   - id: metric.gpu_cuda_kernel_block_size
     type: metric
@@ -79,6 +91,9 @@ groups:
     brief: >
       Distribution of CUDA kernel launch block sizes
       (block.x * block.y * block.z).
+    attributes:
+      - ref: service.name
+      - ref: service.namespace
 
   - id: metric.gpu_cuda_memory_copies
     type: metric
@@ -91,3 +106,5 @@ groups:
       broken down by `cuda.memcpy.kind`.
     attributes:
       - ref: cuda.memcpy.kind
+      - ref: service.name
+      - ref: service.namespace
