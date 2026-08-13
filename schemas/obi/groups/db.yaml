@@ -192,3 +192,79 @@ groups:
               brief: "[Aerospike](https://aerospike.com/)"
               stability: development
         stability: stable
+
+  - id: registry.obi.db
+    type: attribute_group
+    display_name: OBI Database Attributes
+    brief: >
+      Database attributes OBI emits that are not part of upstream semconv.
+    attributes:
+      - id: db.response.error
+        type: string
+        stability: development
+        brief: >
+          Provider-specific database error description captured on a failed
+          database client span.
+        note: >
+          OBI extension attribute, emitted only when selected via
+          `attributes.select` (`db.response.error`), alongside the upstream
+          `db.response.status_code`. Not part of upstream semconv.
+        examples: ["ORA-00942: table or view does not exist"]
+
+  - id: metric.obi.db.client.operation.duration
+    type: metric
+    metric_name: db.client.operation.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted db.client.operation.duration
+    instrument: histogram
+    unit: "s"
+    stability: stable
+    attributes:
+      - ref: db.collection.name
+      - ref: db.operation.name
+      - ref: db.system.name
+      - ref: error.type
+      - ref: server.address
+      - ref: service.name
+      - ref: service.namespace
+
+  - id: span.obi.db.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI outbound database client span.
+    attributes:
+      - ref: db.system.name
+      - ref: db.namespace
+      - ref: db.collection.name
+      - ref: db.operation.name
+      - ref: db.operation.batch.size
+      - ref: db.query.text
+      - ref: db.response.status_code
+      - ref: db.response.error
+      - ref: error.type
+      - ref: server.address
+      - ref: server.port
+      - ref: service.peer.name
+      - ref: elasticsearch.node.name
+      - ref: span.metrics.skip
+
+  - id: span.obi.db.server
+    type: span
+    span_kind: server
+    stability: development
+    brief: OBI inbound database server span.
+    attributes:
+      - ref: db.system.name
+      - ref: db.namespace
+      - ref: db.collection.name
+      - ref: db.operation.name
+      - ref: db.query.text
+      - ref: db.response.status_code
+      - ref: db.response.error
+      - ref: error.type
+      - ref: server.address
+      - ref: server.port
+      - ref: span.metrics.skip

@@ -73,15 +73,29 @@ groups:
     attributes:
       - ref: instance
       - ref: job
+      - ref: service.name
+      - ref: service.namespace
       - ref: service.instance.id
+      - ref: telemetry.sdk.language
+      - ref: telemetry.sdk.name
+      - ref: telemetry.sdk.version
+      - ref: telemetry.distro.name
+      - ref: telemetry.distro.version
+      - ref: host.name
+      - ref: host.id
+      - ref: os.type
+      - ref: container.id
+      - ref: container.name
       - ref: k8s.cluster.name
       - ref: k8s.container.name
       - ref: k8s.cronjob.name
       - ref: k8s.daemonset.name
       - ref: k8s.deployment.name
       - ref: k8s.job.name
+      - ref: k8s.kind
       - ref: k8s.namespace.name
       - ref: k8s.node.name
+      - ref: k8s.owner.name
       - ref: k8s.pod.name
       - ref: k8s.pod.start_time
       - ref: k8s.pod.uid
@@ -106,6 +120,33 @@ groups:
       join trace metrics back to service identity.
     attributes:
       - ref: source
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.instance.id
+      - ref: telemetry.sdk.language
+      - ref: telemetry.sdk.name
+      - ref: telemetry.sdk.version
+      - ref: telemetry.distro.name
+      - ref: telemetry.distro.version
+      - ref: host.id
+      - ref: os.type
+      - ref: container.id
+      - ref: container.name
+      - ref: k8s.cluster.name
+      - ref: k8s.container.name
+      - ref: k8s.cronjob.name
+      - ref: k8s.daemonset.name
+      - ref: k8s.deployment.name
+      - ref: k8s.job.name
+      - ref: k8s.kind
+      - ref: k8s.namespace.name
+      - ref: k8s.node.name
+      - ref: k8s.owner.name
+      - ref: k8s.pod.name
+      - ref: k8s.pod.start_time
+      - ref: k8s.pod.uid
+      - ref: k8s.replicaset.name
+      - ref: k8s.statefulset.name
 
   # OBI-invented per-host meta-metric — there is no upstream /
   # collector-contrib analogue. Carries the upstream `host.id` attribute.

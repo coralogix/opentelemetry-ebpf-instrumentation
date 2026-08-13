@@ -115,8 +115,9 @@ func TestLintSchemaFilterAllowsExpectedEnumOverrideDuplicates(t *testing.T) {
 }
 
 // expectedDeprecatedIncludeUnreferenced mirrors the diagnostic weaver 0.25
-// emits (promoted to Error by --future) for OBI's use of the deprecated
-// --include-unreferenced flag, which OBI still needs.
+// emits (promoted to Error by --future) for the deprecated
+// --include-unreferenced flag. OBI no longer relies on the flag, but the
+// filter still drops the notice defensively.
 const expectedDeprecatedIncludeUnreferenced = `[{
 	"diagnostic": {"severity": "Error"},
 	"error": {"DeprecatedIncludeUnreferencedWarning": {}}

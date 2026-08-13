@@ -21,6 +21,14 @@
 # endpoint and reads the live-check report back from the response body. The
 # `compact` template keeps that body small enough to avoid the truncation that
 # large reports hit when weaver closes the connection on exit.
+#
+# live-check runs WITHOUT `--include-unreferenced`: the OBI registry now
+# declares the full emitted contract (metrics, spans, and the target.info
+# resource carriers), so every attribute OBI emits resolves on its own. The
+# flag would only pull in unreferenced upstream definitions OBI never emits,
+# which no longer changes any finding. Attributes that cannot be enumerated
+# (arbitrary manual-span and user-configured keys) surface as sub-violation
+# `missing_attribute` advice either way.
 services:
   weaver:
     image: otel/weaver:v0.25.1@sha256:9ad46ca9cd4fa5974b121f886aa3e9946a8ef8ea905001a96c018d21f9db87ca
@@ -32,7 +40,6 @@ services:
       - live-check
       - --registry
       - /obi-registry
-      - --include-unreferenced
       - --inactivity-timeout
       - "300"
       - --admin-port
