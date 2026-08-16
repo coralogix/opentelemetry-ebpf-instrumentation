@@ -68,15 +68,18 @@ func metricsFromFile(t *testing.T, path string, out map[string]metricDef) {
 
 func obiMetrics(t *testing.T) map[string]metricDef {
 	t.Helper()
-	entries, err := os.ReadDir(obiGroupsDir)
-	require.NoError(t, err)
 	out := map[string]metricDef{}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
+	err := filepath.WalkDir(obiGroupsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		metricsFromFile(t, filepath.Join(obiGroupsDir, e.Name()), out)
-	}
+		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+		metricsFromFile(t, path, out)
+		return nil
+	})
+	require.NoError(t, err)
 	return out
 }
 
