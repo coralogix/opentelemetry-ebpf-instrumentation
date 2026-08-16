@@ -1,22 +1,8 @@
-# OBI spans that have no dedicated groups-format domain file of their own:
-# the DNS span (dns.yaml is a definition/2 override file, which cannot carry
-# span groups) and the failed-connect span (no upstream semconv domain).
-# Every other OBI span lives in its protocol's domain file (http.yaml, db.yaml,
-# rpc.yaml, messaging.yaml, gen_ai.yaml, aws.yaml).
+# The failed-connect span has no upstream semconv domain of its own, so it
+# lives here rather than in a protocol domain file. Every other OBI span lives
+# in its protocol's domain file (http.yaml, db.yaml, rpc.yaml, messaging.yaml,
+# gen_ai.yaml, aws.yaml, dns.yaml).
 groups:
-  - id: span.obi.dns
-    type: span
-    span_kind: internal
-    stability: development
-    brief: OBI DNS resolution span.
-    attributes:
-      - ref: dns.question.name
-      - ref: dns.answers
-      - ref: client.address
-      - ref: server.address
-      - ref: server.port
-      - ref: span.metrics.skip
-
   - id: span.obi.failed_connect
     type: span
     span_kind: client

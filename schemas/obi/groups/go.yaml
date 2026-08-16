@@ -25,6 +25,7 @@ groups:
     unit: "s"
     stability: development
     attributes:
+      - ref: go.cpu.state
       - ref: go.cpu.detailed_state
   - id: metric.obi.go.goroutine.count
     type: metric

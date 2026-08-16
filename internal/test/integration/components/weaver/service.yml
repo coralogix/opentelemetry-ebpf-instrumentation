@@ -22,13 +22,15 @@
 # `compact` template keeps that body small enough to avoid the truncation that
 # large reports hit when weaver closes the connection on exit.
 #
-# live-check runs WITHOUT `--include-unreferenced`: the OBI registry now
-# declares the full emitted contract (metrics, spans, and the target.info
-# resource carriers), so every attribute OBI emits resolves on its own. The
-# flag would only pull in unreferenced upstream definitions OBI never emits,
-# which no longer changes any finding. Attributes that cannot be enumerated
-# (arbitrary manual-span and user-configured keys) surface as sub-violation
-# `missing_attribute` advice either way.
+# live-check runs WITHOUT `--include-unreferenced` so it validates strictly
+# against OBI's declared contract instead of the whole upstream registry.
+# Everything OBI itself emits is declared (per-domain metrics and spans, the
+# resource entities in resource.yaml, and the target.info carriers). Attributes
+# OBI only forwards — the workload's OTEL_RESOURCE_ATTRIBUTES and telemetry from
+# already-instrumented apps flowing through the same tap — are passthrough, not
+# OBI's contract, and are tolerated by the finding_filters in
+# `schemas/obi/.weaver.toml`. Arbitrary user keys under namespaces OBI does not
+# use are tolerated automatically as sub-violation advice.
 services:
   weaver:
     image: otel/weaver:v0.25.1@sha256:9ad46ca9cd4fa5974b121f886aa3e9946a8ef8ea905001a96c018d21f9db87ca

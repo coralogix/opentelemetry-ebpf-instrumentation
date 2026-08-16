@@ -120,6 +120,7 @@ groups:
       join trace metrics back to service identity.
     attributes:
       - ref: source
+      - ref: otel.scope.name
       - ref: service.name
       - ref: service.namespace
       - ref: service.instance.id
