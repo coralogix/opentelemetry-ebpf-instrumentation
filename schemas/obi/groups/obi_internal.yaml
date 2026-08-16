@@ -65,7 +65,10 @@ groups:
       - ref: telemetry.distro.version
       - ref: host.name
       - ref: host.id
+      - ref: host.type
+      - ref: host.image.id
       - ref: os.type
+      - ref: os.version
       - ref: container.id
       - ref: container.name
       - ref: k8s.cluster.name
@@ -112,7 +115,10 @@ groups:
       - ref: telemetry.distro.name
       - ref: telemetry.distro.version
       - ref: host.id
+      - ref: host.type
+      - ref: host.image.id
       - ref: os.type
+      - ref: os.version
       - ref: container.id
       - ref: container.name
       - ref: k8s.cluster.name
