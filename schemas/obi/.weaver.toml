@@ -50,3 +50,16 @@ sample_names = [
   "deployment.environment.name",
   "network.protocol.version",
 ]
+
+# Accept the Prometheus scrape-convention labels `instance` and `job`. OBI does
+# not emit these over OTLP; in the OATS pipeline the collector's
+# prometheusreceiver adds them when it scrapes OBI's /metrics endpoint and
+# converts the series to OTLP, so weaver sees them on that tap. They are scrape
+# infrastructure, not OBI's semantic-convention contract, so they are tolerated
+# here rather than declared in the registry.
+[[live-check.finding_filters]]
+exclude = ["missing_attribute"]
+sample_names = [
+  "instance",
+  "job",
+]

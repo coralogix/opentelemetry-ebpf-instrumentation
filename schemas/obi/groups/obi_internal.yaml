@@ -23,22 +23,6 @@ groups:
           emissions to disambiguate from collector-contrib connector
           output.
         examples: [ "obi" ]
-      - id: instance
-        type: string
-        stability: development
-        brief: >
-          Scrape target instance label, originating from the Prometheus /
-          OpenMetrics convention. Carried on `target_info` and on every
-          series exported via OBI's Prometheus exporter.
-        examples: ["host.local:9090"]
-      - id: job
-        type: string
-        stability: development
-        brief: >
-          Scrape target job label, originating from the Prometheus /
-          OpenMetrics convention. Carried on `target_info` and on every
-          series exported via OBI's Prometheus exporter.
-        examples: ["my-service"]
       - id: obi.version
         type: string
         stability: development
@@ -71,8 +55,6 @@ groups:
       `target_info` convention. Emitted with value 1 to carry the resource
       attributes of the originating service.
     attributes:
-      - ref: instance
-      - ref: job
       - ref: service.name
       - ref: service.namespace
       - ref: service.instance.id
