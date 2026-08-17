@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -189,6 +191,7 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 	// times before declaring the tap pipeline broken.
 	adminURL := fmt.Sprintf("http://%s/stop", addr)
 	var report *weavercheck.Report
+	var rawReport []byte
 	var finalDrops tapDropCounts
 	var finalDropsErr error
 	for attempt := 1; ; attempt++ {
@@ -201,7 +204,12 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		finalDrops, finalDropsErr = k.tapDropCount(ctx)
 
 		var err error
-		report, err = weavercheck.FetchReport(ctx, adminURL)
+		rawReport, err = weavercheck.FetchRawReport(ctx, adminURL)
+		if err != nil {
+			t.Errorf("%v", err)
+			return
+		}
+		report, err = weavercheck.Parse(rawReport)
 		if err != nil {
 			t.Errorf("%v", err)
 			return
@@ -221,6 +229,20 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		if err := waitForHTTP(ctx, "http://"+addr+"/"); err != nil {
 			t.Errorf("restarted weaver never became reachable: %v", err)
 			return
+		}
+	}
+
+	// Archive the raw report so the weaver-coverage aggregate can union its
+	// seen_* statistics, which the parsed Report drops. This runs during suite
+	// teardown, before exportLogs creates k.logsDir, so ensure it exists first.
+	// Archiving is best-effort for coverage, not a correctness signal, so a
+	// failure is logged rather than failing the validation.
+	if err := os.MkdirAll(k.logsDir, 0o755); err != nil {
+		t.Logf("could not create %s to archive the weaver report: %v", k.logsDir, err)
+	} else {
+		reportPath := filepath.Join(k.logsDir, "weaver-report-k8s-"+k.clusterName+".json")
+		if err := os.WriteFile(reportPath, rawReport, 0o644); err != nil {
+			t.Logf("could not archive weaver report to %s: %v", reportPath, err)
 		}
 	}
 

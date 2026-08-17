@@ -87,3 +87,81 @@ groups:
               brief: 'NATS'
               stability: development
         stability: development
+
+  - id: metric.obi.messaging.client.operation.duration
+    type: metric
+    metric_name: messaging.client.operation.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted messaging.client.operation.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.system
+      - ref: server.address
+      - ref: service.name
+      - ref: service.namespace
+
+  - id: metric.obi.messaging.process.duration
+    type: metric
+    metric_name: messaging.process.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted messaging.process.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.system
+      - ref: server.address
+      - ref: service.name
+      - ref: service.namespace
+
+  # Kafka, MQTT, NATS, AMQP. Producer / consumer split by operation; the
+  # attribute set is the union OBI emits across systems.
+  - id: span.obi.messaging.producer
+    type: span
+    span_kind: producer
+    stability: development
+    brief: OBI messaging producer span.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.client.id
+      - ref: messaging.message.id
+      - ref: messaging.destination.partition.id
+      - ref: messaging.kafka.offset
+      - ref: messaging.message.envelope.size
+      - ref: server.address
+      - ref: server.port
+      - ref: service.peer.name
+      - ref: span.metrics.skip
+
+  - id: span.obi.messaging.consumer
+    type: span
+    span_kind: consumer
+    stability: development
+    brief: OBI messaging consumer span.
+    attributes:
+      - ref: messaging.system
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: messaging.client.id
+      - ref: messaging.message.id
+      - ref: messaging.destination.partition.id
+      - ref: messaging.kafka.offset
+      - ref: messaging.message.envelope.size
+      - ref: server.address
+      - ref: server.port
+      - ref: service.peer.name
+      - ref: span.metrics.skip

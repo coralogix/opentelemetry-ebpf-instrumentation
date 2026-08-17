@@ -175,3 +175,142 @@ groups:
           for Qwen/DashScope, 'conversation'/'response' for the OpenAI APIs,
           'rerank') and passes MCP JSON-RPC method names through verbatim.
         examples: ['chat', 'embeddings', 'response', 'conversation', 'invoke_model', 'rerank', 'tools/call']
+
+  - id: registry.obi.gen_ai
+    type: attribute_group
+    display_name: OBI GenAI Attributes
+    brief: >
+      GenAI attributes OBI emits that are not part of upstream semconv.
+    attributes:
+      - id: gen_ai.metadata
+        type: string
+        stability: development
+        brief: >
+          Provider-specific request/response metadata captured on GenAI
+          spans, JSON-encoded.
+        note: >
+          only emitted when selected via `attributes.select`
+          (`gen_ai.metadata`), alongside the upstream
+          `gen_ai.input.messages` / `gen_ai.output.messages` capture
+          attributes.
+        examples: ['{"conversation_id":"conv_abc123"}']
+      - id: gen_ai.rerank.top_n
+        type: int
+        stability: development
+        brief: >
+          Number of top results requested from a GenAI rerank operation.
+        note: >
+          OBI extension attribute, emitted on rerank spans until upstream
+          semconv defines an official rerank top-N attribute.
+      - id: gen_ai.request.embedding.input_count
+        type: int
+        stability: development
+        brief: >
+          Number of inputs submitted to a GenAI embedding request.
+        note: >
+          OBI extension attribute, emitted on embedding spans until upstream
+          semconv defines an official embedding input-count attribute.
+      - id: gen_ai.retrieval.top_k
+        type: int
+        stability: development
+        brief: >
+          Number of top results requested from a GenAI vector-retrieval
+          operation.
+        note: >
+          OBI extension attribute, emitted on vector-retrieval spans until
+          upstream semconv defines an official retrieval top-K attribute.
+
+  - id: metric.obi.gen_ai.client.operation.duration
+    type: metric
+    metric_name: gen_ai.client.operation.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted gen_ai.client.operation.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: error.type
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.provider.name
+      - ref: gen_ai.request.model
+      - ref: gen_ai.response.model
+      - ref: server.address
+      - ref: server.port
+      - ref: service.name
+      - ref: service.namespace
+
+  - id: metric.obi.gen_ai.client.token.usage
+    type: metric
+    metric_name: gen_ai.client.token.usage
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted gen_ai.client.token.usage
+    instrument: histogram
+    unit: "{token}"
+    stability: development
+    attributes:
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.provider.name
+      - ref: gen_ai.request.model
+      - ref: gen_ai.response.model
+      - ref: gen_ai.token.type
+      - ref: server.address
+      - ref: server.port
+      - ref: service.name
+      - ref: service.namespace
+
+  # Union across OpenAI, Anthropic, Gemini, Qwen, Ollama, OpenAI-compatible,
+  # AWS Bedrock, rerank, embedding and vector-retrieval flows.
+  - id: span.obi.gen_ai.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI GenAI client span.
+    attributes:
+      - ref: gen_ai.provider.name
+      - ref: gen_ai.operation.name
+      - ref: gen_ai.request.model
+      - ref: gen_ai.response.model
+      - ref: gen_ai.response.id
+      - ref: gen_ai.conversation.id
+      - ref: gen_ai.request.temperature
+      - ref: gen_ai.request.top_p
+      - ref: gen_ai.request.top_k
+      - ref: gen_ai.request.max_tokens
+      - ref: gen_ai.request.frequency_penalty
+      - ref: gen_ai.request.presence_penalty
+      - ref: gen_ai.request.choice.count
+      - ref: gen_ai.request.seed
+      - ref: gen_ai.request.stop_sequences
+      - ref: gen_ai.request.encoding_formats
+      - ref: gen_ai.request.stream
+      - ref: gen_ai.usage.input_tokens
+      - ref: gen_ai.usage.output_tokens
+      - ref: gen_ai.usage.cache_read.input_tokens
+      - ref: gen_ai.usage.cache_creation.input_tokens
+      - ref: gen_ai.usage.reasoning.output_tokens
+      - ref: gen_ai.response.finish_reasons
+      - ref: gen_ai.embeddings.dimension.count
+      - ref: gen_ai.output.type
+      - ref: gen_ai.data_source.id
+      - ref: gen_ai.input.messages
+      - ref: gen_ai.output.messages
+      - ref: gen_ai.system_instructions
+      - ref: gen_ai.tool.definitions
+      - ref: gen_ai.metadata
+      - ref: gen_ai.rerank.top_n
+      - ref: gen_ai.request.embedding.input_count
+      - ref: gen_ai.retrieval.top_k
+      - ref: openai.request.service_tier
+      - ref: openai.response.service_tier
+      - ref: openai.response.system_fingerprint
+      - ref: openai.api.type
+      - ref: aws.bedrock.guardrail.id
+      - ref: error.type
+      - ref: server.address
+      - ref: server.port
+      - ref: service.peer.name
+      - ref: span.metrics.skip

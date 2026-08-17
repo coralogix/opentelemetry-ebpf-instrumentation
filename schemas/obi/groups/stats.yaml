@@ -78,6 +78,26 @@ groups:
       - ref: dst.name
       - ref: src.zone
       - ref: dst.zone
+      - ref: k8s.cluster.name
+      - ref: k8s.src.owner.name
+      - ref: k8s.src.owner.type
+      - ref: k8s.src.namespace
+      - ref: k8s.src.name
+      - ref: k8s.src.type
+      - ref: k8s.src.node.ip
+      - ref: k8s.src.node.name
+      - ref: k8s.dst.owner.name
+      - ref: k8s.dst.owner.type
+      - ref: k8s.dst.namespace
+      - ref: k8s.dst.name
+      - ref: k8s.dst.type
+      - ref: k8s.dst.node.ip
+      - ref: k8s.dst.node.name
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.peer.name
+      - ref: service.peer.namespace
+      - ref: network.tcp.handshake.role
 
   - id: metric.obi_stat_tcp_retransmits
     type: metric
@@ -97,6 +117,25 @@ groups:
       - ref: dst.name
       - ref: src.zone
       - ref: dst.zone
+      - ref: k8s.cluster.name
+      - ref: k8s.src.owner.name
+      - ref: k8s.src.owner.type
+      - ref: k8s.src.namespace
+      - ref: k8s.src.name
+      - ref: k8s.src.type
+      - ref: k8s.src.node.ip
+      - ref: k8s.src.node.name
+      - ref: k8s.dst.owner.name
+      - ref: k8s.dst.owner.type
+      - ref: k8s.dst.namespace
+      - ref: k8s.dst.name
+      - ref: k8s.dst.type
+      - ref: k8s.dst.node.ip
+      - ref: k8s.dst.node.name
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.peer.name
+      - ref: service.peer.namespace
 
   - id: metric.obi_stat_tcp_io
     type: metric
@@ -118,6 +157,25 @@ groups:
       - ref: src.zone
       - ref: dst.zone
       - ref: network.io.direction
+      - ref: k8s.cluster.name
+      - ref: k8s.src.owner.name
+      - ref: k8s.src.owner.type
+      - ref: k8s.src.namespace
+      - ref: k8s.src.name
+      - ref: k8s.src.type
+      - ref: k8s.src.node.ip
+      - ref: k8s.src.node.name
+      - ref: k8s.dst.owner.name
+      - ref: k8s.dst.owner.type
+      - ref: k8s.dst.namespace
+      - ref: k8s.dst.name
+      - ref: k8s.dst.type
+      - ref: k8s.dst.node.ip
+      - ref: k8s.dst.node.name
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.peer.name
+      - ref: service.peer.namespace
 
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
@@ -142,3 +200,22 @@ groups:
       - ref: dst.zone
       - ref: reason
       - ref: network.tcp.handshake.role
+      - ref: k8s.cluster.name
+      - ref: k8s.src.owner.name
+      - ref: k8s.src.owner.type
+      - ref: k8s.src.namespace
+      - ref: k8s.src.name
+      - ref: k8s.src.type
+      - ref: k8s.src.node.ip
+      - ref: k8s.src.node.name
+      - ref: k8s.dst.owner.name
+      - ref: k8s.dst.owner.type
+      - ref: k8s.dst.namespace
+      - ref: k8s.dst.name
+      - ref: k8s.dst.type
+      - ref: k8s.dst.node.ip
+      - ref: k8s.dst.node.name
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.peer.name
+      - ref: service.peer.namespace

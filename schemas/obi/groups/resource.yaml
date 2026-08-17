@@ -1,0 +1,28 @@
+# Cloud resource entities OBI's contrib detectors populate. The EC2 / Azure VM /
+# GCP detectors (pkg/appolly/meta) set cloud.* and the GCE-specific gcp.gce.*
+# keys; which appear depends on the environment, so importing the whole entity
+# keeps live-check tolerant of the detector's output without
+# --include-unreferenced. Every attribute in these two entities is one a
+# detector actually emits.
+#
+# The host.* / os.* keys the detectors emit (host.id/name/type, host.image.id,
+# os.type, os.version) are enumerated individually on the target.info carriers
+# in obi_internal.yaml rather than imported as whole entities: the upstream host
+# and os entities also carry keys no OBI detector ever sets (host.arch,
+# host.image.name/version, host.ip, host.mac, os.build_id/description/name),
+# which would otherwise sit in the coverage denominator as permanent gaps.
+#
+# This file declares only attributes OBI itself SETS. Attributes OBI merely
+# forwards from the workload (service.version, deployment.environment.name and
+# any other OTEL_RESOURCE_ATTRIBUTES / app-emitted keys) are passthrough, not
+# part of OBI's contract, and are tolerated by live-check policy (.weaver.toml)
+# instead.
+#
+# Imports must live in their own definition/2 file: weaver's imports directive
+# is file-level and cannot be mixed into a groups-format domain file.
+file_format: definition/2
+
+imports:
+  entities:
+    - cloud
+    - gcp.gce

@@ -29,3 +29,37 @@ sample_names = [
   "client.port",
   "iface.direction",
 ]
+
+# Accept passthrough attributes OBI forwards but does not itself set. These are
+# valid semconv keys under namespaces OBI uses, so they surface as
+# missing_attribute / extends_namespace violations rather than being tolerated
+# as the sub-violation advice that unknown-namespace user attributes get — but
+# they are not part of OBI's emitted contract, so they are tolerated here
+# instead of declared:
+#   - service.version, deployment.environment.name: set by the workload via
+#     OTEL_RESOURCE_ATTRIBUTES and forwarded on the resource.
+#   - network.protocol.version: emitted by an already-instrumented application
+#     whose own telemetry flows through the same weaver tap (OBI sets
+#     network.protocol.name, not .version).
+# Anything OBI actually sets is declared in the registry, so a new violation
+# here still means a real gap unless it is genuine passthrough added to this list.
+[[live-check.finding_filters]]
+exclude = ["missing_attribute", "extends_namespace"]
+sample_names = [
+  "service.version",
+  "deployment.environment.name",
+  "network.protocol.version",
+]
+
+# Accept the Prometheus scrape-convention labels `instance` and `job`. OBI does
+# not emit these over OTLP; in the OATS pipeline the collector's
+# prometheusreceiver adds them when it scrapes OBI's /metrics endpoint and
+# converts the series to OTLP, so weaver sees them on that tap. They are scrape
+# infrastructure, not OBI's semantic-convention contract, so they are tolerated
+# here rather than declared in the registry.
+[[live-check.finding_filters]]
+exclude = ["missing_attribute"]
+sample_names = [
+  "instance",
+  "job",
+]

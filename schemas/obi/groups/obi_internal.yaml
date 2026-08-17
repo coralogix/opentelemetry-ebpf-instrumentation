@@ -23,22 +23,6 @@ groups:
           emissions to disambiguate from collector-contrib connector
           output.
         examples: [ "obi" ]
-      - id: instance
-        type: string
-        stability: development
-        brief: >
-          Scrape target instance label, originating from the Prometheus /
-          OpenMetrics convention. Carried on `target_info` and on every
-          series exported via OBI's Prometheus exporter.
-        examples: ["host.local:9090"]
-      - id: job
-        type: string
-        stability: development
-        brief: >
-          Scrape target job label, originating from the Prometheus /
-          OpenMetrics convention. Carried on `target_info` and on every
-          series exported via OBI's Prometheus exporter.
-        examples: ["my-service"]
       - id: obi.version
         type: string
         stability: development
@@ -71,8 +55,37 @@ groups:
       `target_info` convention. Emitted with value 1 to carry the resource
       attributes of the originating service.
     attributes:
-      - ref: instance
-      - ref: job
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.instance.id
+      - ref: telemetry.sdk.language
+      - ref: telemetry.sdk.name
+      - ref: telemetry.sdk.version
+      - ref: telemetry.distro.name
+      - ref: telemetry.distro.version
+      - ref: host.name
+      - ref: host.id
+      - ref: host.type
+      - ref: host.image.id
+      - ref: os.type
+      - ref: os.version
+      - ref: container.id
+      - ref: container.name
+      - ref: k8s.cluster.name
+      - ref: k8s.container.name
+      - ref: k8s.cronjob.name
+      - ref: k8s.daemonset.name
+      - ref: k8s.deployment.name
+      - ref: k8s.job.name
+      - ref: k8s.kind
+      - ref: k8s.namespace.name
+      - ref: k8s.node.name
+      - ref: k8s.owner.name
+      - ref: k8s.pod.name
+      - ref: k8s.pod.start_time
+      - ref: k8s.pod.uid
+      - ref: k8s.replicaset.name
+      - ref: k8s.statefulset.name
 
   # The trace-pipeline counterpart of `target.info`. Only emitted when any
   # span-metrics feature is enabled — i.e. one of `application_span`,
@@ -92,6 +105,37 @@ groups:
       join trace metrics back to service identity.
     attributes:
       - ref: source
+      - ref: otel.scope.name
+      - ref: service.name
+      - ref: service.namespace
+      - ref: service.instance.id
+      - ref: telemetry.sdk.language
+      - ref: telemetry.sdk.name
+      - ref: telemetry.sdk.version
+      - ref: telemetry.distro.name
+      - ref: telemetry.distro.version
+      - ref: host.id
+      - ref: host.type
+      - ref: host.image.id
+      - ref: os.type
+      - ref: os.version
+      - ref: container.id
+      - ref: container.name
+      - ref: k8s.cluster.name
+      - ref: k8s.container.name
+      - ref: k8s.cronjob.name
+      - ref: k8s.daemonset.name
+      - ref: k8s.deployment.name
+      - ref: k8s.job.name
+      - ref: k8s.kind
+      - ref: k8s.namespace.name
+      - ref: k8s.node.name
+      - ref: k8s.owner.name
+      - ref: k8s.pod.name
+      - ref: k8s.pod.start_time
+      - ref: k8s.pod.uid
+      - ref: k8s.replicaset.name
+      - ref: k8s.statefulset.name
 
   # OBI-invented per-host meta-metric — there is no upstream /
   # collector-contrib analogue. Carries the upstream `host.id` attribute.

@@ -21,6 +21,16 @@
 # endpoint and reads the live-check report back from the response body. The
 # `compact` template keeps that body small enough to avoid the truncation that
 # large reports hit when weaver closes the connection on exit.
+#
+# live-check runs WITHOUT `--include-unreferenced` so it validates strictly
+# against OBI's declared contract instead of the whole upstream registry.
+# Everything OBI itself emits is declared (per-domain metrics and spans, the
+# resource entities in resource.yaml, and the target.info carriers). Attributes
+# OBI only forwards — the workload's OTEL_RESOURCE_ATTRIBUTES and telemetry from
+# already-instrumented apps flowing through the same tap — are passthrough, not
+# OBI's contract, and are tolerated by the finding_filters in
+# `schemas/obi/.weaver.toml`. Arbitrary user keys under namespaces OBI does not
+# use are tolerated automatically as sub-violation advice.
 services:
   weaver:
     image: otel/weaver:v0.25.1@sha256:9ad46ca9cd4fa5974b121f886aa3e9946a8ef8ea905001a96c018d21f9db87ca
@@ -32,7 +42,6 @@ services:
       - live-check
       - --registry
       - /obi-registry
-      - --include-unreferenced
       - --inactivity-timeout
       - "300"
       - --admin-port
