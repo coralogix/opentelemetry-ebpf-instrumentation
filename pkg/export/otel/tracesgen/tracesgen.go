@@ -36,6 +36,38 @@ import (
 	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
 )
 
+const userAgentHeader = "user-agent"
+
+// The http.request.method enum members. Method names are case-sensitive and
+// must match exactly, so this set is not canonicalized.
+var knownHTTPMethods = map[string]struct{}{
+	"CONNECT": {},
+	"DELETE":  {},
+	"GET":     {},
+	"HEAD":    {},
+	"OPTIONS": {},
+	"PATCH":   {},
+	"POST":    {},
+	"PUT":     {},
+	"QUERY":   {},
+	"TRACE":   {},
+}
+
+// httpMethodAttributes clamps a method outside the semconv enum to _OTHER and
+// keeps the wire value on http.request.method_original. Besides conformance
+// this bounds the cardinality of http.request.method, which otherwise carries
+// whatever bytes the request line held.
+func httpMethodAttributes(method string) []attribute.KeyValue {
+	if _, ok := knownHTTPMethods[method]; ok {
+		return []attribute.KeyValue{request.HTTPRequestMethod(method)}
+	}
+
+	return []attribute.KeyValue{
+		semconv.HTTPRequestMethodOther,
+		semconv.HTTPRequestMethodOriginal(method),
+	}
+}
+
 // Attribute keys not yet available in semconv v1.41.0.
 // Replace with semconv helpers when the package is updated.
 var (
@@ -503,6 +535,11 @@ func httpEnrichmentAttributes(span *request.Span) []attribute.KeyValue {
 	attrs := make([]attribute.KeyValue, 0, len(span.RequestHeaders)+len(span.ResponseHeaders))
 	for name, values := range span.RequestHeaders {
 		attrs = append(attrs, attribute.StringSlice(attr.HTTPRequestHeaderKey(name), values))
+		// The captured header also has a semconv home of its own, which
+		// consumers look for instead of the generic header attribute.
+		if strings.EqualFold(name, userAgentHeader) && len(values) > 0 && values[0] != "" {
+			attrs = append(attrs, semconv.UserAgentOriginal(values[0]))
+		}
 	}
 	for name, values := range span.ResponseHeaders {
 		attrs = append(attrs, attribute.StringSlice(attr.HTTPResponseHeaderKey(name), values))
@@ -559,7 +596,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			request.HTTPResponseBodySize(span.ResponseBodyLength()),
 		}
 		if span.Method != "" {
-			attrs = append(attrs, request.HTTPRequestMethod(span.Method))
+			attrs = append(attrs, httpMethodAttributes(span.Method)...)
 		}
 		if span.Path != "" {
 			attrs = append(attrs, request.HTTPUrlPath(span.Path))
@@ -666,7 +703,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			request.HTTPResponseBodySize(span.ResponseBodyLength()),
 		}
 		if span.Method != "" {
-			attrs = append(attrs, request.HTTPRequestMethod(span.Method))
+			attrs = append(attrs, httpMethodAttributes(span.Method)...)
 		}
 
 		if scrubbedQS != "" {
@@ -1362,6 +1399,9 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 				attrs = append(attrs, request.DBCollectionName(table))
 			}
 		}
+		if span.DBQuerySummary != "" {
+			attrs = append(attrs, semconv.DBQuerySummary(span.DBQuerySummary))
+		}
 		if span.Status == 1 && span.SQLError != nil {
 			attrs = append(attrs, request.DBResponseStatusCode(strconv.Itoa(int(span.SQLError.Code))))
 			// omit error.type when the SQLSTATE was not captured, instead of
@@ -1473,6 +1513,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 		if procName := span.SunRPCProcedureNameForExport(); procName != "" {
 			attrs = append(attrs, semconv.OncRPCProcedureName(procName))
+			attrs = append(attrs, semconv.RPCMethod(procName))
 		}
 		if span.SubType != 0 {
 			attrs = append(attrs, semconv.OncRPCVersion(span.SubType))
@@ -1601,11 +1642,78 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 
 	}
 
+	attrs = append(attrs, networkPeerAttributes(span)...)
+
+	// network.protocol.name is conditionally required only when the protocol is
+	// not http, which it always is here, so only the version is reported.
+	if version := span.ProtoVersion.String(); version != "" {
+		attrs = append(attrs, semconv.NetworkProtocolVersion(version))
+	}
+
+	// Several protocol branches above already set error.type from their own
+	// error detail, which is more specific than the generic status-derived
+	// value, so only fill in the gap.
+	if errType := request.SpanErrorType(span); errType != "" && !hasAttribute(attrs, semconv.ErrorTypeKey) {
+		attrs = append(attrs, request.ErrorType(errType))
+	}
+
 	if _, ok := optionalAttrs[attr.SkipSpanMetrics]; ok {
 		attrs = append(attrs, spanMetricsSkip)
 	}
 
 	return attrs
+}
+
+// networkPeerAttributes reports the raw socket address of the connection's
+// remote end. server.address and client.address prefer a resolved name or a
+// Host header when one is available, so without this the socket address is
+// dropped and cannot be recovered downstream.
+//
+// DNS and failed-connect spans are left out: their client/server mapping does
+// not follow the usual client-span convention, so the remote end is ambiguous.
+func networkPeerAttributes(span *request.Span) []attribute.KeyValue {
+	var addr string
+	var port int
+
+	switch span.Type {
+	case request.EventTypeHTTP, request.EventTypeGRPC,
+		request.EventTypeSQLServer, request.EventTypeRedisServer,
+		request.EventTypeMemcachedServer, request.EventTypeSunRPCServer,
+		request.EventTypeKafkaServer, request.EventTypeMQTTServer,
+		request.EventTypeNATSServer:
+		addr, port = span.Peer, span.PeerPort
+	case request.EventTypeHTTPClient, request.EventTypeGRPCClient,
+		request.EventTypeSQLClient, request.EventTypeRedisClient,
+		request.EventTypeMongoClient, request.EventTypeCouchbaseClient,
+		request.EventTypeMemcachedClient, request.EventTypeAerospikeClient,
+		request.EventTypeSunRPCClient, request.EventTypeKafkaClient,
+		request.EventTypeMQTTClient, request.EventTypeNATSClient,
+		request.EventTypeAMQPClient:
+		addr, port = span.Host, span.HostPort
+	default:
+		return nil
+	}
+
+	if addr == "" {
+		return nil
+	}
+
+	attrs := []attribute.KeyValue{semconv.NetworkPeerAddress(addr)}
+	if port > 0 {
+		attrs = append(attrs, semconv.NetworkPeerPort(port))
+	}
+
+	return attrs
+}
+
+func hasAttribute(attrs []attribute.KeyValue, key attribute.Key) bool {
+	for i := range attrs {
+		if attrs[i].Key == key {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TraceAttributesSelector returns the []attribute.KeyValue for a single span.

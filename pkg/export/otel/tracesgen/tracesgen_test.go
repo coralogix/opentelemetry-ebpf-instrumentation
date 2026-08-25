@@ -81,6 +81,262 @@ func TestTraceAttributesSelector_DNSQuestionName(t *testing.T) {
 	assert.Contains(t, optInAttrs, semconv.DNSQuestionName("example.com"))
 }
 
+func attrValue(attrs []attribute.KeyValue, key string) (attribute.Value, bool) {
+	for _, kv := range attrs {
+		if string(kv.Key) == key {
+			return kv.Value, true
+		}
+	}
+	return attribute.Value{}, false
+}
+
+func countAttr(attrs []attribute.KeyValue, key string) int {
+	n := 0
+	for _, kv := range attrs {
+		if string(kv.Key) == key {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTraceAttributesSelector_ErrorType(t *testing.T) {
+	noOpts := map[attr.Name]struct{}{}
+
+	t.Run("omitted when the span did not fail", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTP, Method: "GET", Path: "/x", Status: 200}
+		_, ok := attrValue(TraceAttributesSelector(span, noOpts), "error.type")
+		assert.False(t, ok)
+	})
+
+	t.Run("http carries the status code", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTP, Method: "GET", Path: "/x", Status: 503}
+		v, ok := attrValue(TraceAttributesSelector(span, noOpts), "error.type")
+		require.True(t, ok)
+		assert.Equal(t, "503", v.AsString())
+	})
+
+	t.Run("grpc carries the status code name", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeGRPC, Path: "/pkg.Svc/M", Status: 14}
+		v, ok := attrValue(TraceAttributesSelector(span, noOpts), "error.type")
+		require.True(t, ok)
+		assert.Equal(t, "UNAVAILABLE", v.AsString())
+	})
+
+	t.Run("db carries the server error code", func(t *testing.T) {
+		span := &request.Span{
+			Type:    request.EventTypeRedisClient,
+			Method:  "GET",
+			Status:  1,
+			DBError: request.DBError{ErrorCode: "WRONGTYPE"},
+		}
+		v, ok := attrValue(TraceAttributesSelector(span, noOpts), "error.type")
+		require.True(t, ok)
+		assert.Equal(t, "WRONGTYPE", v.AsString())
+	})
+
+	t.Run("falls back to _OTHER with no classification", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeRedisClient, Method: "GET", Status: 1}
+		v, ok := attrValue(TraceAttributesSelector(span, noOpts), "error.type")
+		require.True(t, ok)
+		assert.Equal(t, "_OTHER", v.AsString())
+	})
+
+	t.Run("not duplicated when the protocol branch already set it", func(t *testing.T) {
+		span := &request.Span{
+			Type:     request.EventTypeSQLClient,
+			Method:   "SELECT",
+			Status:   1,
+			SQLError: &request.SQLError{Code: 1064, SQLState: "42000"},
+		}
+		attrs := TraceAttributesSelector(span, noOpts)
+		assert.Equal(t, 1, countAttr(attrs, "error.type"))
+		v, _ := attrValue(attrs, "error.type")
+		assert.Equal(t, "42000", v.AsString())
+	})
+}
+
+func TestTraceAttributesSelector_NetworkPeer(t *testing.T) {
+	noOpts := map[attr.Name]struct{}{}
+
+	t.Run("server span reports the client socket", func(t *testing.T) {
+		span := &request.Span{
+			Type: request.EventTypeHTTP, Method: "GET", Path: "/x", Status: 200,
+			Peer: "10.0.0.5", PeerPort: 54321,
+			Host: "10.0.0.9", HostPort: 8080,
+			// a resolved name takes over client.address, so the socket address
+			// is only available through network.peer.address
+			PeerName: "frontend",
+		}
+		attrs := TraceAttributesSelector(span, noOpts)
+		addr, ok := attrValue(attrs, "network.peer.address")
+		require.True(t, ok)
+		assert.Equal(t, "10.0.0.5", addr.AsString())
+		port, ok := attrValue(attrs, "network.peer.port")
+		require.True(t, ok)
+		assert.Equal(t, int64(54321), port.AsInt64())
+	})
+
+	t.Run("client span reports the server socket", func(t *testing.T) {
+		span := &request.Span{
+			Type: request.EventTypeHTTPClient, Method: "GET", Path: "/x", Status: 200,
+			Peer: "10.0.0.5", PeerPort: 54321,
+			Host: "10.0.0.9", HostPort: 8080,
+		}
+		attrs := TraceAttributesSelector(span, noOpts)
+		addr, ok := attrValue(attrs, "network.peer.address")
+		require.True(t, ok)
+		assert.Equal(t, "10.0.0.9", addr.AsString())
+		port, ok := attrValue(attrs, "network.peer.port")
+		require.True(t, ok)
+		assert.Equal(t, int64(8080), port.AsInt64())
+	})
+
+	t.Run("omitted where the client/server mapping is ambiguous", func(t *testing.T) {
+		for _, et := range []request.EventType{request.EventTypeDNS, request.EventTypeFailedConnect} {
+			span := &request.Span{Type: et, Peer: "10.0.0.5", PeerPort: 5, Host: "10.0.0.9", HostPort: 53}
+			_, ok := attrValue(TraceAttributesSelector(span, noOpts), "network.peer.address")
+			assert.False(t, ok, "event type %v", et)
+		}
+	})
+
+	t.Run("omitted with no socket address", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTPClient, Method: "GET", Status: 200}
+		_, ok := attrValue(TraceAttributesSelector(span, noOpts), "network.peer.address")
+		assert.False(t, ok)
+	})
+}
+
+func TestTraceAttributesSelector_HTTPRequestMethod(t *testing.T) {
+	noOpts := map[attr.Name]struct{}{}
+
+	for _, method := range []string{"GET", "POST", "QUERY", "CONNECT", "TRACE"} {
+		t.Run("enum member "+method+" passes through", func(t *testing.T) {
+			span := &request.Span{Type: request.EventTypeHTTP, Method: method, Path: "/x", Status: 200}
+			attrs := TraceAttributesSelector(span, noOpts)
+
+			v, ok := attrValue(attrs, "http.request.method")
+			require.True(t, ok)
+			assert.Equal(t, method, v.AsString())
+			_, hasOriginal := attrValue(attrs, "http.request.method.original")
+			assert.False(t, hasOriginal)
+		})
+	}
+
+	// A mis-parsed buffer would otherwise become a unique http.request.method
+	// value, so the clamp is a cardinality guard as much as a conformance fix.
+	for _, method := range []string{"get", "PROPFIND", "\x16\x03\x01", "GET /x HTTP/1.1"} {
+		t.Run("outside the enum is clamped", func(t *testing.T) {
+			span := &request.Span{Type: request.EventTypeHTTP, Method: method, Path: "/x", Status: 200}
+			attrs := TraceAttributesSelector(span, noOpts)
+
+			v, ok := attrValue(attrs, "http.request.method")
+			require.True(t, ok)
+			assert.Equal(t, "_OTHER", v.AsString())
+
+			orig, ok := attrValue(attrs, "http.request.method_original")
+			require.True(t, ok)
+			assert.Equal(t, method, orig.AsString())
+		})
+	}
+
+	t.Run("applies to client spans too", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTPClient, Method: "frobnicate", Path: "/x", Status: 200}
+		attrs := TraceAttributesSelector(span, noOpts)
+
+		v, _ := attrValue(attrs, "http.request.method")
+		assert.Equal(t, "_OTHER", v.AsString())
+		orig, ok := attrValue(attrs, "http.request.method_original")
+		require.True(t, ok)
+		assert.Equal(t, "frobnicate", orig.AsString())
+	})
+}
+
+func TestTraceAttributesSelector_NetworkProtocolVersion(t *testing.T) {
+	noOpts := map[attr.Name]struct{}{}
+
+	t.Run("reported for every protocol that carries a version", func(t *testing.T) {
+		cases := []struct {
+			et      request.EventType
+			version request.ProtoVersion
+			want    string
+		}{
+			{request.EventTypeHTTP, request.ProtoVersionHTTP11, "1.1"},
+			{request.EventTypeHTTP, request.ProtoVersionHTTP10, "1.0"},
+			{request.EventTypeHTTP, request.ProtoVersionHTTP2, "2"},
+			{request.EventTypeHTTPClient, request.ProtoVersionHTTP11, "1.1"},
+			{request.EventTypeGRPC, request.ProtoVersionHTTP2, "2"},
+			{request.EventTypeGRPCClient, request.ProtoVersionHTTP2, "2"},
+		}
+		for _, c := range cases {
+			span := &request.Span{Type: c.et, ProtoVersion: c.version, Method: "GET", Path: "/x", Status: 200}
+			v, ok := attrValue(TraceAttributesSelector(span, noOpts), "network.protocol.version")
+			require.True(t, ok, "event type %v", c.et)
+			assert.Equal(t, c.want, v.AsString())
+		}
+	})
+
+	t.Run("omitted when the version was never determined", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTP, Method: "GET", Path: "/x", Status: 200}
+		_, ok := attrValue(TraceAttributesSelector(span, noOpts), "network.protocol.version")
+		assert.False(t, ok)
+	})
+
+	// The protocol is always http here, and semconv makes the name
+	// conditionally required only when it is not.
+	t.Run("protocol name is not reported", func(t *testing.T) {
+		span := &request.Span{Type: request.EventTypeHTTP, ProtoVersion: request.ProtoVersionHTTP11, Method: "GET", Path: "/x", Status: 200}
+		_, ok := attrValue(TraceAttributesSelector(span, noOpts), "network.protocol.name")
+		assert.False(t, ok)
+	})
+}
+
+func TestTraceAttributesSelector_DBQuerySummary(t *testing.T) {
+	span := &request.Span{
+		Type:           request.EventTypeSQLClient,
+		Method:         "SELECT",
+		Path:           "orders",
+		DBQuerySummary: "SELECT orders",
+	}
+	v, ok := attrValue(TraceAttributesSelector(span, map[attr.Name]struct{}{}), "db.query.summary")
+	require.True(t, ok)
+	assert.Equal(t, "SELECT orders", v.AsString())
+}
+
+func TestTraceAttributesSelector_UserAgentOriginal(t *testing.T) {
+	span := &request.Span{
+		Type: request.EventTypeHTTP, Method: "GET", Path: "/x", Status: 200,
+		RequestHeaders: map[string][]string{"User-Agent": {"curl/8.4.0"}},
+	}
+	attrs := TraceAttributesSelector(span, map[attr.Name]struct{}{})
+
+	v, ok := attrValue(attrs, "user_agent.original")
+	require.True(t, ok)
+	assert.Equal(t, "curl/8.4.0", v.AsString())
+
+	// the generic header attribute is still emitted alongside it
+	_, ok = attrValue(attrs, "http.request.header.user-agent")
+	assert.True(t, ok)
+}
+
+func TestTraceAttributesSelector_SunRPCMethod(t *testing.T) {
+	span := &request.Span{
+		Type:      request.EventTypeSunRPCClient,
+		Method:    "GETATTR",
+		Path:      "nfs",
+		Route:     "3",
+		SubType:   3,
+		Statement: "AUTH_UNIX",
+	}
+	attrs := TraceAttributesSelector(span, map[attr.Name]struct{}{})
+
+	proc, hasProc := attrValue(attrs, "onc_rpc.procedure.name")
+	require.True(t, hasProc)
+	method, hasMethod := attrValue(attrs, "rpc.method")
+	require.True(t, hasMethod)
+	assert.Equal(t, proc.AsString(), method.AsString())
+}
+
 func TestTraceAttributesSelector_GraphQLDocumentSelection(t *testing.T) {
 	const document = `mutation ChangeEmail { updateUser(email: "secret@example.com") { id } }`
 
