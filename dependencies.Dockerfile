@@ -6,3 +6,4 @@ FROM ghcr.io/astral-sh/uv:python3.9-trixie-slim@sha256:59f428b4c037de1a08e9af383
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim@sha256:d61b872404ed1a0774e2098b5af64c178b59c99be171db6631455262bb0750b4 AS python314
 FROM golang:1.26.5@sha256:7caba5286b4c3613a337b709c573047d8ae62ee76106647313b61e72b99f20af AS golang
 FROM otel/weaver:v0.25.1@sha256:9ad46ca9cd4fa5974b121f886aa3e9946a8ef8ea905001a96c018d21f9db87ca AS weaver
+FROM otel/build-tool-schemas:0.25.0@sha256:1c4b877fee86c936fc5b65915c18f91a047616e0883a86cbb016daabc4784da3 AS schemas

@@ -159,6 +159,7 @@ lint-run lint-fix-run:
 	go tool $(TOOLS_MODFILE) golangci-lint run ./... --timeout=6m $(LINT_EXTRA_ARGS)
 
 WEAVERIMAGE = $(shell awk '$$4=="weaver" {print $$2}' $(DEPENDENCIES_DOCKERFILE))
+SCHEMASIMAGE = $(shell awk '$$4=="schemas" {print $$2}' $(DEPENDENCIES_DOCKERFILE))
 .PHONY: lint-schema
 lint-schema: fetch-upstream-semconv
 	@echo "### Linting OBI semantic-convention registry"
@@ -167,7 +168,7 @@ lint-schema: fetch-upstream-semconv
 .PHONY: check-schema-files
 check-schema-files:
 	@echo "### Checking published OBI telemetry schema files"
-	@./scripts/check-schema-files.sh "$(CURDIR)/site/schemas/obi"
+	@./scripts/check-schema-files.sh "$(CURDIR)/site/schemas/obi" $(OCI_BIN) $(SCHEMASIMAGE)
 
 .PHONY: generate-schema-next
 generate-schema-next:
