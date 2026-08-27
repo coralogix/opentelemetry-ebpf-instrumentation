@@ -9,16 +9,20 @@
 #   2. bumps the emitted schema_url constant (OBISchemaURL) and the weaver
 #      registry manifest schema_url to <version>.
 #
-# Intended to run at release prep (invoked by `make prerelease`). Files are
-# immutable once published: if telemetry changed in this release, add the
-# rename entries by hand under the new <version>: block before committing
-# (see site/README.md).
+# The new version's transformations are derived from the renames declared in the
+# registry (`deprecated: {reason: renamed, renamed_to: ...}`), skipping any pair
+# already recorded in an earlier version. Renames that are not declared that way
+# still have to be added by hand (see devdocs/telemetry-schema.md). Files are
+# immutable once published: never edit a released version.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OCI_BIN="${OCI_BIN:-docker}"
+WEAVER_IMAGE="${WEAVER_IMAGE:-$(awk '$4=="weaver" {print $2}' "$ROOT/dependencies.Dockerfile")}"
 BASE_URL="https://open-telemetry.github.io/opentelemetry-ebpf-instrumentation/schemas/obi"
 SCHEMA_DIR="$ROOT/site/schemas/obi"
+REGISTRY="$ROOT/schemas/obi"
 SCHEMA_VERSION_FILE="$ROOT/pkg/export/attributes/names/schema_version.go"
 MANIFEST="$ROOT/schemas/obi/manifest.yaml"
 
@@ -35,14 +39,36 @@ else
 	prev="$(printf '%s\n' "$SCHEMA_DIR"/* | sed 's#.*/##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
 	[ -n "$prev" ] || fail "no previous schema file under $SCHEMA_DIR to base $version on"
 	grep -Eq '^versions:[[:space:]]*$' "$SCHEMA_DIR/$prev" || fail "previous file $prev has no 'versions:' block"
+	# Renames already recorded in earlier versions must not repeat in the new
+	# block; collect them as `old: new` pairs from the previous file.
+	known="$(grep -E '^ {12,14}[^ ].*: ' "$SCHEMA_DIR/$prev" | sed 's/^ *//' || true)"
+
+	resolved=$(mktemp)
+	"$OCI_BIN" run --rm -v "$REGISTRY:/obi-registry:ro,z" -w /obi-registry \
+		"$WEAVER_IMAGE" registry resolve --registry /obi-registry \
+		--include-unreferenced --format json > "$resolved" 2>/dev/null || true
+
+	changes=""
+	if jq -e '.groups | length > 0' "$resolved" >/dev/null 2>&1; then
+		changes="$(jq -r --arg known "$known" -f "$ROOT/scripts/schema-renames.jq" "$resolved")"
+	else
+		echo "generate-schema-next: could not resolve the registry; emitting no transformations" >&2
+	fi
+	rm -f "$resolved"
+
 	{
 		echo "file_format: 1.1.0"
 		echo "schema_url: $BASE_URL/$version"
 		echo "versions:"
 		echo "  $version:"
+		[ -n "$changes" ] && printf '%s\n' "$changes"
 		awk 'f{print} /^versions:[[:space:]]*$/{f=1}' "$SCHEMA_DIR/$prev"
 	} > "$new_file"
-	echo "generate-schema-next: created site/schemas/obi/$version (empty transformations; add renames by hand if telemetry changed)"
+	if [ -n "$changes" ]; then
+		echo "generate-schema-next: created site/schemas/obi/$version with the renames declared in the registry"
+	else
+		echo "generate-schema-next: created site/schemas/obi/$version with no transformations"
+	fi
 fi
 
 # Regenerate the emitted URL constant and bump the registry manifest to <version>.
