@@ -706,6 +706,18 @@ release-source: docker-generate java-docker-build
 	@./scripts/release-source.sh --release-version "$(RELEASE_SOURCE_VERSION)" --release-dir "$(RELEASE_DIR)"
 	@$(MAKE) release-checksums RELEASE_VERSION=$(RELEASE_SOURCE_VERSION)
 
+# release-module packages the Go module proxy assets (zip/.mod/.info) for the
+# release. It must run AFTER release-source (which runs docker-generate and
+# java-docker-build), reusing the fully generated working tree in the same job;
+# it deliberately does NOT depend on docker-generate so the generated artifacts
+# (bpf2go outputs and the embedded Java agent JAR) are not regenerated.
+.PHONY: release-module
+release-module:
+	@echo "### Building Go module proxy assets"
+	@mkdir -p $(RELEASE_DIR)
+	@go run ./cmd/modzip --version "$(RELEASE_VERSION)" --source-dir . --dist-dir "$(RELEASE_DIR)"
+	@$(MAKE) release-checksums RELEASE_VERSION=$(RELEASE_VERSION)
+
 .PHONY: release-checksums
 release-checksums:
 	@echo "### Generating checksums"
@@ -714,7 +726,8 @@ release-checksums:
 	files=$$(find . -maxdepth 1 \( \
 		-name 'obi-$(RELEASE_VERSION)-*.tar.gz' -o \
 		-name 'obi-$(RELEASE_VERSION)-*.cyclonedx.json' -o \
-		-name 'obi-java-agent-$(RELEASE_VERSION).cyclonedx.json' \
+		-name 'obi-java-agent-$(RELEASE_VERSION).cyclonedx.json' -o \
+		-name 'obi-$(RELEASE_VERSION).module.*' \
 	\) | sed 's|^\./||' | sort) && \
 	if [ -z "$$files" ]; then \
 		echo "ERROR: No release artifacts found for obi-$(RELEASE_VERSION) in $(RELEASE_DIR)"; \
