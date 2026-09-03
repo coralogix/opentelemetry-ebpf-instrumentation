@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -200,8 +202,17 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		// losses during the final drain that supplies this report.
 		finalDrops, finalDropsErr = k.tapDropCount(ctx)
 
-		var err error
-		report, err = weavercheck.FetchReport(ctx, adminURL)
+		raw, err := weavercheck.FetchRawReport(ctx, adminURL)
+		if err != nil {
+			t.Errorf("%v", err)
+			return
+		}
+		// Archived under the same weaver-report-<name>.json name the
+		// Docker-Compose and OATS suites use, so cmd/obi-weaver-coverage can
+		// union all three. A later retry overwrites it, leaving the report the
+		// validation actually ran on.
+		k.archiveWeaverReport(t, raw)
+		report, err = weavercheck.Parse(raw)
 		if err != nil {
 			t.Errorf("%v", err)
 			return
@@ -345,4 +356,21 @@ func waitForHTTP(ctx context.Context, url string) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// archiveWeaverReport writes the raw live-check report into the suite's kind
+// log directory, which CI uploads as a weaver-reports artifact. A write failure
+// is logged, never fatal: it must not mask the validation result.
+func (k *Kind) archiveWeaverReport(t weavercheck.TestingT, raw []byte) {
+	t.Helper()
+	if k.logsDir == "" {
+		return
+	}
+	name := strings.ReplaceAll(k.clusterName, "/", "_")
+	reportPath := filepath.Join(k.logsDir, fmt.Sprintf("weaver-report-%s.json", name))
+	if err := os.WriteFile(reportPath, raw, 0o644); err != nil {
+		t.Logf("warn: failed to archive weaver report to %s: %v", reportPath, err)
+		return
+	}
+	t.Logf("weaver report saved to %s", reportPath)
 }

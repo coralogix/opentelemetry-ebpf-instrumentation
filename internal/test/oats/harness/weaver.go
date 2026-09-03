@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,7 +38,7 @@ const (
 // Weaver being unreachable is itself a failure (the group forgot to wire the
 // shared weaver compose fragment), unless the run explicitly opts out via
 // TESTCASE_SKIP_WEAVER=true.
-func validateWeaver() {
+func validateWeaver(outputDir, name string) {
 	if os.Getenv(skipWeaverEnv) == "true" {
 		ginkgo.GinkgoWriter.Printf("%s=true — skipping weaver validation\n", skipWeaverEnv)
 		return
@@ -45,7 +47,11 @@ func validateWeaver() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	report, err := weavercheck.FetchReport(ctx, weaverAdminURL)
+	raw, err := weavercheck.FetchRawReport(ctx, weaverAdminURL)
+	if err == nil {
+		archiveWeaverReport(outputDir, name, raw)
+	}
+	report, err := reportFrom(raw, err)
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) {
 			ginkgo.Fail(fmt.Sprintf(
@@ -60,4 +66,29 @@ func validateWeaver() {
 		return
 	}
 	weavercheck.Validate(ginkgo.GinkgoT(), report)
+}
+
+func reportFrom(raw []byte, fetchErr error) (*weavercheck.Report, error) {
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+	return weavercheck.Parse(raw)
+}
+
+// archiveWeaverReport writes the raw live-check report beside the test case's
+// other build output as weaver-report-<name>.json, matching the name the
+// Docker-Compose suites use so cmd/obi-weaver-coverage can union OATS reports
+// with the integration-matrix ones. A write failure is logged, never fatal: it
+// must not mask the validation result.
+func archiveWeaverReport(outputDir, name string, raw []byte) {
+	if outputDir == "" {
+		return
+	}
+	safe := strings.ReplaceAll(name, "/", "_")
+	reportPath := filepath.Join(outputDir, fmt.Sprintf("weaver-report-%s.json", safe))
+	if err := os.WriteFile(reportPath, raw, 0o644); err != nil {
+		ginkgo.GinkgoWriter.Printf("warn: failed to archive weaver report to %s: %v\n", reportPath, err)
+		return
+	}
+	ginkgo.GinkgoWriter.Printf("weaver report saved to %s\n", reportPath)
 }
