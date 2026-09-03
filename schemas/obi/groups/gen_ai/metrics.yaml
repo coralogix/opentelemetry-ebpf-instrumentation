@@ -11,12 +11,24 @@ groups:
     stability: development
     attributes:
       - ref: error.type
+        requirement_level:
+          conditionally_required: if the operation ended in an error
       - ref: gen_ai.operation.name
+        requirement_level: required
       - ref: gen_ai.provider.name
+        requirement_level: required
       - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
       - ref: gen_ai.response.model
+        requirement_level:
+          conditionally_required: if the provider returned it
       - ref: server.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
 
   - id: metric.obi.gen_ai.client.token.usage
     type: metric
@@ -30,9 +42,20 @@ groups:
     stability: development
     attributes:
       - ref: gen_ai.operation.name
+        requirement_level: required
       - ref: gen_ai.provider.name
+        requirement_level: required
       - ref: gen_ai.request.model
+        requirement_level:
+          conditionally_required: If available.
       - ref: gen_ai.response.model
+        requirement_level:
+          conditionally_required: if the provider returned it
       - ref: gen_ai.token.type
+        requirement_level: required
       - ref: server.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.

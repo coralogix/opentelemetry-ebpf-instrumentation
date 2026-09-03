@@ -11,14 +11,31 @@ groups:
       Total number of spans observed, grouped by span name / kind / status.
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in
 
   - id: metric.obi.traces.span.metrics.duration
     type: metric
@@ -31,14 +48,31 @@ groups:
       / status.
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in
 
   # Legacy Grafana-style names for the same two metrics, matching the older
   # spanmetrics processor output. Emitted by the deprecated `application_span`
@@ -58,14 +92,31 @@ groups:
       (legacy naming).
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in
 
   - id: metric.obi.traces_spanmetrics_latency
     type: metric
@@ -81,14 +132,31 @@ groups:
       / status (legacy naming).
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in
 
   - id: metric.obi.traces_spanmetrics_size_total
     type: metric
@@ -107,14 +175,31 @@ groups:
       metrics feature enabled.
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in
 
   - id: metric.obi.traces_spanmetrics_response_size_total
     type: metric
@@ -133,11 +218,28 @@ groups:
       metrics feature enabled.
     attributes:
       - ref: span.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: span.kind
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: status.code
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: source
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.instance.id
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: telemetry.sdk.language
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: host.id
+        requirement_level: opt_in

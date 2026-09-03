@@ -56,3 +56,5 @@ groups:
       broken down by `cuda.memcpy.kind`.
     attributes:
       - ref: cuda.memcpy.kind
+        requirement_level:
+          conditionally_required: if the operation is a CUDA memory copy

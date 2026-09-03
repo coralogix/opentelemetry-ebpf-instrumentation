@@ -11,43 +11,105 @@ groups:
     brief: OBI inbound HTTP server span.
     attributes:
       - ref: http.request.method
+        requirement_level: required
       - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
       - ref: url.path
+        requirement_level: required
       - ref: url.scheme
+        requirement_level: required
       - ref: url.query
+        requirement_level: opt_in
       - ref: http.route
+        requirement_level:
+          conditionally_required: If and only if it's available
       - ref: client.address
+        requirement_level: required
       - ref: server.address
+        requirement_level: required
       - ref: server.port
+        requirement_level:
+          conditionally_required: If available and `server.address` is set.
       - ref: http.request.body.size
+        requirement_level: opt_in
       - ref: http.response.body.size
+        requirement_level: opt_in
       - ref: http.request.body.content
+        requirement_level: opt_in
       - ref: http.response.body.content
+        requirement_level: opt_in
       - ref: http.request.header
+        requirement_level: opt_in
       - ref: http.response.header
+        requirement_level: opt_in
       - ref: span.metrics.skip
+        requirement_level: opt_in
       - ref: graphql.operation.name
+        requirement_level:
+          conditionally_required: if the request was identified as GraphQL
       - ref: graphql.operation.type
+        requirement_level:
+          conditionally_required: if the request was identified as GraphQL
       - ref: graphql.document
+        requirement_level: opt_in
       - ref: mcp.method.name
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
       - ref: mcp.resource.uri
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
       - ref: mcp.session.id
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
       - ref: mcp.protocol.version
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
       - ref: gen_ai.operation.name
+        requirement_level:
+          conditionally_required: if the request was identified as a GenAI or MCP operation
       - ref: gen_ai.tool.name
+        requirement_level:
+          conditionally_required: if the operation executes a tool
       - ref: gen_ai.tool.type
+        requirement_level:
+          conditionally_required: if the operation executes a tool
       - ref: gen_ai.tool.call.arguments
+        requirement_level:
+          conditionally_required: if the operation executes a tool
       - ref: gen_ai.tool.call.result
+        requirement_level:
+          conditionally_required: if the operation executes a tool
       - ref: gen_ai.prompt.name
+        requirement_level:
+          conditionally_required: if the request named a prompt template
       - ref: jsonrpc.request.id
+        requirement_level:
+          conditionally_required: if the request was identified as JSON-RPC or MCP
       - ref: jsonrpc.protocol.version
+        requirement_level:
+          conditionally_required: if the request was identified as JSON-RPC or MCP
       - ref: rpc.system.name
+        requirement_level:
+          conditionally_required: if the call was identified as an RPC protocol
       - ref: rpc.method
+        requirement_level:
+          conditionally_required: if the call was identified as an RPC protocol
       - ref: rpc.response.status_code
+        requirement_level:
+          conditionally_required: if the RPC protocol reported a status code
       - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
       - ref: network.peer.port
+        requirement_level:
+          conditionally_required: If `network.peer.address` is set.
       - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
       - ref: error.type
+        requirement_level:
+          conditionally_required: If request has ended with an error.
   - id: span.obi.http.client
     type: span
     span_kind: client
@@ -55,26 +117,46 @@ groups:
     brief: OBI outbound HTTP client span.
     attributes:
       - ref: http.request.method
+        requirement_level: required
       - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
       - ref: url.full
+        requirement_level: required
       - ref: url.scheme
+        requirement_level: opt_in
       - ref: url.query
+        requirement_level: opt_in
       - ref: server.address
+        requirement_level: required
       - ref: server.port
+        requirement_level: required
       - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
       - ref: http.request.body.size
+        requirement_level: opt_in
       - ref: http.response.body.size
+        requirement_level: opt_in
       - ref: http.request.body.content
+        requirement_level: opt_in
       - ref: http.response.body.content
+        requirement_level: opt_in
       - ref: http.request.header
+        requirement_level: opt_in
       - ref: http.response.header
-      - ref: rpc.system.name
-      - ref: rpc.method
-      - ref: rpc.response.status_code
-      - ref: jsonrpc.protocol.version
-      - ref: jsonrpc.request.id
+        requirement_level: opt_in
       - ref: span.metrics.skip
+        requirement_level: opt_in
       - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
       - ref: network.peer.port
+        requirement_level:
+          conditionally_required: If `network.peer.address` is set.
       - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
       - ref: error.type
+        requirement_level:
+          conditionally_required: If request has ended with an error.

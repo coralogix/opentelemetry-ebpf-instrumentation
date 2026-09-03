@@ -178,6 +178,28 @@ check-schema-files:
 	@echo "### Checking published OBI telemetry schema files"
 	@./scripts/check-schema-files.sh "$(CURDIR)/site/schemas/obi"
 
+# Telemetry coverage: what the registry declares, against what the suites were
+# observed to emit. The denominator comes from the registry; the numerator is
+# the `observed` section of the weaver live-check reports each suite archives,
+# so a meaningful number needs the reports of a complete matrix run gathered
+# under WEAVER_REPORTS_DIR.
+WEAVER_REPORTS_DIR ?= ./all-weaver-reports
+WEAVER_COVERAGE_OUT ?= ./weaver-coverage-out
+
+.PHONY: weaver-coverage-model
+weaver-coverage-model: fetch-upstream-semconv
+	@echo "### Generating OBI telemetry coverage model"
+	@./scripts/weaver-coverage-model.sh $(OCI_BIN) $(WEAVERIMAGE) "$(CURDIR)/schemas/obi" "$(WEAVER_COVERAGE_OUT)"
+
+.PHONY: weaver-coverage
+weaver-coverage: weaver-coverage-model
+	@echo "### Computing OBI telemetry coverage"
+	go run ./cmd/obi-weaver-coverage \
+		--model $(WEAVER_COVERAGE_OUT)/coverage-model.json \
+		--in $(WEAVER_REPORTS_DIR) \
+		--out-md $(WEAVER_COVERAGE_OUT)/coverage.md \
+		--out-json $(WEAVER_COVERAGE_OUT)/coverage.json
+
 .PHONY: generate-schema-next
 generate-schema-next:
 	@echo "### Cutting the OBI telemetry schema for the versions.yaml version"

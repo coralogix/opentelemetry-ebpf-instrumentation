@@ -1,0 +1,71 @@
+# OBI recognises Model Context Protocol calls on an HTTP client request. MCP
+# is its own span type upstream rather than a GenAI operation, and upstream's
+# `mcp.client` is self-sufficient — it declares the peer and network
+# attributes, so it does not depend on a surrounding HTTP span.
+#
+# MCP traffic seen on the *server* side stays on `span.obi.http.server`, which
+# OBI enriches in place; that span genuinely is an inbound HTTP request.
+groups:
+  - id: span.obi.mcp.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI Model Context Protocol client span.
+    attributes:
+      - ref: error.type
+        requirement_level:
+          conditionally_required: if the operation ended in an error
+      - ref: gen_ai.operation.name
+        requirement_level: required
+      - ref: gen_ai.prompt.name
+        requirement_level:
+          conditionally_required: if the request named a prompt template
+      - ref: gen_ai.tool.call.arguments
+        requirement_level:
+          conditionally_required: if the operation executes a tool
+      - ref: gen_ai.tool.call.result
+        requirement_level:
+          conditionally_required: if the operation executes a tool
+      - ref: gen_ai.tool.name
+        requirement_level:
+          conditionally_required: if the operation executes a tool
+      - ref: gen_ai.tool.type
+        requirement_level:
+          conditionally_required: if the operation executes a tool
+      - ref: jsonrpc.request.id
+        requirement_level:
+          conditionally_required: if the request was identified as JSON-RPC or MCP
+      - ref: mcp.method.name
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
+      - ref: mcp.protocol.version
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
+      - ref: mcp.resource.uri
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
+      - ref: mcp.session.id
+        requirement_level:
+          conditionally_required: if the request was identified as MCP
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: if and only if `network.peer.address` is set.
+      - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
+      - ref: rpc.response.status_code
+        requirement_level:
+          conditionally_required: if the RPC protocol reported a status code
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If `server.address` is set.
+      - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
+      - ref: span.metrics.skip
+        requirement_level: opt_in

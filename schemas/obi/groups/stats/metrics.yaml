@@ -9,34 +9,92 @@ groups:
       Smoothed round-trip time observed per TCP connection.
     attributes:
       - ref: obi.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.cluster.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: network.tcp.handshake.role
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
 
   - id: metric.obi.obi.stat.tcp.retransmits
     type: metric
@@ -48,33 +106,89 @@ groups:
       Count of TCP retransmissions observed per connection.
     attributes:
       - ref: obi.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.cluster.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
 
   - id: metric.obi.obi.stat.tcp.io
     type: metric
@@ -87,34 +201,92 @@ groups:
       broken down by direction.
     attributes:
       - ref: obi.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: network.io.direction
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.cluster.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
 
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
@@ -129,32 +301,92 @@ groups:
       `reason`.
     attributes:
       - ref: obi.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.address
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.port
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: src.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: dst.zone
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: reason
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: network.tcp.handshake.role
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.cluster.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.src.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.owner.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.ip
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: k8s.dst.node.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: service.peer.namespace
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point

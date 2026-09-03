@@ -11,9 +11,15 @@ groups:
     stability: development
     attributes:
       - ref: messaging.destination.name
+        requirement_level:
+          conditionally_required: if and only if `messaging.destination.name` is known to have low cardinality. Otherwise, `messaging.destination.template` MAY be populated.
       - ref: messaging.operation.name
+        requirement_level: required
       - ref: messaging.system
+        requirement_level: required
       - ref: server.address
+        requirement_level:
+          conditionally_required: If available.
 
   - id: metric.obi.messaging.process.duration
     type: metric
@@ -27,6 +33,12 @@ groups:
     stability: development
     attributes:
       - ref: messaging.destination.name
+        requirement_level:
+          conditionally_required: if and only if `messaging.destination.name` is known to have low cardinality. Otherwise, `messaging.destination.template` MAY be populated.
       - ref: messaging.operation.name
+        requirement_level: required
       - ref: messaging.system
+        requirement_level: required
       - ref: server.address
+        requirement_level:
+          conditionally_required: If available.

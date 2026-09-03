@@ -16,7 +16,11 @@ groups:
     stability: stable
     attributes:
       - ref: jvm.memory.pool.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: jvm.memory.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
   - id: metric.obi.jvm.memory.limit
     type: metric
     metric_name: jvm.memory.limit
@@ -29,7 +33,11 @@ groups:
     stability: stable
     attributes:
       - ref: jvm.memory.pool.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: jvm.memory.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
   - id: metric.obi.jvm.memory.used
     type: metric
     metric_name: jvm.memory.used
@@ -42,7 +50,11 @@ groups:
     stability: stable
     attributes:
       - ref: jvm.memory.pool.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: jvm.memory.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
   - id: metric.obi.jvm.memory.used_after_last_gc
     type: metric
     metric_name: jvm.memory.used_after_last_gc
@@ -55,7 +67,11 @@ groups:
     stability: stable
     attributes:
       - ref: jvm.memory.pool.name
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
       - ref: jvm.memory.type
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
   - id: metric.obi.jvm.class.loaded
     type: metric
     metric_name: jvm.class.loaded
@@ -101,6 +117,8 @@ groups:
     stability: stable
     attributes:
       - ref: jvm.thread.daemon
+        requirement_level:
+          conditionally_required: if OBI could determine it for the data point
   - id: metric.obi.jvm.cpu.time
     type: metric
     metric_name: jvm.cpu.time
