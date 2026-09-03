@@ -7,6 +7,12 @@ import "strings"
 
 const Unclassified = ""
 
+// NotTelemetry marks a span OBI emits that carries no semantic convention at
+// all, so it is neither coverage of a declared signal nor an undeclared one.
+// It cannot be declared in the registry instead: weaver rejects a span group
+// with an empty attribute list as missing its attributes.
+const NotTelemetry = "-"
+
 type shape struct {
 	kind  string
 	attrs map[string]struct{}
@@ -47,16 +53,16 @@ type rule struct {
 }
 
 var rules = []rule{
-	// The timing children createSubSpans attaches to every request span are
-	// internal and carry no attributes at all. Matched before DNS, which is
-	// the other internal-kind type and is recognized by having any attribute
-	// — dns.question.name is opt_in, so a DNS span may carry only its
-	// connection attributes.
+	// The timing children createSubSpans attaches to every request span ("in
+	// queue" and "processing") are internal and carry no attributes at all.
+	// They are real output but carry no semantic convention, so they are
+	// excluded from coverage rather than declared. Matched before DNS, the
+	// other internal-kind type, which is recognized by carrying attributes.
 	{
-		types: []string{"obi.subspan"},
+		types: nil,
 		match: func(s shape) string {
 			if s.kind == "internal" && len(s.attrs) == 0 {
-				return "obi.subspan"
+				return NotTelemetry
 			}
 			return Unclassified
 		},

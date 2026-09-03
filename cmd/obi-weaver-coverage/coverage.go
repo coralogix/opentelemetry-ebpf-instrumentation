@@ -45,6 +45,9 @@ func Aggregate(m *Model, u *Union) *Result {
 	spanAttrs := map[string]map[string]struct{}{}
 	for _, s := range u.SpanShapes {
 		t := Classify(s)
+		if t == NotTelemetry {
+			continue
+		}
 		if t == Unclassified {
 			r.UnclassifiedShapes = append(r.UnclassifiedShapes, s)
 			continue

@@ -177,9 +177,9 @@ func TestClassify(t *testing.T) {
 			want: "obi.db.server",
 		},
 		{
-			name:  "an attribute-less internal span is a timing sub-span, not dns",
+			name:  "an attribute-less internal span is a timing sub-span, excluded from coverage",
 			shape: SpanShape{Kind: "internal", Attributes: []string{}},
-			want:  "obi.subspan",
+			want:  NotTelemetry,
 		},
 		{
 			// Semconv has no server-kind messaging span; OBI reaching it is a
@@ -280,7 +280,6 @@ func classifierFixtures() []SpanShape {
 		{Kind: "client", Attributes: []string{"rpc.system.name"}},
 		{Kind: "server", Attributes: []string{"rpc.system.name"}},
 		{Kind: "internal", Attributes: []string{"dns.question.name"}},
-		{Kind: "internal", Attributes: []string{}},
 		{Kind: "client", Attributes: []string{"network.tcp.handshake.role"}},
 	}
 }
