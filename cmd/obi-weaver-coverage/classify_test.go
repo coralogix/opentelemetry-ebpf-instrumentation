@@ -177,6 +177,19 @@ func TestClassify(t *testing.T) {
 			want: "obi.db.server",
 		},
 		{
+			name:  "an attribute-less internal span is a timing sub-span, not dns",
+			shape: SpanShape{Kind: "internal", Attributes: []string{}},
+			want:  "obi.subspan",
+		},
+		{
+			// Semconv has no server-kind messaging span; OBI reaching it is a
+			// direction-inference bug, so this must surface as unclassified
+			// rather than be credited to a declared type.
+			name:  "a server-kind messaging span matches nothing",
+			shape: SpanShape{Kind: "server", Attributes: []string{"messaging.system", "messaging.destination.name"}, Discriminators: map[string]string{"messaging.system": "kafka"}},
+			want:  Unclassified,
+		},
+		{
 			name:  "messaging producer by kind",
 			shape: SpanShape{Kind: "producer", Attributes: []string{"messaging.system", "messaging.destination.name"}},
 			want:  "obi.messaging.producer",
@@ -205,6 +218,13 @@ func TestClassify(t *testing.T) {
 			name:  "dns without its optional question attribute",
 			shape: SpanShape{Kind: "internal", Attributes: []string{"server.address", "server.port"}},
 			want:  "obi.dns",
+		},
+		{
+			// A messaging span whose operation type did not map falls through
+			// to internal kind. It must not be read as dns.
+			name:  "an internal span carrying another protocol's marker is not dns",
+			shape: SpanShape{Kind: "internal", Attributes: []string{"messaging.system", "server.address"}},
+			want:  Unclassified,
 		},
 		{
 			name:  "failed connect by handshake role",
@@ -260,6 +280,7 @@ func classifierFixtures() []SpanShape {
 		{Kind: "client", Attributes: []string{"rpc.system.name"}},
 		{Kind: "server", Attributes: []string{"rpc.system.name"}},
 		{Kind: "internal", Attributes: []string{"dns.question.name"}},
+		{Kind: "internal", Attributes: []string{}},
 		{Kind: "client", Attributes: []string{"network.tcp.handshake.role"}},
 	}
 }

@@ -21,6 +21,7 @@ on: # zizmor: ignore[dangerous-triggers] cross-workflow artifact aggregation req
       - "Integration tests"
       - "OATS tests"
       - "Integration tests K8S"
+      - "Integration tests VM"
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -90,7 +91,7 @@ jobs:
           latest=$(gh api --paginate \
             "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
             --jq '[.workflow_runs[]
-                   | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S")]
+                   | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S" or .name == "Integration tests VM")]
                   | group_by(.name) | map(max_by(.run_number))')
           total=$(echo "$latest" | jq 'length')
           pending=$(echo "$latest" | jq '[.[] | select(.status != "completed")] | length')
@@ -115,7 +116,7 @@ jobs:
           run_ids=$(gh api --paginate \
             "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
             --jq '.workflow_runs[]
-                  | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S")
+                  | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S" or .name == "Integration tests VM")
                   | select(.status == "completed")
                   | .id' | sort -u)
           echo "contributing completed runs: ${run_ids:-none}"

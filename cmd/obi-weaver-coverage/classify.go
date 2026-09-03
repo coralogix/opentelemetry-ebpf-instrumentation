@@ -47,15 +47,44 @@ type rule struct {
 }
 
 var rules = []rule{
+	// The timing children createSubSpans attaches to every request span are
+	// internal and carry no attributes at all. Matched before DNS, which is
+	// the other internal-kind type and is recognized by having any attribute
+	// — dns.question.name is opt_in, so a DNS span may carry only its
+	// connection attributes.
+	{
+		types: []string{"obi.subspan"},
+		match: func(s shape) string {
+			if s.kind == "internal" && len(s.attrs) == 0 {
+				return "obi.subspan"
+			}
+			return Unclassified
+		},
+	},
+	// DNS is the only internal-kind declared type, but matching on kind alone
+	// would also swallow any other span that reaches internal kind — a
+	// messaging span whose operation type did not map, for instance. A DNS
+	// span carries its connection attributes and no other protocol's marker;
+	// dns.question.name itself is opt_in, so it cannot be required here.
 	{
 		types: []string{"obi.dns"},
 		match: func(s shape) string {
-			if s.kind == "internal" {
+			if s.kind != "internal" || len(s.attrs) == 0 {
+				return Unclassified
+			}
+			if s.hasPrefix("dns.") || !s.protocolMarked() {
 				return "obi.dns"
 			}
 			return Unclassified
 		},
 	},
+	// A server-kind span carrying messaging attributes is deliberately left
+	// unclassified. Semantic conventions define messaging spans as producer or
+	// consumer only, and OBI reaches server kind for them by inferring
+	// direction from whether the first operation it observed on the connection
+	// was a receive — which mislabels a messaging client whose connection
+	// predates the agent. Declaring a span type for it would write that into
+	// the contract; failing it keeps the emitter bug visible.
 	{
 		types: []string{"obi.messaging.producer", "obi.messaging.consumer"},
 		match: func(s shape) string {

@@ -1764,27 +1764,40 @@ func spanKind(span *request.Span) trace2.SpanKind {
 	}
 
 	switch span.Type {
-	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeKafkaServer, request.EventTypeMQTTServer, request.EventTypeNATSServer, request.EventTypeSunRPCServer, request.EventTypeMemcachedServer, request.EventTypeSQLServer, request.EventTypeAerospikeServer:
+	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeSunRPCServer, request.EventTypeMemcachedServer, request.EventTypeSQLServer, request.EventTypeAerospikeServer:
 		return trace2.SpanKindServer
 	case request.EventTypeHTTPClient, request.EventTypeGRPCClient, request.EventTypeSQLClient, request.EventTypeRedisClient, request.EventTypeMongoClient, request.EventTypeCouchbaseClient, request.EventTypeMemcachedClient, request.EventTypeSunRPCClient, request.EventTypeAerospikeClient, request.EventTypeFailedConnect:
 		if request.IsMessagingClientOperation(span) {
-			switch span.AWS.SQS.OperationType {
-			case request.MessagingSend:
-				return trace2.SpanKindProducer
-			case request.MessagingReceive, request.MessagingSettle:
-				return trace2.SpanKindConsumer
+			if kind, ok := messagingSpanKind(span.AWS.SQS.OperationType); ok {
+				return kind
 			}
 		}
 		return trace2.SpanKindClient
-	case request.EventTypeKafkaClient, request.EventTypeMQTTClient, request.EventTypeNATSClient, request.EventTypeAMQPClient:
-		switch request.MessagingOperationTypeOf(span.Method) {
-		case request.MessagingSend:
-			return trace2.SpanKindProducer
-		case request.MessagingProcess:
-			return trace2.SpanKindConsumer
+	// A messaging span is a producer or a consumer whichever side of the
+	// connection OBI observed it from. Semantic conventions define no
+	// server-kind messaging span, so the `*Server` event types — which OBI
+	// reaches by inferring direction from the first operation seen on the
+	// connection — belong here rather than with the request/response
+	// protocols above.
+	case request.EventTypeKafkaClient, request.EventTypeKafkaServer,
+		request.EventTypeMQTTClient, request.EventTypeMQTTServer,
+		request.EventTypeNATSClient, request.EventTypeNATSServer,
+		request.EventTypeAMQPClient:
+		if kind, ok := messagingSpanKind(request.MessagingOperationTypeOf(span.Method)); ok {
+			return kind
 		}
 	}
 	return trace2.SpanKindInternal
+}
+
+func messagingSpanKind(operationType string) (trace2.SpanKind, bool) {
+	switch operationType {
+	case request.MessagingSend:
+		return trace2.SpanKindProducer, true
+	case request.MessagingReceive, request.MessagingProcess, request.MessagingSettle:
+		return trace2.SpanKindConsumer, true
+	}
+	return trace2.SpanKindUnspecified, false
 }
 
 func spanStartTime(t request.Timings) time.Time {
