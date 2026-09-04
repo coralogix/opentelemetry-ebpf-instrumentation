@@ -47,13 +47,17 @@ groups:
       - ref: messaging.operation.name
         requirement_level: required
       - ref: aws.sqs.queue.url
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: aws.request_id
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: aws.extended_request_id
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: cloud.region
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: messaging.message.id
         requirement_level:
           conditionally_required: if the broker returned a message id
@@ -103,13 +107,17 @@ groups:
       - ref: messaging.operation.name
         requirement_level: required
       - ref: aws.sqs.queue.url
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: aws.request_id
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: aws.extended_request_id
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: cloud.region
-        requirement_level: required
+        requirement_level:
+          conditionally_required: if the messaging system is AWS SQS
       - ref: messaging.message.id
         requirement_level:
           conditionally_required: if the broker returned a message id
