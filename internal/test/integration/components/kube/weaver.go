@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 
+	"go.opentelemetry.io/obi/internal/test/integration/k8s/common/testpath"
 	"go.opentelemetry.io/obi/internal/test/weavercheck"
 )
 
@@ -363,11 +364,16 @@ func waitForHTTP(ctx context.Context, url string) error {
 // is logged, never fatal: it must not mask the validation result.
 func (k *Kind) archiveWeaverReport(t weavercheck.TestingT, raw []byte) {
 	t.Helper()
-	if k.logsDir == "" {
+	// testpath.KindLogs, not k.logsDir: the ExportLogs option that would set
+	// logsDir is never passed, so it is always empty. This is the directory CI
+	// uploads the weaver reports from.
+	dir := testpath.KindLogs
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Logf("warn: failed to create %s for the weaver report: %v", dir, err)
 		return
 	}
 	name := strings.ReplaceAll(k.clusterName, "/", "_")
-	reportPath := filepath.Join(k.logsDir, fmt.Sprintf("weaver-report-%s.json", name))
+	reportPath := filepath.Join(dir, fmt.Sprintf("weaver-report-%s.json", name))
 	if err := os.WriteFile(reportPath, raw, 0o644); err != nil {
 		t.Logf("warn: failed to archive weaver report to %s: %v", reportPath, err)
 		return
