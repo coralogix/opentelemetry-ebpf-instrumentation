@@ -54,6 +54,17 @@ exporters:
       initial_interval: 1s
       max_interval: 5s
       max_elapsed_time: 15s
+processors:
+  # OBI relays application-authored spans verbatim (its manual span feature copies the
+  # application's ScopeSpans, scope name included), while OBI's own spans carry no scope
+  # name. Relayed spans use attribute keys chosen by the instrumented application, which
+  # can never exist in OBI's registry, so weaver reports each one as a violation. Drop
+  # them from the weaver tap only, so jaeger and the suites' assertions still see them.
+  filter/weaver:
+    error_mode: ignore
+    traces:
+      span:
+        - 'instrumentation_scope.name != ""'
 service:
   # own telemetry exposed for validateWeaver's first-hop drop check (00-kind*.yml)
   telemetry:
@@ -71,4 +82,5 @@ service:
       exporters: [otlp/weavercol]
     traces/weaver:
       receivers: [otlp]
+      processors: [filter/weaver]
       exporters: [otlp/weavercol]

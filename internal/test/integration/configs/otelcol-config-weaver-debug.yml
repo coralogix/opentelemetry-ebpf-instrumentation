@@ -35,6 +35,17 @@ exporters:
       enabled: false
   debug/traces:
     verbosity: detailed
+processors:
+  # OBI relays application-authored spans verbatim (its manual span feature copies the
+  # application's ScopeSpans, scope name included), while OBI's own spans carry no scope
+  # name. Relayed spans use attribute keys chosen by the instrumented application, which
+  # can never exist in OBI's registry, so weaver reports each one as a violation. Drop
+  # them from the weaver tap only, so jaeger and the suites' assertions still see them.
+  filter/weaver:
+    error_mode: ignore
+    traces:
+      span:
+        - 'instrumentation_scope.name != ""'
 service:
   pipelines:
     metrics:
@@ -48,4 +59,5 @@ service:
       exporters: [otlp/weaver]
     traces/weaver:
       receivers: [otlp]
+      processors: [filter/weaver]
       exporters: [otlp/weaver]
