@@ -17,6 +17,11 @@ services:
       context: ../../../internal/test/integration/components/pythonsql/
       dockerfile: Dockerfile_ssl
     image: hatest-testserver-python-sql
+    # uvicorn serves from several PIDs and OBI resolves the Python service name
+    # per PID, so an auto-derived name is not stable across them. Pin it so the
+    # Jaeger assertions query a fixed service.
+    environment:
+      OTEL_SERVICE_NAME: main_ssl
     ports:
       - "${TEST_SERVICE_PORTS}"
     depends_on:
