@@ -1843,3 +1843,20 @@ func TestNoMessagingSpanIsReportedAsServerKind(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateTracesSetsOBISchemaURL(t *testing.T) {
+	cache := expirable2.NewLRU[svc.UID, []attribute.KeyValue](10, nil, 0)
+	span := request.Span{Type: request.EventTypeHTTP, Method: "GET", Path: "/", Status: 200}
+
+	traces := GenerateTracesWithAttributes(
+		cache,
+		&span.Service,
+		nil,
+		&meta.NodeMeta{},
+		[]TraceSpanAndAttributes{{Span: &span, Attributes: TraceAttributesSelector(&span, map[attr.Name]struct{}{})}},
+		"obi",
+	)
+
+	require.Equal(t, 1, traces.ResourceSpans().Len())
+	assert.Equal(t, attr.OBISchemaURL, traces.ResourceSpans().At(0).SchemaUrl())
+}
