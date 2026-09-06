@@ -211,9 +211,6 @@ groups:
       - ref: gen_ai.rerank.top_n
         requirement_level:
           conditionally_required: if the operation is a rerank request
-      - ref: gen_ai.retrieval.top_k
-        requirement_level:
-          conditionally_required: if the operation is a retrieval request
       - ref: network.peer.address
         requirement_level:
           conditionally_required: if the peer socket address was observed
