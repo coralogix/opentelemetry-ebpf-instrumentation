@@ -1,18 +1,47 @@
-# `compact` live-check output format: the statistics block plus a deduplicated
+# `compact` live-check output format: the statistics block, a deduplicated
 # list of findings (message, level, advice type, occurrence count, and the
-# distinct signals that triggered it) — the same detail the harness logs, but
-# collapsed.
+# distinct signals that triggered it), and the `observed` reduction telemetry
+# coverage is computed from.
 #
 # Must be a hidden directory: a
 # visible weaver.yaml inside the registry mount is parsed as a registry file
 # and rejected.
+#
+# `observed` exists because this report travels back over the admin `/stop`
+# response body, which truncates on a large report — that is why the compact
+# template drops per-sample bodies in the first place. Coverage needs
+# per-signal detail the `statistics` seen-maps cannot express (they are flat,
+# global, and omit spans entirely), so the reduction happens here at source
+# rather than by keeping every sample and reducing afterwards.
+#
+# Spans are projected and deduplicated rather than classified. A suite emits
+# few distinct span shapes however many spans it produces, so `unique`
+# collapses the section to a handful of entries — while classifying a shape
+# into one of the registry's declared span types stays in
+# `cmd/obi-weaver-coverage`, where a test can hold the rules and the registry
+# to each other. The span name is deliberately not projected: names carry
+# route templates and operation names, so including them would defeat the
+# deduplication, and every span type is identified by its attributes and kind.
 whitespace_control:
   trim_blocks: true
   lstrip_blocks: true
 
 templates:
   - template: report.json.j2
-    filter: >
+    filter: |
+      # Values of the attributes whose *value* discriminates one declared span
+      # type from another (an Elasticsearch call from any other database
+      # client, an AWS SDK call from any other RPC client). Attribute presence
+      # alone identifies every other type, so nothing else needs a value and
+      # the projection stays free of high-cardinality payloads.
+      def discriminators: ["db.system.name", "rpc.system.name", "messaging.system", "gen_ai.operation.name"];
+
+      def attr_names: [.attributes[]?.name];
+
+      def disc_values:
+        [.attributes[]? | select(.name as $n | discriminators | index($n)) | {key: .name, value: (.value | tostring)}]
+        | from_entries;
+
       { statistics: .statistics,
         findings: (
           [ .samples[] | .. | objects | select(has("all_advice")) | .all_advice[] ]
@@ -24,6 +53,29 @@ templates:
               count:   length,
               signals: ([ .[] | select((.signal_name // "") != "") | "\(.signal_type):\(.signal_name)" ] | unique)
             })
-        ) }
+        ),
+        observed: {
+          spans: (
+            [ .samples[] | select(.span) | .span
+              | { kind: .kind,
+                  attributes: (attr_names | unique),
+                  discriminators: disc_values }
+            ] | unique
+          ),
+          metrics: (
+            [ .samples[] | select(.metric) | .metric
+              | { key: .name,
+                  value: ([.data_points[]?.attributes[]?.name] | unique) }
+            ]
+            | group_by(.key)
+            | map({ key: .[0].key, value: ([.[].value] | add | unique) })
+            | from_entries
+          ),
+          resource: (
+            [ .samples[] | select(.resource) | .resource | attr_names ]
+            | add // []
+            | unique
+          )
+        } }
     application_mode: single
     file_name: live_check.json

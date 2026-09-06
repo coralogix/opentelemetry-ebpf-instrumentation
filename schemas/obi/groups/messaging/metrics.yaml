@@ -1,0 +1,44 @@
+groups:
+  - id: metric.obi.messaging.client.operation.duration
+    type: metric
+    metric_name: messaging.client.operation.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted messaging.client.operation.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: messaging.destination.name
+        requirement_level:
+          conditionally_required: if and only if `messaging.destination.name` is known to have low cardinality. Otherwise, `messaging.destination.template` MAY be populated.
+      - ref: messaging.operation.name
+        requirement_level: required
+      - ref: messaging.system
+        requirement_level: required
+      - ref: server.address
+        requirement_level:
+          conditionally_required: If available.
+
+  - id: metric.obi.messaging.process.duration
+    type: metric
+    metric_name: messaging.process.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted messaging.process.duration
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: messaging.destination.name
+        requirement_level:
+          conditionally_required: if and only if `messaging.destination.name` is known to have low cardinality. Otherwise, `messaging.destination.template` MAY be populated.
+      - ref: messaging.operation.name
+        requirement_level: required
+      - ref: messaging.system
+        requirement_level: required
+      - ref: server.address
+        requirement_level:
+          conditionally_required: If available.

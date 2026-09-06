@@ -96,6 +96,19 @@ func Parse(rawReport []byte) (*Report, error) {
 // transport-agnostic and logging-agnostic (returns an error rather than failing
 // a test).
 func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
+	raw, err := FetchRawReport(ctx, adminURL)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(raw)
+}
+
+// FetchRawReport is FetchReport without the parse, for callers that archive the
+// report before reading it. The archived bytes are what
+// `cmd/obi-weaver-coverage` unions across suites, so they must be the report
+// weaver actually produced rather than a re-serialization of the parsed subset
+// this package models.
+func FetchRawReport(ctx context.Context, adminURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building weaver /stop request: %w", err)
@@ -115,7 +128,7 @@ func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading weaver /stop response body: %w", err)
 	}
-	return Parse(raw)
+	return raw, nil
 }
 
 // Validate logs the full advisory breakdown and asserts that weaver reported no

@@ -1,0 +1,48 @@
+# OBI's AWS SDK span contract. OBI surfaces AWS S3 and SQS calls detected on
+# the wire as client spans carrying the upstream aws.* / cloud.* attributes;
+# SQS additionally carries messaging.* attributes. All attributes are upstream
+# semconv, so no OBI-specific attributes are declared here.
+groups:
+  - id: span.obi.aws.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI AWS SDK client span (S3, SQS).
+    attributes:
+      - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
+      - ref: rpc.system.name
+        requirement_level:
+          conditionally_required: if the call was identified as an RPC protocol
+      - ref: rpc.method
+        requirement_level: required
+      - ref: cloud.region
+        requirement_level: required
+      - ref: aws.request_id
+        requirement_level: required
+      - ref: aws.extended_request_id
+        requirement_level:
+          conditionally_required: If available.
+      - ref: aws.s3.bucket
+        requirement_level: required
+      - ref: aws.s3.key
+        requirement_level: required
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level: required
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: if and only if `network.peer.address` is set.
+      - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
+      - ref: error.type
+        requirement_level:
+          conditionally_required: if the operation ended in an error

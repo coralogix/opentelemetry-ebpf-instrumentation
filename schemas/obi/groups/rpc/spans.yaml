@@ -1,0 +1,107 @@
+groups:
+  # gRPC and ONC/Sun RPC share one client / server pair (mirroring upstream's
+  # generic span.rpc.client / span.rpc.server), discriminated by
+  # rpc.system.name. The onc_rpc.* attributes only appear on ONC/Sun RPC spans.
+  - id: span.obi.rpc.server
+    type: span
+    span_kind: server
+    stability: development
+    brief: OBI inbound RPC server span (gRPC, ONC/Sun RPC).
+    attributes:
+      - ref: rpc.system.name
+        requirement_level: required
+      - ref: rpc.method
+        requirement_level:
+          conditionally_required: if available.
+      - ref: rpc.response.status_code
+        requirement_level:
+          conditionally_required: if available.
+      - ref: client.address
+        requirement_level: required
+      - ref: server.address
+        requirement_level:
+          conditionally_required: If available.
+      - ref: server.port
+        requirement_level:
+          conditionally_required: if applicable and if `server.address` is set.
+      - ref: onc_rpc.program.name
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.procedure.number
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.procedure.name
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.version
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.auth.flavor
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: If `network.peer.address` is set.
+      - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If and only if the operation failed.
+  - id: span.obi.rpc.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI outbound RPC client span (gRPC, ONC/Sun RPC).
+    attributes:
+      - ref: rpc.system.name
+        requirement_level: required
+      - ref: rpc.method
+        requirement_level:
+          conditionally_required: if available.
+      - ref: rpc.response.status_code
+        requirement_level:
+          conditionally_required: if available.
+      - ref: server.address
+        requirement_level:
+          conditionally_required: If available.
+      - ref: server.port
+        requirement_level:
+          conditionally_required: if applicable and if `server.address` is set.
+      - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
+      - ref: onc_rpc.program.name
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.procedure.number
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.procedure.name
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.version
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: onc_rpc.auth.flavor
+        requirement_level:
+          conditionally_required: if the call was identified as ONC RPC
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: If `network.peer.address` is set.
+      - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If and only if the operation failed.

@@ -1,0 +1,142 @@
+groups:
+  - id: span.obi.db.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI outbound database client span.
+    attributes:
+      - ref: db.system.name
+        requirement_level: required
+      - ref: db.namespace
+        requirement_level:
+          conditionally_required: If available.
+      - ref: db.collection.name
+        requirement_level:
+          conditionally_required: If readily available and if a database call is performed on a single collection.
+
+      - ref: db.operation.name
+        requirement_level:
+          conditionally_required: If readily available and if there is a single operation name that describes the database call.
+
+      - ref: db.operation.batch.size
+        requirement_level:
+          conditionally_required: if the operation is a batch
+      - ref: db.query.text
+        requirement_level: opt_in
+      - ref: db.response.status_code
+        requirement_level:
+          conditionally_required: If the operation failed and status code is available.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If and only if the operation failed.
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If using a port other than the default port for this DBMS and if `server.address` is set.
+      - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: If applicable for this database system.
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: if and only if `network.peer.address` is set.
+
+  # Elasticsearch is recognised from HTTP client traffic, so these spans carry
+  # the HTTP client base set on top of the db.* attributes. The native database
+  # protocols covered by span.obi.db.client never emit http.* / url.*, which is
+  # why this is a separate group rather than extra refs on the shared one.
+  - id: span.obi.elasticsearch.client
+    type: span
+    span_kind: client
+    stability: development
+    brief: OBI Elasticsearch client span, detected from HTTP client traffic.
+    attributes:
+      - ref: http.request.method
+        requirement_level: required
+      - ref: url.full
+        requirement_level: required
+      - ref: db.system.name
+        requirement_level: required
+      - ref: db.namespace
+        requirement_level:
+          conditionally_required: if the server reported a namespace
+      - ref: db.collection.name
+        requirement_level:
+          conditionally_required: if the operation targets a named collection
+      - ref: db.operation.name
+        requirement_level: required
+      - ref: db.query.text
+        requirement_level: opt_in
+      - ref: elasticsearch.node.name
+        requirement_level:
+          conditionally_required: if the response identified the node
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If and only if the operation failed.
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If using a port other than the default port for this DBMS and if `server.address` is set.
+      - ref: service.peer.name
+        requirement_level:
+          conditionally_required: if the peer service name could be resolved
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: if the peer socket address was observed
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: if and only if `network.peer.address` is set.
+      - ref: network.protocol.version
+        requirement_level:
+          conditionally_required: if the protocol version was observed on the wire
+      - ref: db.response.status_code
+        requirement_level:
+          conditionally_required: If response was received.
+  - id: span.obi.db.server
+    type: span
+    span_kind: server
+    stability: development
+    brief: OBI inbound database server span.
+    attributes:
+      - ref: db.system.name
+        requirement_level: required
+      - ref: db.namespace
+        requirement_level:
+          conditionally_required: If available.
+      - ref: db.collection.name
+        requirement_level:
+          conditionally_required: If readily available and if a database call is performed on a single collection.
+
+      - ref: db.operation.name
+        requirement_level:
+          conditionally_required: If readily available and if there is a single operation name that describes the database call.
+
+      - ref: db.query.text
+        requirement_level: opt_in
+      - ref: db.response.status_code
+        requirement_level:
+          conditionally_required: If the operation failed and status code is available.
+      - ref: error.type
+        requirement_level:
+          conditionally_required: If and only if the operation failed.
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level:
+          conditionally_required: If using a port other than the default port for this DBMS and if `server.address` is set.
+      - ref: span.metrics.skip
+        requirement_level: opt_in
+      - ref: network.peer.address
+        requirement_level:
+          conditionally_required: If applicable for this database system.
+      - ref: network.peer.port
+        requirement_level:
+          conditionally_required: if and only if `network.peer.address` is set.

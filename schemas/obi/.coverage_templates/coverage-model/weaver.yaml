@@ -1,0 +1,90 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Emits the coverage denominator: every signal OBI's registry declares, and
+# for each one the attributes it declares, with their requirement level.
+#
+# This is the registry half of telemetry coverage. The observed half comes
+# from the `observed` section of the live-check reports the suites archive;
+# `cmd/obi-weaver-coverage` intersects the two. Nothing here reads emitted
+# telemetry, so the model is a pure function of the registry and its pin.
+#
+# Must be a hidden directory: a visible weaver.yaml inside the registry mount
+# is parsed as a registry file and rejected.
+#
+# Run with an ABSOLUTE --registry path. weaver prunes a dot-prefixed registry
+# root as a hidden directory, so `--registry .` resolves to an empty registry
+# and every signal silently disappears from the denominator.
+whitespace_control:
+  trim_blocks: true
+  lstrip_blocks: true
+
+templates:
+  - template: coverage-model.json.j2
+    application_mode: single
+    file_name: coverage-model.json
+    filter: |
+      # A conditional level resolves to {conditionally_required: "when ..."},
+      # every other level to a bare string. Both collapse to the level name so
+      # a consumer can switch on it; the condition text is kept beside it,
+      # because for a conditional attribute the condition is the only thing
+      # that says when the attribute is owed.
+      def level: if type == "object" then keys[0] else . end;
+      def condition: if type == "object" then (to_entries[0].value | tostring) else null end;
+
+      def leveled:
+        {level: (.requirement_level | level)}
+        + (if (.requirement_level | condition) == null then {}
+           else {condition: (.requirement_level | condition)} end);
+
+      def attributes:
+        [.attributes[]? | {key: .key, value: leveled}] | from_entries;
+
+      # `obi.upstream_override` marks a signal OBI redeclares to narrow the
+      # upstream definition to the attributes it actually emits. Carried into
+      # the model so a coverage report can separate "OBI's own signal" from
+      # "OBI's narrowing of an upstream signal" without re-reading the
+      # registry.
+      def override: (.annotations.obi.upstream_override // false) != false;
+
+      def entity_identity:
+        [.identity[]? | {key: .key, value: leveled}] | from_entries;
+
+      def entity_description:
+        [.description[]? | {key: .key, value: leveled}] | from_entries;
+
+      # A signal's own definition has id == the name it declares. Anything
+      # else under that name is a refinement of it, and a refinement's
+      # attributes are not coverage of the general signal.
+      {
+        spans: ([.refinements.spans[]? | select(.id == .type)] | map({
+          key: .type,
+          value: {kind: .kind, attributes: attributes},
+        }) | from_entries),
+        metrics: ([.refinements.metrics[]? | select(.id == .name)] | map({
+          key: .name,
+          value: {
+            instrument: .instrument,
+            unit: .unit,
+            upstream_override: override,
+            attributes: attributes,
+          },
+        }) | from_entries),
+        events: ([.refinements.events[]? | select(.id == .name)] | map({
+          key: .name,
+          value: {attributes: attributes},
+        }) | from_entries),
+        entities: ([.refinements.entities[]? | select(.id == .type)] | map({
+          key: .type,
+          value: {
+            identity: entity_identity,
+            description: entity_description,
+          },
+        }) | from_entries),
+        enums: ([
+          .registry.attributes[]?
+          | select(.type | type == "object" and .members)
+          | {key: .key, value: [.type.members[]?.value]}
+        ] | from_entries),
+        schema_url: .schema_url,
+      }
