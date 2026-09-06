@@ -3,6 +3,14 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.db.client
+        upstream_omits:
+          - db.query.parameter
+          - db.query.summary
+          - db.response.returned_rows
+          - db.stored_procedure.name
     brief: OBI outbound database client span.
     attributes:
       - ref: db.system.name
@@ -54,6 +62,12 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.db.elasticsearch.client
+        upstream_omits:
+          - db.operation.batch.size
+          - db.operation.parameter
     brief: OBI Elasticsearch client span, detected from HTTP client traffic.
     attributes:
       - ref: http.request.method
@@ -104,6 +118,11 @@ groups:
     type: span
     span_kind: server
     stability: development
+    annotations:
+      obi:
+        upstream_span: none
+        upstream_absent_reason: >-
+          upstream models no database server span; OBI derives this span by inferring connection direction
     brief: OBI inbound database server span.
     attributes:
       - ref: db.system.name

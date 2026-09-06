@@ -47,6 +47,9 @@ templates:
       # registry.
       def override: (.annotations.obi.upstream_override // false) != false;
 
+      def upstream_span: .annotations.obi.upstream_span // null;
+      def upstream_omits: .annotations.obi.upstream_omits // [];
+
       def entity_identity:
         [.identity[]? | {key: .key, value: leveled}] | from_entries;
 
@@ -59,7 +62,12 @@ templates:
       {
         spans: ([.refinements.spans[]? | select(.id == .type)] | map({
           key: .type,
-          value: {kind: .kind, attributes: attributes},
+          value: {
+            kind: .kind,
+            upstream_span: upstream_span,
+            upstream_omits: upstream_omits,
+            attributes: attributes,
+          },
         }) | from_entries),
         metrics: ([.refinements.metrics[]? | select(.id == .name)] | map({
           key: .name,

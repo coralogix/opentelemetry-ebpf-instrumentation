@@ -3,6 +3,11 @@ groups:
     type: span
     span_kind: internal
     stability: development
+    annotations:
+      obi:
+        upstream_span: none
+        upstream_absent_reason: >-
+          upstream models no DNS resolution span
     brief: OBI DNS resolution span.
     attributes:
       - ref: dns.question.name

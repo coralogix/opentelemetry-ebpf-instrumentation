@@ -7,6 +7,11 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: none
+        upstream_absent_reason: >-
+          upstream models nothing for an outbound connection that never completed
     brief: OBI failed outbound connection span.
     attributes:
       - ref: client.address

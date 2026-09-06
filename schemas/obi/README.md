@@ -86,3 +86,36 @@ Values OBI merely passes through from user configuration (e.g.
 `deployment.environment.name` from a workload's `OTEL_RESOURCE_ATTRIBUTES`)
 are NOT overridden: the integration tests must configure values that satisfy
 the upstream conventions instead.
+
+## Recording how a span diverges from upstream
+
+Metrics record their relationship to upstream with
+`annotations.obi.upstream_override`. Spans record theirs with four keys under
+`annotations.obi`, on the `span.obi.*` group itself, because the relationship
+cannot be derived from the id: OBI's Elasticsearch span answers to upstream's
+`db.`-prefixed refinement, its RPC spans to `rpc.call.*`, and both messaging
+spans to `messaging.attributes`, which upstream still types as an
+attribute_group rather than a span.
+
+| Key | Meaning |
+| --- | --- |
+| `upstream_span` | The upstream group this span's attribute set is measured against, or `none` when upstream models nothing equivalent. Required on every `span.obi.*` group. |
+| `upstream_absent_reason` | Why upstream has no counterpart. Required when `upstream_span` is `none`. |
+| `upstream_omits` | Upstream attributes this span deliberately does not carry, each one a reviewed decision. |
+| `upstream_absorbs` | Upstream span types OBI declines to declare because it enriches this span in place instead, each with a `reason`. |
+
+`none` is spelled out rather than inferred from an absent key so that a typo in
+a counterpart id fails `TestSpanCounterpartsExist` instead of silently reading
+as "OBI models this alone".
+
+The guards in `internal/schemacheck/span_drift_test.go` hold the schema to
+these annotations: a new span group without `upstream_span` fails, an omission
+outside `upstream_omits` fails, and an `upstream_omits` entry that is no longer
+omitted fails so the record stays a true statement of divergence rather than a
+snapshot that drifts. `make test-schema` runs them.
+
+Read the current divergence with
+`go test -v -run TestSpanDriftReport ./internal/schemacheck/`, which never
+fails. Note that `upstream_omits` is the divergence **recorded**, not the
+divergence **justified** — some entries are genuinely unobservable from eBPF,
+others are simply not implemented yet.

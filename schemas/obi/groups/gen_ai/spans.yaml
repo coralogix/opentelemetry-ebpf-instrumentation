@@ -14,6 +14,11 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.gen_ai.inference.client
+        upstream_omits:
+          - gen_ai.response.time_to_first_chunk
     brief: OBI GenAI inference span (chat and text completion).
     attributes:
       - ref: aws.bedrock.guardrail.id
@@ -37,9 +42,6 @@ groups:
       - ref: gen_ai.output.type
         requirement_level:
           conditionally_required: when applicable and if the request includes an output format.
-      - ref: gen_ai.prompt.name
-        requirement_level:
-          conditionally_required: if the request named a prompt template
       - ref: gen_ai.provider.name
         requirement_level: required
       - ref: gen_ai.request.choice.count
@@ -139,6 +141,9 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.gen_ai.embeddings.client
     brief: OBI GenAI embeddings span.
     attributes:
       - ref: error.type
@@ -190,6 +195,12 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.gen_ai.retrieval.client
+        upstream_omits:
+          - gen_ai.retrieval.documents
+          - gen_ai.retrieval.query.text
     brief: OBI GenAI retrieval and rerank span.
     attributes:
       - ref: error.type

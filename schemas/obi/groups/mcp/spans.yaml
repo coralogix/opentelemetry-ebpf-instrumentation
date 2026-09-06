@@ -10,6 +10,13 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.mcp.client
+        upstream_omits:
+          - jsonrpc.protocol.version
+          - network.protocol.name
+          - network.transport
     brief: OBI Model Context Protocol client span.
     attributes:
       - ref: error.type

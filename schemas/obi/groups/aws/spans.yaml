@@ -7,6 +7,9 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.aws.client
     brief: OBI AWS SDK client span (S3, SQS).
     attributes:
       - ref: service.peer.name

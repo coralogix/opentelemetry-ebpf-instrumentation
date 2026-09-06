@@ -73,7 +73,7 @@ func obiMetrics(t *testing.T) map[string]metricDef {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		if d.IsDir() || !isSchemaFile(path) {
 			return nil
 		}
 		metricsFromFile(t, path, out)
@@ -108,7 +108,7 @@ func upstreamMetrics(t *testing.T) map[string]metricDef {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+		if d.IsDir() || !isSchemaFile(path) {
 			return nil
 		}
 		metricsFromFile(t, path, out)

@@ -6,6 +6,11 @@ groups:
     type: span
     span_kind: server
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.rpc.call.server
+        upstream_omits:
+          - rpc.method_original
     brief: OBI inbound RPC server span (gRPC, ONC/Sun RPC).
     attributes:
       - ref: rpc.system.name
@@ -57,6 +62,11 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.rpc.call.client
+        upstream_omits:
+          - rpc.method_original
     brief: OBI outbound RPC client span (gRPC, ONC/Sun RPC).
     attributes:
       - ref: rpc.system.name

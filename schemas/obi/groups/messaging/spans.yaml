@@ -5,6 +5,18 @@ groups:
     type: span
     span_kind: producer
     stability: development
+    annotations:
+      obi:
+        upstream_span: messaging.attributes
+        upstream_omits:
+          - messaging.batch.message_count
+          - messaging.consumer.group.name
+          - messaging.destination.anonymous
+          - messaging.destination.subscription.name
+          - messaging.destination.template
+          - messaging.destination.temporary
+          - messaging.message.body.size
+          - messaging.message.conversation_id
     brief: OBI messaging producer span.
     attributes:
       - ref: messaging.system
@@ -65,6 +77,18 @@ groups:
     type: span
     span_kind: consumer
     stability: development
+    annotations:
+      obi:
+        upstream_span: messaging.attributes
+        upstream_omits:
+          - messaging.batch.message_count
+          - messaging.consumer.group.name
+          - messaging.destination.anonymous
+          - messaging.destination.subscription.name
+          - messaging.destination.template
+          - messaging.destination.temporary
+          - messaging.message.body.size
+          - messaging.message.conversation_id
     brief: OBI messaging consumer span.
     attributes:
       - ref: messaging.system

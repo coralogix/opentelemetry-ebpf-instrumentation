@@ -33,8 +33,10 @@ type AttrLevel struct {
 type Attributes map[string]AttrLevel
 
 type ModelSpan struct {
-	Kind       string     `json:"kind"`
-	Attributes Attributes `json:"attributes"`
+	Kind          string     `json:"kind"`
+	UpstreamSpan  string     `json:"upstream_span"`
+	UpstreamOmits []string   `json:"upstream_omits"`
+	Attributes    Attributes `json:"attributes"`
 }
 
 type ModelMetric struct {

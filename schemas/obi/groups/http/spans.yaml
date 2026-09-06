@@ -8,6 +8,30 @@ groups:
     type: span
     span_kind: server
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.http.server
+        upstream_omits:
+          - client.port
+          - http.request.method_original
+          - http.request.size
+          - http.response.size
+          - network.local.address
+          - network.local.port
+          - network.protocol.name
+          - network.transport
+          - user_agent.original
+          - user_agent.synthetic.type
+        upstream_absorbs:
+          - id: span.mcp.server
+            reason: >-
+              server-side MCP is enriched onto this span, which genuinely is an inbound HTTP request
+          - id: span.graphql.server
+            reason: >-
+              GraphQL is enriched onto this span in place
+          - id: span.rpc.jsonrpc.call.server
+            reason: >-
+              JSON-RPC over HTTP is enriched onto this span in place
     brief: OBI inbound HTTP server span.
     attributes:
       - ref: http.request.method
@@ -114,6 +138,23 @@ groups:
     type: span
     span_kind: client
     stability: development
+    annotations:
+      obi:
+        upstream_span: span.http.client
+        upstream_omits:
+          - http.request.method_original
+          - http.request.resend_count
+          - http.request.size
+          - http.response.size
+          - network.protocol.name
+          - network.transport
+          - url.template
+          - user_agent.original
+          - user_agent.synthetic.type
+        upstream_absorbs:
+          - id: span.rpc.jsonrpc.call.client
+            reason: >-
+              JSON-RPC over HTTP is enriched onto this span in place
     brief: OBI outbound HTTP client span.
     attributes:
       - ref: http.request.method
