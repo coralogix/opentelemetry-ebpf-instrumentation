@@ -44,7 +44,7 @@ func testPythonAWSSQS(t *testing.T) {
 		assertSQSOperation(ct, "CreateQueue", qr.QueueURL, "", "")
 		assertSQSOperation(ct, "SendMessage", qr.QueueURL, mr.Messages[0].MessageID, "send")
 		assertSQSOperation(ct, "ReceiveMessage", qr.QueueURL, "", "receive")
-		assertSQSOperation(ct, "DeleteMessage", qr.QueueURL, "", "")
+		assertSQSOperation(ct, "DeleteMessage", qr.QueueURL, "", "settle")
 		assertSQSOperation(ct, "GetQueueAttributes", qr.QueueURL, "", "")
 		assertSQSOperation(ct, "DeleteQueue", qr.QueueURL, "", "")
 	}, testTimeout, time.Second)
@@ -62,10 +62,21 @@ func sqsRequestWithData[T sqsQueueURL | sqsMessages](t *testing.T, url string) T
 	return data
 }
 
+func sqsSpanKind(operationType string) string {
+	switch operationType {
+	case "send":
+		return "producer"
+	case "receive":
+		return "consumer"
+	}
+
+	return "client"
+}
+
 func assertSQSOperation(t require.TestingT, op, expectedQueueURL, expectedMessageID, expectedOperationType string) {
 	opName := "sqs." + op
 
-	span := fetchAWSSpanByOP(t, opName)
+	span := fetchAWSSpanByOP(t, opName, sqsSpanKind(expectedOperationType))
 	require.Equal(t, opName, span.OperationName)
 
 	tag, found := jaeger.FindIn(span.Tags, "aws.request_id")

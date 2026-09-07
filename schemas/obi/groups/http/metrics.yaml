@@ -1,0 +1,170 @@
+groups:
+  # --- Metrics ----------------------------------------------------------
+  - id: metric.obi.http.client.request.body.size
+    type: metric
+    metric_name: http.client.request.body.size
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.client.request.body.size
+    instrument: histogram
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: if a route template could be matched for the request
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level: required
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: opt_in
+  - id: metric.obi.http.client.request.duration
+    type: metric
+    metric_name: http.client.request.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.client.request.duration
+    instrument: histogram
+    unit: "s"
+    stability: stable
+    attributes:
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: if a route template could be matched for the request
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level: required
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: opt_in
+  - id: metric.obi.http.client.response.body.size
+    type: metric
+    metric_name: http.client.response.body.size
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.client.response.body.size
+    instrument: histogram
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: if a route template could be matched for the request
+      - ref: server.address
+        requirement_level: required
+      - ref: server.port
+        requirement_level: required
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: opt_in
+  - id: metric.obi.http.server.request.body.size
+    type: metric
+    metric_name: http.server.request.body.size
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.server.request.body.size
+    instrument: histogram
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: client.address
+        requirement_level: opt_in
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: If and only if it's available
+      - ref: server.address
+        requirement_level: opt_in
+      - ref: server.port
+        requirement_level: opt_in
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: required
+  - id: metric.obi.http.server.request.duration
+    type: metric
+    metric_name: http.server.request.duration
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.server.request.duration
+    instrument: histogram
+    unit: "s"
+    stability: stable
+    attributes:
+      - ref: client.address
+        requirement_level: opt_in
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: If and only if it's available
+      - ref: server.address
+        requirement_level: opt_in
+      - ref: server.port
+        requirement_level: opt_in
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: required
+  - id: metric.obi.http.server.response.body.size
+    type: metric
+    metric_name: http.server.response.body.size
+    annotations:
+      obi:
+        upstream_override: true
+    brief: OBI-emitted http.server.response.body.size
+    instrument: histogram
+    unit: "By"
+    stability: development
+    attributes:
+      - ref: client.address
+        requirement_level: opt_in
+      - ref: http.request.method
+        requirement_level: required
+      - ref: http.response.status_code
+        requirement_level:
+          conditionally_required: If and only if one was received/sent.
+      - ref: http.route
+        requirement_level:
+          conditionally_required: If and only if it's available
+      - ref: server.address
+        requirement_level: opt_in
+      - ref: server.port
+        requirement_level: opt_in
+      - ref: url.path
+        requirement_level: opt_in
+      - ref: url.scheme
+        requirement_level: required

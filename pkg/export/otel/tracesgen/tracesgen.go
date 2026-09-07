@@ -546,6 +546,25 @@ func messagingOperationAttrs(method string) []attribute.KeyValue {
 	}
 }
 
+type httpTransportScope int
+
+const (
+	httpTransportAll httpTransportScope = iota
+	httpTransportRequestOnly
+	httpTransportNone
+)
+
+func httpClientTransportScope(subType int) httpTransportScope {
+	switch subType {
+	case request.HTTPSubtypeNone, request.HTTPSubtypeGraphQL:
+		return httpTransportAll
+	case request.HTTPSubtypeElasticsearch:
+		return httpTransportRequestOnly
+	default:
+		return httpTransportNone
+	}
+}
+
 //nolint:cyclop
 func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.Name]struct{}, redactSet map[string]struct{}) []attribute.KeyValue {
 	var attrs []attribute.KeyValue
@@ -656,23 +675,32 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			url = request.URLFull(scheme, host, urlPath)
 		}
 
+		transport := httpClientTransportScope(span.SubType)
+
 		attrs = []attribute.KeyValue{
-			request.HTTPResponseStatusCode(span.Status),
-			request.HTTPUrlFull(url),
-			semconv.URLScheme(scheme),
 			request.ServerAddr(host),
 			request.PeerService(request.PeerServiceFromSpan(span)),
 			request.ServerPort(span.HostPort),
-			request.HTTPRequestBodySize(int(span.RequestBodyLength())),
-			request.HTTPResponseBodySize(span.ResponseBodyLength()),
-		}
-		if span.Method != "" {
-			attrs = append(attrs, request.HTTPRequestMethod(span.Method))
 		}
 
-		if scrubbedQS != "" {
-			if _, ok := optionalAttrs[attr.HTTPUrlQuery]; ok {
-				attrs = append(attrs, request.HTTPUrlQuery(scrubbedQS))
+		if transport != httpTransportNone {
+			attrs = append(attrs, request.HTTPUrlFull(url))
+			if span.Method != "" {
+				attrs = append(attrs, request.HTTPRequestMethod(span.Method))
+			}
+		}
+
+		if transport == httpTransportAll {
+			attrs = append(attrs,
+				request.HTTPResponseStatusCode(span.Status),
+				semconv.URLScheme(scheme),
+				request.HTTPRequestBodySize(int(span.RequestBodyLength())),
+				request.HTTPResponseBodySize(span.ResponseBodyLength()),
+			)
+			if scrubbedQS != "" {
+				if _, ok := optionalAttrs[attr.HTTPUrlQuery]; ok {
+					attrs = append(attrs, request.HTTPUrlQuery(scrubbedQS))
+				}
 			}
 		}
 
@@ -690,6 +718,11 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			}
 			attrs = append(attrs, request.DBOperationName(span.Elasticsearch.DBOperationName))
 			attrs = append(attrs, request.DBSystemName(span.Elasticsearch.DBSystemName))
+			// Semconv defines this as the HTTP code the cluster returned, and
+			// requires it only when a response was received.
+			if span.Status != 0 {
+				attrs = append(attrs, request.DBResponseStatusCode(strconv.Itoa(span.Status)))
+			}
 		}
 
 		if span.SubType == request.HTTPSubtypeAWSS3 && span.AWS != nil {
@@ -705,6 +738,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 
 		if span.SubType == request.HTTPSubtypeAWSSQS && span.AWS != nil {
 			sqs := span.AWS.SQS
+			attrs = append(attrs, semconv.MessagingSystemAWSSQS)
 			attrs = append(attrs, request.MessagingOperationName(sqs.OperationName))
 			// messaging.operation.type is a semconv enum: omit it instead of
 			// emitting an empty (invalid) variant when the type is unknown.
@@ -962,7 +996,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			if ai.OperationName != "" {
 				// gen_ai.operation.name must not be emitted as an empty
 				// string: omit it when the operation could not be derived
-				// (re-typed to string in schemas/obi/groups/gen_ai.yaml).
+				// (re-typed to string in schemas/obi/groups/gen_ai/registry.yaml).
 				attrs = append(attrs, semconv.GenAIOperationNameKey.String(ai.OperationName))
 			}
 			attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
@@ -1298,7 +1332,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 				attrs = append(attrs, semconv.GenAIDataSourceID(collection))
 			}
 			if topK := ai.Input.GetTopK(); topK > 0 {
-				attrs = append(attrs, attribute.Int("gen_ai.retrieval.top_k", topK))
+				attrs = append(attrs, semconv.GenAIRequestTopK(float64(topK)))
 			}
 		}
 
@@ -1724,22 +1758,45 @@ func genAIResponseErrorMessage(span *request.Span) string {
 	return ""
 }
 
+func messagingSpanKind(operationType string) (trace2.SpanKind, bool) {
+	switch operationType {
+	case request.MessagingSend:
+		return trace2.SpanKindProducer, true
+	case request.MessagingReceive, request.MessagingProcess:
+		return trace2.SpanKindConsumer, true
+	}
+
+	return trace2.SpanKindUnspecified, false
+}
+
 func spanKind(span *request.Span) trace2.SpanKind {
 	if span.Type == request.EventTypeManualSpan {
 		return trace2.ValidateSpanKind(span.SpanKind)
 	}
 
 	switch span.Type {
-	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeKafkaServer, request.EventTypeMQTTServer, request.EventTypeNATSServer, request.EventTypeSunRPCServer, request.EventTypeMemcachedServer, request.EventTypeSQLServer, request.EventTypeAerospikeServer:
+	case request.EventTypeHTTP, request.EventTypeGRPC, request.EventTypeRedisServer, request.EventTypeSunRPCServer, request.EventTypeMemcachedServer, request.EventTypeSQLServer, request.EventTypeAerospikeServer:
 		return trace2.SpanKindServer
 	case request.EventTypeHTTPClient, request.EventTypeGRPCClient, request.EventTypeSQLClient, request.EventTypeRedisClient, request.EventTypeMongoClient, request.EventTypeCouchbaseClient, request.EventTypeMemcachedClient, request.EventTypeSunRPCClient, request.EventTypeAerospikeClient, request.EventTypeFailedConnect:
+		if span.SubType == request.HTTPSubtypeAWSSQS && span.AWS != nil {
+			if kind, ok := messagingSpanKind(span.AWS.SQS.OperationType); ok {
+				return kind
+			}
+		}
 		return trace2.SpanKindClient
-	case request.EventTypeKafkaClient, request.EventTypeMQTTClient, request.EventTypeNATSClient, request.EventTypeAMQPClient:
-		switch request.MessagingOperationTypeOf(span.Method) {
-		case request.MessagingSend:
-			return trace2.SpanKindProducer
-		case request.MessagingProcess:
-			return trace2.SpanKindConsumer
+	// A messaging span is a producer or a consumer whichever side of the
+	// connection OBI observed it from. Semantic conventions define no
+	// server-kind messaging span, so the `*Server` event types belong here
+	// rather than with the request/response protocols above: OBI reaches them
+	// by inferring direction from the first operation it saw on the
+	// connection, which says nothing about whether that operation was a send
+	// or a receive.
+	case request.EventTypeKafkaClient, request.EventTypeKafkaServer,
+		request.EventTypeMQTTClient, request.EventTypeMQTTServer,
+		request.EventTypeNATSClient, request.EventTypeNATSServer,
+		request.EventTypeAMQPClient:
+		if kind, ok := messagingSpanKind(request.MessagingOperationTypeOf(span.Method)); ok {
+			return kind
 		}
 	}
 	return trace2.SpanKindInternal

@@ -138,3 +138,6 @@ internal/test/integration/components/ai/openai/go/testserver
 
 # rendered site output (make render-site)
 build/
+
+# coverage model + report output (make weaver-coverage)
+weaver-coverage-out/

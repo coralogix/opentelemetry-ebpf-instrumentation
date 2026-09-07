@@ -362,6 +362,19 @@ jobs:
           fi
           bash ./scripts/bpf-metrics-summary.sh "${ARGS[@]}" || true
 
+      # Per-shard weaver live-check reports. `weaver_coverage_combined.yml`
+      # unions these across every weaver-wired suite and computes telemetry
+      # coverage from them, so a shard that ran no weaver-wired test simply
+      # contributes nothing.
+      - name: Upload weaver live-check reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: weaver-reports-${{ matrix.id }}-${{ github.run_number }}
+          path: testoutput/weaver-report-*.json
+          if-no-files-found: ignore
+          retention-days: 5
+
       - name: Upload eBPF metrics snapshots (PoC)
         if: ${{ always() && matrix.arch == 'amd64' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

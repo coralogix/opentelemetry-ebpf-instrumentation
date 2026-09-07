@@ -118,13 +118,17 @@ const (
 	HTTPSubtypeOllama           = 17 // http + Ollama native API
 )
 
+// IsGenAISubtype reports whether a subtype is recorded on the GenAI client
+// metrics. MCP is deliberately absent: it is a tool and resource protocol
+// rather than a model provider, so it has no `gen_ai.provider.name` to report,
+// and semantic conventions give it its own `mcp.client.*` / `mcp.server.*`
+// metrics. Its spans still carry the GenAI attributes it does define.
 func IsGenAISubtype(subtype int) bool {
 	return subtype == HTTPSubtypeOpenAI ||
 		subtype == HTTPSubtypeAnthropic ||
 		subtype == HTTPSubtypeGemini ||
 		subtype == HTTPSubtypeQwen ||
 		subtype == HTTPSubtypeAWSBedrock ||
-		subtype == HTTPSubtypeMCP ||
 		subtype == HTTPSubtypeEmbedding ||
 		subtype == HTTPSubtypeRerank ||
 		subtype == HTTPSubtypeRetrieval ||
@@ -211,6 +215,7 @@ const (
 	MessagingReceive = "receive"
 	MessagingPublish = "publish"
 	MessagingProcess = "process"
+	MessagingSettle  = "settle"
 )
 
 func MessagingOperationTypeOf(operationName string) string {
@@ -218,6 +223,21 @@ func MessagingOperationTypeOf(operationName string) string {
 		return MessagingSend
 	}
 	return operationName
+}
+
+// IsMessagingClientOperation reports whether an AWS SQS span describes a
+// producer or consumer operation. Queue administration calls carry no
+// messaging.operation.type and are not messaging client operations.
+func IsMessagingClientOperation(span *Span) bool {
+	if span.SubType != HTTPSubtypeAWSSQS || span.AWS == nil {
+		return false
+	}
+	switch span.AWS.SQS.OperationType {
+	case MessagingSend, MessagingReceive, MessagingSettle:
+		return true
+	default:
+		return false
+	}
 }
 
 type converter struct {
