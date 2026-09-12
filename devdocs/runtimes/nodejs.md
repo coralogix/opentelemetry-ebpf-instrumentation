@@ -111,13 +111,25 @@ The injected agent reports in-process readings over an eBPF side channel:
   `SIGUSR1` (see below), and fails when the environment blocks the inspector
   (e.g. seccomp) — in both cases the metrics are silently absent (an error is
   logged).
-- `SIGUSR1` is withheld unless the process is provably a Node.js runtime that
-  the signal cannot terminate and that has no handler of its own. Each refusal
-  is logged once, with a `reason`:
-  - the executable names none of Node's own internal symbols and the process
-    maps no `libnode.so`, so it is a Node.js process only by the name of its
-    binary. libuv's symbols do not count towards this: any runtime linking
-    libuv carries them, so they say nothing about which runtime it is;
+- A process reaches the injector only if discovery typed it Node.js, which it
+  does from the executable's own symbols (`node::NodeMainInstance`,
+  `node::Environment`, `node::Start`) or a mapped `libnode.so`, never from the
+  name of the binary. The N-API surface does not count towards this, because
+  Bun re-exports it, and neither do libuv's symbols, which every runtime
+  linking libuv carries. A Bun binary installed as `node` is therefore not
+  typed Node.js and is never signalled or injected.
+- That type is not private to the injector. It also selects the
+  `telemetry.sdk.language` resource attribute, the `package.json` service-name
+  resolution, and Node.js route harvesting. A build that names none of the
+  symbols and maps no `libnode.so` loses all four, and because Node links
+  `libstdc++`, it is typed C++ rather than generic, so the emitted
+  `telemetry.sdk.language` is wrong rather than merely absent. Official builds
+  for 18 through 24 on glibc and musl, `strip -s` builds, distribution packages,
+  single-executable applications, `pkg` bundles and Electron all carry the
+  symbols; a build linked without `-rdynamic` is the shape that would not.
+- `SIGUSR1` is withheld unless the signal cannot terminate the process and the
+  application has no handler of its own. Each refusal is logged once, with a
+  `reason`:
   - `SigCgt`/`SigIgn` in `/proc/<pid>/status` show `SIGUSR1` neither caught nor
     ignored, so sending it would terminate the process. A runtime is briefly in
     this state after `exec`, so OBI waits for it to install its handler before

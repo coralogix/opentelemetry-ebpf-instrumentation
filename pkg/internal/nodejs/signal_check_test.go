@@ -309,67 +309,23 @@ func unusedPID(t *testing.T) int {
 	return pidMax + 1
 }
 
-func TestIsNodeRuntime_NilELF(t *testing.T) {
-	if isNodeRuntime(os.Getpid(), readNodeSymbols(nil)) {
-		t.Error("expected a nil ELF not to be identified as a Node.js runtime")
-	}
-}
-
-func TestIsNodeRuntime_NodeBinary(t *testing.T) {
-	if !isNodeRuntime(os.Getpid(), readNodeSymbols(openELFPath(t, findNodeBinary(t)))) {
-		t.Error("expected the node binary to be identified as a Node.js runtime")
-	}
-}
-
-func TestIsNodeRuntime_NonNodeExecutable(t *testing.T) {
-	if isNodeRuntime(os.Getpid(), readNodeSymbols(testBinaryELF(t))) {
-		t.Error("expected a non-Node executable not to be identified as a Node.js runtime")
-	}
-}
-
-// The gate is fail-closed: an executable whose symbols say nothing loses
-// injection unless the process maps libnode.so. A distribution build stripped
-// to .dynsym is exactly that case, so the decision is asserted directly rather
-// than only through whichever node happens to be installed.
-func TestIsNodeRuntime_SymbolDecision(t *testing.T) {
-	nodeELF := openELFPath(t, findNodeBinary(t))
-
-	for _, tc := range []struct {
-		name string
-		syms nodeSymbols
-		want bool
-	}{
-		{name: "runtime symbols present", syms: readNodeSymbols(nodeELF), want: true},
-		// A stripped executable names nothing, so identification falls to the
-		// mapped-library check, which this process fails.
-		{name: "stripped executable", syms: nodeSymbols{}},
-		// The signal tree is read separately; naming it does not identify a
-		// runtime on its own, and only `identified` decides this gate.
-		{name: "signal tree without identification", syms: nodeSymbols{hasTree: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// A PID that maps no libnode.so isolates the symbol decision from
-			// the mapped-library fallback.
-			if got := isNodeRuntime(os.Getpid(), tc.syms); got != tc.want {
-				t.Errorf("isNodeRuntime = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestReadNodeSymbols_AbsentTable(t *testing.T) {
-	syms := readNodeSymbols(nil)
-	if syms.identified {
-		t.Error("an absent symbol table must not identify a runtime")
-	}
-	if syms.hasTree {
+	if readNodeSymbols(nil).hasTree {
 		t.Error("an absent symbol table must not yield a signal tree")
 	}
 }
 
-func TestHasMappedNodeLibrary_NonNodeProcess(t *testing.T) {
-	if hasMappedNodeLibrary(os.Getpid()) {
-		t.Error("expected no libnode.so mapping in a non-Node process")
+// A build that strips .symtab names no signal tree, and the injector falls back
+// to the source scan; that path is covered elsewhere. What must hold here is
+// that when the table does name it, the address is usable rather than zero.
+func TestReadNodeSymbols_NodeBinary(t *testing.T) {
+	syms := readNodeSymbols(openELFPath(t, findNodeBinary(t)))
+	if !syms.hasTree {
+		t.Skip("this node build strips uv__signal_tree from .symtab")
+	}
+
+	if syms.signalTree.Off == 0 {
+		t.Error("a named uv__signal_tree must resolve to a non-zero offset")
 	}
 }
 
@@ -506,20 +462,6 @@ func TestSignalTreeRuntimeAddr_ResolvesForNode(t *testing.T) {
 	}
 	if addr == 0 {
 		t.Error("expected a non-zero runtime address")
-	}
-}
-
-func TestSIGUSR1Refusal_NonNodeExecutable(t *testing.T) {
-	reason := sigusr1Refusal(context.Background(), os.Getpid(), testBinaryELF(t))
-	if reason != refusalNotNodeRuntime {
-		t.Errorf("expected %q, got %q", refusalNotNodeRuntime, reason)
-	}
-}
-
-func TestSIGUSR1Refusal_NilELF(t *testing.T) {
-	reason := sigusr1Refusal(context.Background(), os.Getpid(), nil)
-	if reason != refusalNotNodeRuntime {
-		t.Errorf("expected %q, got %q", refusalNotNodeRuntime, reason)
 	}
 }
 

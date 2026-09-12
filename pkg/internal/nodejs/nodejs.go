@@ -182,7 +182,6 @@ func (i *NodeInjector) injectViaOpenInspector(pid int) (bool, error) {
 }
 
 const (
-	refusalNotNodeRuntime          = "executable is not identifiable as a Node.js runtime"
 	refusalSignalIsFatal           = "SIGUSR1 is neither caught nor ignored, so it would terminate the process"
 	refusalDispositionUnknown      = "the process caught and ignored signal sets could not be read"
 	refusalHandlerFound            = "process has a custom SIGUSR1 handler"
@@ -199,16 +198,11 @@ const (
 )
 
 // sigusr1Refusal reports why the signal is withheld, or an empty reason when
-// it is safe to send. Each gate answers a question the next one cannot: is this
-// a Node.js runtime at all, would the signal terminate it, and has the
-// application taken the signal over.
+// it is safe to send. Discovery has already established that this is a Node.js
+// runtime; what is left is whether the signal would terminate it, and whether
+// the application has taken the signal over.
 func sigusr1Refusal(ctx context.Context, pid int, elfFile *elf.File) string {
-	// Both symbol-based gates read the same tables, so they are walked once.
 	syms := readNodeSymbols(elfFile)
-
-	if !isNodeRuntime(pid, syms) {
-		return refusalNotNodeRuntime
-	}
 
 	switch awaitSignalDisposition(ctx, pid) {
 	case signalDispositionFatal:

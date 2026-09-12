@@ -39,63 +39,34 @@ const (
 
 const (
 	signalTreeSymbol = "uv__signal_tree"
-	nodeLibrary      = "libnode.so"
 	sigusr1Mask      = uint64(1) << (sigusr1 - 1)
 )
 
-// nodeRuntimeSymbols are Node's own internals, which no other runtime carries.
-//
-// The public N-API surface is deliberately absent: Bun re-exports node::
-// symbols such as MakeCallback, so matching those would identify it as Node.
-// libuv's symbols are absent for the same reason — any runtime linking libuv
-// has them, Bun included, so they say nothing about which runtime this is.
-var nodeRuntimeSymbols = []string{
-	"_ZN4node16NodeMainInstance",
-	"_ZN4node11Environment",
-	"_ZN4node5StartE",
-}
-
-// nodeSymbols is what one walk of the executable's symbol tables yields for
-// both gates that need them. debug/elf caches nothing, so asking twice reparses
-// the whole table — around twelve thousand symbols for a stock node.
+// nodeSymbols is what one walk of the executable's symbol tables yields.
+// debug/elf caches nothing, so asking twice reparses the whole table, around
+// twelve thousand symbols for a stock node.
 type nodeSymbols struct {
-	// identified reports that some runtime symbol matched.
-	identified bool
 	// signalTree is libuv's signal-handle tree root, when the table names it.
 	signalTree procs.Sym
 	hasTree    bool
 }
 
-// readNodeSymbols collects both symbol sets in a single pass. The exact lookup
-// admits STT_FUNC as well as STT_OBJECT, which the substring lookup needs for
-// Node's own methods: uv__signal_tree is a data object, so this only widens the
+// readNodeSymbols looks up libuv's signal tree. The lookup admits STT_FUNC as
+// well as STT_OBJECT: uv__signal_tree is a data object, so this only widens the
 // match to a function of that exact name, which no Node build has.
 func readNodeSymbols(elfFile *elf.File) nodeSymbols {
 	if elfFile == nil {
 		return nodeSymbols{}
 	}
 
-	exact, substring, err := procs.FindExeSymbolsByNameAndSubstring(elfFile,
-		[]string{signalTreeSymbol}, nodeRuntimeSymbols, elf.STT_FUNC, elf.STT_OBJECT)
+	exact, err := procs.FindExeSymbols(elfFile,
+		[]string{signalTreeSymbol}, elf.STT_FUNC, elf.STT_OBJECT)
 	if err != nil {
 		return nodeSymbols{}
 	}
 
 	tree, hasTree := exact[signalTreeSymbol]
-	return nodeSymbols{identified: len(substring) > 0, signalTree: tree, hasTree: hasTree}
-}
-
-func isNodeRuntime(pid int, syms nodeSymbols) bool {
-	return syms.identified || hasMappedNodeLibrary(pid)
-}
-
-func hasMappedNodeLibrary(pid int) bool {
-	maps, err := procs.FindLibMaps(app.PID(pid))
-	if err != nil {
-		return false
-	}
-
-	return procs.LibPath(nodeLibrary, maps) != nil
+	return nodeSymbols{signalTree: tree, hasTree: hasTree}
 }
 
 // hasUserSIGUSR1Handler checks whether a Node.js process has a JavaScript-level
