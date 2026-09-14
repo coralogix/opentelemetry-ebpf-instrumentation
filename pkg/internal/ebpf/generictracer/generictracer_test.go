@@ -7,12 +7,14 @@ package generictracer
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"testing"
 	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/rlimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -480,4 +482,93 @@ func (f fakeServiceFilter) CurrentPIDs(ebpfcommon.PIDType) map[uint32]map[app.PI
 		(*f.currentPIDsCalls)++
 	}
 	return f.current
+}
+
+func newTestPidFilterMaps(t *testing.T) (validPids, pidCache *ebpf.Map) {
+	t.Helper()
+
+	if err := rlimit.RemoveMemlock(); err != nil {
+		t.Skipf("removing memlock failed: %v", err)
+	}
+
+	validPids, err := ebpf.NewMap(&ebpf.MapSpec{
+		Name:       "valid_pids_test",
+		Type:       ebpf.Array,
+		KeySize:    4,
+		ValueSize:  8,
+		MaxEntries: maxConcurrentPids,
+	})
+	if err != nil {
+		t.Skipf("ebpf map create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = validPids.Close() })
+
+	pidCache, err = ebpf.NewMap(&ebpf.MapSpec{
+		Name:       "pid_cache_test",
+		Type:       ebpf.LRUHash,
+		KeySize:    4,
+		ValueSize:  4,
+		MaxEntries: 16,
+	})
+	if err != nil {
+		t.Skipf("ebpf map create failed: %v", err)
+	}
+	t.Cleanup(func() { _ = pidCache.Close() })
+
+	return validPids, pidCache
+}
+
+func pidCacheLen(t *testing.T, m *ebpf.Map) int {
+	t.Helper()
+
+	var key, value uint32
+	n := 0
+	iter := m.Iterate()
+	for iter.Next(&key, &value) {
+		n++
+	}
+	require.NoError(t, iter.Err())
+
+	return n
+}
+
+// pid_cache holds negative answers too (bpf/pid/pid.h), so every rebuild of the
+// filter must drop the whole cache or a stale "not selected" would outlive the
+// filter change that authorized the process.
+func TestRebuildValidPidsClearsPidCache(t *testing.T) {
+	validPids, pidCache := newTestPidFilterMaps(t)
+
+	const ns, nsPid = uint32(4026532701), app.PID(7)
+	tracer := &Tracer{
+		log: slog.Default(),
+		pidsFilter: fakeServiceFilter{current: map[uint32]map[app.PID]svc.Attrs{
+			ns: {nsPid: {}},
+		}},
+	}
+	tracer.bpfObjects.ValidPids = validPids
+	tracer.bpfObjects.PidCache = pidCache
+
+	// one positive and two negative entries, as the BPF side would leave them
+	require.NoError(t, pidCache.Put(uint32(41007), uint32(41007)))
+	require.NoError(t, pidCache.Put(uint32(5000), uint32(0)))
+	require.NoError(t, pidCache.Put(uint32(6000), uint32(0)))
+	require.Equal(t, 3, pidCacheLen(t, pidCache))
+
+	require.NoError(t, tracer.rebuildValidPids())
+
+	assert.Equal(t, 0, pidCacheLen(t, pidCache), "rebuild must clear every cached answer")
+
+	segment, bit := pidSegmentBit((uint64(ns) << 32) | uint64(nsPid))
+	var word uint64
+	require.NoError(t, validPids.Lookup(segment, &word))
+	assert.Equal(t, uint64(1)<<bit, word, "the selected (ns, pid) bit is set")
+}
+
+func TestClearPidCacheOnEmptyMap(t *testing.T) {
+	_, pidCache := newTestPidFilterMaps(t)
+	tracer := &Tracer{log: slog.Default()}
+	tracer.bpfObjects.PidCache = pidCache
+
+	require.NoError(t, tracer.clearPidCache())
+	assert.Equal(t, 0, pidCacheLen(t, pidCache))
 }
