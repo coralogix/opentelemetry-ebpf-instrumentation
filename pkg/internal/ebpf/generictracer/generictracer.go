@@ -151,34 +151,62 @@ func (p *Tracer) rebuildValidPids() error {
 
 	// pid_cache also holds negative answers, which the new filter may
 	// invalidate. Clearing it after the segments are written makes every
-	// process re-evaluate once against the new filter.
-	return p.clearPidCache()
+	// process re-evaluate once against the new filter. A failed clear must
+	// not fail the rebuild: the filter is already correct, and the caller's
+	// positive Put still has to happen.
+	if err := p.clearPidCache(); err != nil {
+		p.log.Warn("failed to clear the BPF pid cache; stale entries age out with the LRU", "error", err)
+	}
+
+	return nil
 }
+
+// pid_cache is an LRU hash the BPF side keeps inserting into. When it is
+// full, kernel evictions can invalidate the iteration cursor; the walk then
+// restarts and eventually aborts. Every pass still deletes what it saw, so a
+// bounded number of passes drains the map.
+const pidCacheClearPasses = 3
 
 func (p *Tracer) clearPidCache() error {
 	if p.bpfObjects.PidCache == nil {
 		return nil
 	}
 
+	for pass := range pidCacheClearPasses {
+		keys, iterErr := p.pidCacheKeys()
+
+		for _, k := range keys {
+			err := p.bpfObjects.PidCache.Delete(k)
+			if err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+				return fmt.Errorf("clearing pid %d from the BPF pid cache: %w", k, err)
+			}
+		}
+
+		if iterErr == nil {
+			return nil
+		}
+		if !errors.Is(iterErr, ebpf.ErrIterationAborted) {
+			return fmt.Errorf("iterating the BPF pid cache: %w", iterErr)
+		}
+
+		p.log.Debug("BPF pid cache walk aborted by concurrent eviction, retrying", "pass", pass+1, "deleted", len(keys))
+	}
+
+	p.log.Warn("BPF pid cache still churning after the clear passes; leftovers age out with the LRU", "passes", pidCacheClearPasses)
+
+	return nil
+}
+
+func (p *Tracer) pidCacheKeys() ([]uint32, error) {
 	var key, value uint32
-	var keys []uint32
+	keys := make([]uint32, 0, p.bpfObjects.PidCache.MaxEntries())
 
 	iter := p.bpfObjects.PidCache.Iterate()
 	for iter.Next(&key, &value) {
 		keys = append(keys, key)
 	}
-	if err := iter.Err(); err != nil {
-		return fmt.Errorf("iterating the BPF pid cache: %w", err)
-	}
 
-	for _, k := range keys {
-		err := p.bpfObjects.PidCache.Delete(k)
-		if err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
-			return fmt.Errorf("clearing pid %d from the BPF pid cache: %w", k, err)
-		}
-	}
-
-	return nil
+	return keys, iter.Err()
 }
 
 func (p *Tracer) AllowPID(pid app.PID, ns uint32, fi *exec.FileInfo) {
