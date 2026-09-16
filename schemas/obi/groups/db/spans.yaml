@@ -20,7 +20,8 @@ groups:
       - ref: network.peer.address
       - ref: network.peer.port
       - ref: db.query.summary
-        requirement_level: opt_in
+        requirement_level:
+          conditionally_required: if a summary could be derived from the query
 
   # Elasticsearch is recognised from HTTP client traffic, so these spans carry
   # the HTTP client base set on top of the db.* attributes. The native database
@@ -34,7 +35,8 @@ groups:
     attributes:
       - ref: http.request.method
       - ref: http.request.method_original
-        requirement_level: opt_in
+        requirement_level:
+          conditionally_required: if the wire method is outside the semconv enum
       - ref: url.full
       # Appended unconditionally for this subtype, outside the transport gate
       # the other HTTP response attributes sit behind.
@@ -73,4 +75,5 @@ groups:
       - ref: network.peer.address
       - ref: network.peer.port
       - ref: db.query.summary
-        requirement_level: opt_in
+        requirement_level:
+          conditionally_required: if a summary could be derived from the query
