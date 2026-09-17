@@ -829,15 +829,6 @@ static __always_inline bool current_obi_handoff(struct pt_regs *ctx, chan_handof
         return true;
     }
 
-    obi_ctx_info_t *obi_ctx = obi_ctx__get(bpf_get_current_pid_tgid());
-    if (obi_ctx && valid_trace(obi_ctx->trace_id) && valid_span(obi_ctx->span_id)) {
-        __builtin_memcpy(handoff->tp.trace_id, obi_ctx->trace_id, sizeof(handoff->tp.trace_id));
-        __builtin_memcpy(handoff->tp.span_id, obi_ctx->span_id, sizeof(handoff->tp.span_id));
-        *((u64 *)handoff->tp.parent_id) = 0;
-        handoff->tp.flags = 0;
-        return true;
-    }
-
     return false;
 }
 
