@@ -94,6 +94,19 @@ section empty once drained.
   `traces_host_info{cloud_host_id=...}` must be updated. A component vendoring OBI that
   assigns to `prom.CloudHostIDKey` keeps its own label name.
 
+- A span attribute OBI parses but could not determine is no longer emitted as an empty
+  string. It affects `server.address`, `client.address`, `service.peer.name`, `url.scheme`,
+  `url.full`, `elasticsearch.node.name`, `messaging.client.id`, `aws.s3.key`,
+  `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id` and
+  `messaging.destination.name` on the AWS SQS span only. A consumer selecting on the presence
+  of one of these sees it absent where it previously carried `""`. `service.peer.name` is the
+  widest: it is empty on every client span outside Kubernetes, since only the Kubernetes
+  decorator and the name resolver set it.
+  Attributes the registry declares `required` are left alone, so a missing one still shows up
+  as an empty value rather than vanishing. Attributes an application sets on a manual span are
+  untouched, including ones it deliberately sets to an empty string. Resource attributes and
+  metric labels are unchanged.
+
 ## Hosting notes
 
 `site/` is published as static files with no markdown processing, so the generated

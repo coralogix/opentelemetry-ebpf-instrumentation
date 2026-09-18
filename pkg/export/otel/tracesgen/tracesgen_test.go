@@ -1512,6 +1512,32 @@ func TestTraceAttributesSelector_GenAITokenDetailAvailability(t *testing.T) {
 	}
 }
 
+// url.scheme is read from the connection, not from the URL, so a request with
+// no query string still carries it.
+func TestHTTPClientSchemeSurvivesWithoutAQueryString(t *testing.T) {
+	span := &request.Span{
+		Type:      request.EventTypeHTTPClient,
+		Method:    "GET",
+		Path:      "/v1/things",
+		FullPath:  "/v1/things",
+		Host:      "api.example.com",
+		HostPort:  443,
+		Statement: "https;api.example.com",
+		Status:    200,
+	}
+
+	attrs := AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{}))
+
+	scheme, ok := attrs.Get(string(semconv.URLSchemeKey))
+	require.True(t, ok, "url.scheme must not depend on the query string")
+	assert.Equal(t, "https", scheme.Str())
+
+	span.Statement = ""
+	attrs = AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{}))
+	_, ok = attrs.Get(string(semconv.URLSchemeKey))
+	assert.False(t, ok, "url.scheme must be absent when no scheme was captured")
+}
+
 func TestHTTPClientTransportAttributesBySubtype(t *testing.T) {
 	defaultAttrs, err := UserSelectedAttributes(&attributes.SelectorConfig{})
 	require.NoError(t, err)
@@ -1568,14 +1594,16 @@ func TestHTTPClientTransportAttributesBySubtype(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			span := &request.Span{
-				Type:     request.EventTypeHTTPClient,
-				SubType:  tt.subType,
-				Method:   "POST",
-				Path:     "/v1/things",
-				FullPath: "/v1/things?q=1",
-				Host:     "api.example.com",
-				HostPort: 443,
-				Status:   200,
+				Type:      request.EventTypeHTTPClient,
+				SubType:   tt.subType,
+				Method:    "POST",
+				Path:      "/v1/things",
+				FullPath:  "/v1/things?q=1",
+				Host:      "api.example.com",
+				HostPort:  443,
+				HostName:  "api",
+				Statement: "https;api.example.com",
+				Status:    200,
 			}
 			if tt.payload != nil {
 				tt.payload(span)
@@ -1594,7 +1622,7 @@ func TestHTTPClientTransportAttributesBySubtype(t *testing.T) {
 
 			for _, key := range []string{"server.address", "server.port", "service.peer.name"} {
 				_, ok := selected.Get(key)
-				assert.True(t, ok, "%s must survive on every http client subtype", key)
+				assert.True(t, ok, "%s must survive on every http client subtype when the span carries a value for it", key)
 			}
 		})
 	}
