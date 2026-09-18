@@ -48,6 +48,14 @@ The supported handoff shapes are:
 
 `runtime.selectgo` and `select`-based channel paths are not supported yet.
 
+## Relationship to `traces_ctx_v1`
+
+Both sides of a handoff are resolved from the per-goroutine maps that the Go
+protocol uprobes maintain, keyed by the goroutine making the call. The pinned
+`traces_ctx_v1` map is not consulted: a thread-keyed lookup cannot distinguish
+the goroutine performing the channel operation from whichever one ran on that
+thread before it.
+
 ## Limits
 
 Pending links are kept in a bounded userspace cache while OBI waits for the
