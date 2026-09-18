@@ -93,6 +93,12 @@ section empty once drained.
   that `target_info` already carried. Dashboards selecting
   `traces_host_info{cloud_host_id=...}` must be updated. A component vendoring OBI that
   assigns to `prom.CloudHostIDKey` keeps its own label name.
+- Five span group ids are replaced by per-system ones:
+  `span.obi.messaging.{producer,consumer,client}` become
+  `span.obi.messaging.<broker>.{producer,consumer,client}`, and
+  `span.obi.rpc.{client,server}` become `span.obi.rpc.{grpc,onc_rpc}.{client,server}`.
+  No emitted attribute changes, but a link into `site/docs/spans.md` anchored on
+  one of the old ids no longer resolves.
 
 ## Hosting notes
 
