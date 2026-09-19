@@ -651,11 +651,15 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 	switch span.Type {
 	case request.EventTypeHTTP:
 		attrs = []attribute.KeyValue{
-			request.ClientAddr(request.PeerAsClient(span)),
-			request.ServerAddr(request.SpanHost(span)),
 			request.ServerPort(span.HostPort),
 			request.HTTPRequestBodySize(int(span.RequestBodyLength())),
 			request.HTTPResponseBodySize(span.ResponseBodyLength()),
+		}
+		if client := request.PeerAsClient(span); client != "" {
+			attrs = append(attrs, request.ClientAddr(client))
+		}
+		if host := request.SpanHost(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		attrs = appendHTTPResponseStatus(attrs, span)
 		attrs = append(attrs, httpMethodAttributes(span.Method, optionalAttrs)...)
@@ -690,9 +694,13 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		attrs = []attribute.KeyValue{
 			semconv.RPCMethod(span.Path),
 			semconv.RPCSystemNameGRPC,
-			request.ClientAddr(request.PeerAsClient(span)),
-			request.ServerAddr(request.SpanHost(span)),
 			request.ServerPort(span.HostPort),
+		}
+		if client := request.PeerAsClient(span); client != "" {
+			attrs = append(attrs, request.ClientAddr(client))
+		}
+		if host := request.SpanHost(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		// GRPCStatusCodeString returns "" for statuses outside the gRPC enum
 		// (e.g. an HTTP code that leaked through protocol detection): omit
@@ -704,10 +712,14 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		// SQL++ spans should only have DB attributes, not HTTP attributes
 		if span.SubType == request.HTTPSubtypeSQLPP {
 			attrs = []attribute.KeyValue{
-				request.ServerAddr(request.HostAsServer(span)),
 				request.ServerPort(span.HostPort),
-				request.PeerService(request.PeerServiceFromSpan(span)),
 				request.DBSystemName(span.DBSystem),
+			}
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
+			if host := request.HostAsServer(span); host != "" {
+				attrs = append(attrs, request.ServerAddr(host))
 			}
 			if span.Route != "" {
 				attrs = append(attrs, request.DBCollectionName(span.Route))
@@ -755,20 +767,25 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		transport := httpClientTransportScope(span.SubType)
 
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(host),
-			request.PeerService(request.PeerServiceFromSpan(span)),
 			request.ServerPort(span.HostPort),
+		}
+		if host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
+		if peer := request.PeerServiceFromSpan(span); peer != "" {
+			attrs = append(attrs, request.PeerService(peer))
 		}
 
 		if transport != httpTransportNone {
-			attrs = append(attrs, request.HTTPUrlFull(url))
+			if url != "" {
+				attrs = append(attrs, request.HTTPUrlFull(url))
+			}
 			attrs = append(attrs, httpMethodAttributes(span.Method, optionalAttrs)...)
 		}
 
 		if transport == httpTransportAll {
 			attrs = appendHTTPResponseStatus(attrs, span)
 			attrs = append(attrs,
-				semconv.URLScheme(scheme),
 				request.HTTPRequestBodySize(int(span.RequestBodyLength())),
 				request.HTTPResponseBodySize(span.ResponseBodyLength()),
 			)
@@ -777,11 +794,16 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 					attrs = append(attrs, request.HTTPUrlQuery(scrubbedQS))
 				}
 			}
+			if scheme != "" {
+				attrs = append(attrs, semconv.URLScheme(scheme))
+			}
 		}
 
 		if span.SubType == request.HTTPSubtypeElasticsearch && span.Elasticsearch != nil {
 			attrs = append(attrs, request.DBCollectionName(span.Elasticsearch.DBCollectionName))
-			attrs = append(attrs, request.ElasticsearchNodeName(span.Elasticsearch.NodeName))
+			if span.Elasticsearch.NodeName != "" {
+				attrs = append(attrs, request.ElasticsearchNodeName(span.Elasticsearch.NodeName))
+			}
 			attrs = append(attrs, request.DBNamespace(span.DBNamespace))
 			// semconv: for Elasticsearch, db.response.status_code is the HTTP
 			// response code, reported whenever a response was received
@@ -809,7 +831,9 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			attrs = append(attrs, semconv.AWSRequestID(s3.Meta.RequestID))
 			attrs = append(attrs, request.AWSExtendedRequestID(s3.Meta.ExtendedRequestID))
 			attrs = append(attrs, semconv.AWSS3Bucket(s3.Bucket))
-			attrs = append(attrs, semconv.AWSS3Key(s3.Key))
+			if s3.Key != "" {
+				attrs = append(attrs, semconv.AWSS3Key(s3.Key))
+			}
 		}
 
 		if span.SubType == request.HTTPSubtypeAWSSQS && span.AWS != nil {
@@ -821,7 +845,9 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			if sqs.OperationType != "" {
 				attrs = append(attrs, request.MessagingOperationType(sqs.OperationType))
 			}
-			attrs = append(attrs, request.MessagingDestinationName(sqs.Destination))
+			if sqs.Destination != "" {
+				attrs = append(attrs, request.MessagingDestinationName(sqs.Destination))
+			}
 			attrs = append(attrs, request.MessagingMessageID(sqs.MessageID))
 			attrs = append(attrs, semconv.CloudRegion(sqs.Meta.Region))
 			attrs = append(attrs, semconv.AWSRequestID(sqs.Meta.RequestID))
@@ -863,12 +889,18 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 				// derived rather than emitting an empty value.
 				attrs = append(attrs, semconv.GenAIOperationNameKey.String(ai.OperationName))
 			}
-			attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
-			if ai.OperationName == "conversation" || ai.OperationName == "chatkit.session" || ai.OperationName == "chatkit.thread" {
+			if ai.ID != "" {
+				attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
+			}
+			if ai.ID != "" && (ai.OperationName == "conversation" || ai.OperationName == "chatkit.session" || ai.OperationName == "chatkit.thread") {
 				attrs = append(attrs, semconv.GenAIConversationID(ai.ID))
 			}
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
-			attrs = append(attrs, semconv.GenAIResponseModel(ai.ResponseModel))
+			if ai.Request.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			}
+			if ai.ResponseModel != "" {
+				attrs = append(attrs, semconv.GenAIResponseModel(ai.ResponseModel))
+			}
 			if ai.FrequencyPenalty != 0.0 {
 				attrs = append(attrs, semconv.GenAIRequestFrequencyPenalty(ai.FrequencyPenalty))
 			} else if ai.Request.FrequencyPenalty != 0 {
@@ -966,11 +998,15 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			}
 			if ai.Output.Error != nil && ai.Output.Error.Type != "" {
 				attrs = append(attrs, semconv.GenAIResponseID(ai.Output.RequestID))
-			} else {
+			} else if ai.Output.ID != "" {
 				attrs = append(attrs, semconv.GenAIResponseID(ai.Output.ID))
 			}
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Input.Model))
-			attrs = append(attrs, semconv.GenAIResponseModel(ai.Output.Model))
+			if ai.Input.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Input.Model))
+			}
+			if ai.Output.Model != "" {
+				attrs = append(attrs, semconv.GenAIResponseModel(ai.Output.Model))
+			}
 			attrs = append(attrs, genAIUsageAttributes(span)...)
 			if ai.Input.MaxTokens > 0 {
 				attrs = append(attrs, semconv.GenAIRequestMaxTokens(ai.Input.MaxTokens))
@@ -1024,10 +1060,12 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			if ai.Output.ResponseID != "" {
 				attrs = append(attrs, semconv.GenAIResponseID(ai.Output.ResponseID))
 			}
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Model))
+			if ai.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Model))
+			}
 			if ai.Output.ModelVersion != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Output.ModelVersion))
-			} else {
+			} else if ai.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Model))
 			}
 			if cfg := ai.Input.GenerationConfig; cfg != nil {
@@ -1101,11 +1139,15 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 				// (re-typed to string in schemas/obi/groups/gen_ai/registry.yaml).
 				attrs = append(attrs, semconv.GenAIOperationNameKey.String(ai.OperationName))
 			}
-			attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			if ai.ID != "" {
+				attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
+			}
+			if ai.Request.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			}
 			if ai.ResponseModel != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.ResponseModel))
-			} else {
+			} else if ai.Request.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Request.Model))
 			}
 			if ai.FrequencyPenalty != 0.0 {
@@ -1187,10 +1229,12 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			ai := span.GenAI.Ollama
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String("ollama"))
 			attrs = append(attrs, semconv.GenAIOperationNameKey.String(ai.OperationName))
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			if ai.Request.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			}
 			if ai.ResponseModel != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.ResponseModel))
-			} else {
+			} else if ai.Request.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Request.Model))
 			}
 			attrs = append(attrs, genAIUsageAttributes(span)...)
@@ -1222,11 +1266,15 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			ai := span.GenAI.OpenAICompatible
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String(span.GenAIProviderName()))
 			attrs = append(attrs, semconv.GenAIOperationNameKey.String(ai.OperationName))
-			attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			if ai.ID != "" {
+				attrs = append(attrs, semconv.GenAIResponseID(ai.ID))
+			}
+			if ai.Request.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Request.Model))
+			}
 			if ai.ResponseModel != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.ResponseModel))
-			} else {
+			} else if ai.Request.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Request.Model))
 			}
 			if ai.FrequencyPenalty != 0.0 {
@@ -1308,8 +1356,10 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			ai := span.GenAI.Bedrock
 			attrs = append(attrs, semconv.GenAIProviderNameAWSBedrock)
 			attrs = append(attrs, semconv.GenAIOperationNameKey.String("invoke_model"))
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Model))
-			attrs = append(attrs, semconv.GenAIResponseModel(ai.Model))
+			if ai.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Model))
+				attrs = append(attrs, semconv.GenAIResponseModel(ai.Model))
+			}
 			if ai.Input.MaxTokens > 0 {
 				attrs = append(attrs, semconv.GenAIRequestMaxTokens(ai.Input.MaxTokens))
 			}
@@ -1361,10 +1411,12 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			ai := span.GenAI.Rerank
 			attrs = append(attrs, semconv.GenAIProviderNameKey.String(ai.Provider))
 			attrs = append(attrs, semconv.GenAIOperationNameKey.String("rerank"))
-			attrs = append(attrs, semconv.GenAIRequestModel(ai.Input.Model))
+			if ai.Input.Model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(ai.Input.Model))
+			}
 			if ai.Output.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Output.Model))
-			} else {
+			} else if ai.Input.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Input.Model))
 			}
 			if id := ai.Output.GetID(); id != "" {
@@ -1396,10 +1448,12 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			if model == "" {
 				model = ai.Model
 			}
-			attrs = append(attrs, semconv.GenAIRequestModel(model))
+			if model != "" {
+				attrs = append(attrs, semconv.GenAIRequestModel(model))
+			}
 			if ai.Output.Model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(ai.Output.Model))
-			} else {
+			} else if model != "" {
 				attrs = append(attrs, semconv.GenAIResponseModel(model))
 			}
 			attrs = append(attrs, genAIUsageAttributes(span)...)
@@ -1449,9 +1503,13 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		attrs = []attribute.KeyValue{
 			semconv.RPCMethod(span.Path),
 			semconv.RPCSystemNameGRPC,
-			request.ServerAddr(request.HostAsServer(span)),
-			request.PeerService(request.PeerServiceFromSpan(span)),
 			request.ServerPort(span.HostPort),
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
+		if peer := request.PeerServiceFromSpan(span); peer != "" {
+			attrs = append(attrs, request.PeerService(peer))
 		}
 		// See the EventTypeGRPC case: omit the status code attribute when the
 		// span status is not a valid gRPC code.
@@ -1460,12 +1518,16 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeSQLClient, request.EventTypeSQLServer:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			span.DBSystemName(), // We can distinguish in the future for MySQL, Postgres etc
 		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
 		if span.Type == request.EventTypeSQLClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 		if _, ok := optionalAttrs[attr.DBQueryText]; ok {
 			attrs = append(attrs, request.DBQueryText(span.Statement))
@@ -1490,12 +1552,16 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeRedisServer, request.EventTypeRedisClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			semconv.DBSystemNameRedis,
 		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
 		if span.Type == request.EventTypeRedisClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 		operation := span.Method
 		if operation != "" {
@@ -1516,16 +1582,22 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeKafkaServer, request.EventTypeKafkaClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			semconv.MessagingSystemKafka,
-			semconv.MessagingDestinationName(span.Path),
-			semconv.MessagingClientID(span.Statement),
+		}
+		attrs = append(attrs, semconv.MessagingDestinationName(span.Path))
+		if span.Statement != "" {
+			attrs = append(attrs, semconv.MessagingClientID(span.Statement))
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		attrs = append(attrs, messagingOperationAttrs(span.Method)...)
 
 		if span.Type == request.EventTypeKafkaClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 
 		if span.MessagingInfo != nil {
@@ -1536,46 +1608,64 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeMQTTServer, request.EventTypeMQTTClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			messagingSystemMQTT,
-			semconv.MessagingDestinationName(span.Path),
-			semconv.MessagingClientID(span.Statement),
+		}
+		attrs = append(attrs, semconv.MessagingDestinationName(span.Path))
+		if span.Statement != "" {
+			attrs = append(attrs, semconv.MessagingClientID(span.Statement))
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		attrs = append(attrs, messagingOperationAttrs(span.Method)...)
 
 		if span.Type == request.EventTypeMQTTClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 	case request.EventTypeNATSServer, request.EventTypeNATSClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			messagingSystemNATS,
-			semconv.MessagingDestinationName(span.Path),
-			semconv.MessagingClientID(span.Statement),
 			semconv.MessagingMessageEnvelopeSize(int(span.ContentLength)),
+		}
+		attrs = append(attrs, semconv.MessagingDestinationName(span.Path))
+		if span.Statement != "" {
+			attrs = append(attrs, semconv.MessagingClientID(span.Statement))
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		attrs = append(attrs, messagingOperationAttrs(span.Method)...)
 
 		if span.Type == request.EventTypeNATSClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 	case request.EventTypeAMQPClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			messagingSystemAMQP,
 		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
 		attrs = append(attrs, messagingOperationAttrs(span.Method)...)
 
-		attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+		if peer := request.PeerServiceFromSpan(span); peer != "" {
+			attrs = append(attrs, request.PeerService(peer))
+		}
 	case request.EventTypeSunRPCServer, request.EventTypeSunRPCClient:
 		// https://opentelemetry.io/docs/specs/semconv/registry/attributes/onc-rpc/
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			request.RPCSystem("onc_rpc"),
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		if span.Path != "" {
 			attrs = append(attrs, semconv.OncRPCProgramName(span.Path))
@@ -1595,14 +1685,20 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			attrs = append(attrs, attribute.String(string(attr.OncRPCAuthFlavor), span.Statement))
 		}
 		if span.Type == request.EventTypeSunRPCClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 	case request.EventTypeMongoClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			request.PeerService(request.PeerServiceFromSpan(span)),
 			semconv.DBSystemNameMongoDB,
+		}
+		if peer := request.PeerServiceFromSpan(span); peer != "" {
+			attrs = append(attrs, request.PeerService(peer))
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		operation := span.Method
 		if operation != "" {
@@ -1620,10 +1716,14 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeCouchbaseClient:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			request.PeerService(request.PeerServiceFromSpan(span)),
 			semconv.DBSystemNameCouchbase,
+		}
+		if peer := request.PeerServiceFromSpan(span); peer != "" {
+			attrs = append(attrs, request.PeerService(peer))
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		operation := span.Method
 		if operation != "" {
@@ -1646,10 +1746,16 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeAerospikeClient, request.EventTypeAerospikeServer:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
-			request.PeerService(request.PeerServiceFromSpan(span)),
 			request.DBSystemName("aerospike"),
+		}
+		if span.Type == request.EventTypeAerospikeClient {
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
+		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 		if span.Method != "" {
 			attrs = append(attrs, request.DBOperationName(span.Method))
@@ -1674,12 +1780,16 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		}
 	case request.EventTypeMemcachedClient, request.EventTypeMemcachedServer:
 		attrs = []attribute.KeyValue{
-			request.ServerAddr(request.HostAsServer(span)),
 			request.ServerPort(span.HostPort),
 			semconv.DBSystemNameMemcached,
 		}
+		if host := request.HostAsServer(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
+		}
 		if span.Type == request.EventTypeMemcachedClient {
-			attrs = append(attrs, request.PeerService(request.PeerServiceFromSpan(span)))
+			if peer := request.PeerServiceFromSpan(span); peer != "" {
+				attrs = append(attrs, request.PeerService(peer))
+			}
 		}
 		if span.Method != "" {
 			attrs = append(attrs, request.DBOperationName(span.Method))
@@ -1697,15 +1807,23 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 		attrs = manualSpanAttributes(span)
 	case request.EventTypeFailedConnect:
 		attrs = []attribute.KeyValue{
-			request.ClientAddr(request.PeerAsClient(span)),
-			request.ServerAddr(request.SpanHost(span)),
 			request.ServerPort(span.HostPort),
+		}
+		if client := request.PeerAsClient(span); client != "" {
+			attrs = append(attrs, request.ClientAddr(client))
+		}
+		if host := request.SpanHost(span); host != "" {
+			attrs = append(attrs, request.ServerAddr(host))
 		}
 	case request.EventTypeDNS:
 		attrs = []attribute.KeyValue{
-			request.ClientAddr(request.SpanHost(span)),
-			request.ServerAddr(request.PeerAsClient(span)),
 			request.ServerPort(span.HostPort),
+		}
+		if client := request.SpanHost(span); client != "" {
+			attrs = append(attrs, request.ClientAddr(client))
+		}
+		if server := request.PeerAsClient(span); server != "" {
+			attrs = append(attrs, request.ServerAddr(server))
 		}
 		if answers := span.DNSAnswerList(); len(answers) > 0 {
 			attrs = append(attrs, request.DNSAnswers(answers))

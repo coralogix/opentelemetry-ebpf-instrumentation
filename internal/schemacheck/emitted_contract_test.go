@@ -80,6 +80,7 @@ func emittedSpanAttributes(span *request.Span, optional ...attr.Name) []string {
 		seen[key] = struct{}{}
 		keys = append(keys, key)
 	}
+
 	return keys
 }
 
@@ -110,6 +111,7 @@ func TestEmittedSpanAttributesMatchDeclaredGroup(t *testing.T) {
 				// network.peer.* for a hostname, since server.address carries it.
 				Host:         "10.0.0.1",
 				HostPort:     9200,
+				HostName:     "es-1",
 				Peer:         "10.0.0.1",
 				PeerPort:     54321,
 				Status:       500,
@@ -141,6 +143,7 @@ func TestEmittedSpanAttributesMatchDeclaredGroup(t *testing.T) {
 				SubType:      request.HTTPSubtypeAWSS3,
 				Host:         "10.0.0.1",
 				HostPort:     443,
+				HostName:     "s3-1",
 				Status:       500,
 				ProtoVersion: request.ProtoVersionHTTP11,
 				AWS: &request.AWS{S3: request.AWSS3{
@@ -170,6 +173,7 @@ func TestEmittedSpanAttributesMatchDeclaredGroup(t *testing.T) {
 				SubType:      request.HTTPSubtypeAWSSQS,
 				Host:         "10.0.0.1",
 				HostPort:     443,
+				HostName:     "sqs-1",
 				Status:       500,
 				ProtoVersion: request.ProtoVersionHTTP11,
 				AWS: &request.AWS{SQS: request.AWSSQS{
