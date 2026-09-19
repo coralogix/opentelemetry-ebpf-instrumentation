@@ -1,0 +1,94 @@
+name: Update Go module proxy index
+
+# Maintains the Go module proxy version index used by the "mod"-type vanity
+# redirector. On each published release that carries a Go module zip asset, the
+# release tag is appended to list.txt, which is stored on the utility release
+# tagged "module-index". The redirector serves that list as the module's
+# @v/list endpoint.
+
+on:
+  release:
+    types: [published]
+
+# https://docs.zizmor.sh/audits/#excessive-permissions
+permissions: {}
+
+# Serialize index updates: concurrent runs would race on the single shared
+# list.txt asset on the module-index release.
+concurrency:
+  group: module-index
+  cancel-in-progress: false
+
+jobs:
+  update-index:
+    name: Append release tag to module index
+    runs-on: ubuntu-latest
+    if: github.repository == 'open-telemetry/opentelemetry-ebpf-instrumentation'
+    permissions:
+      contents: write # create/update the module-index utility release and its asset
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Append tag to module index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INDEX_RELEASE: module-index
+        run: |
+          set -euo pipefail
+
+          tag="${RELEASE_TAG}"
+
+          # Only index released module versions: semver tags starting with v.
+          if [[ ! "${tag}" =~ ^v[0-9] ]]; then
+            echo "Tag '${tag}' is not a v[0-9] release tag; nothing to index."
+            exit 0
+          fi
+
+          # Only index releases that actually published a Go module zip asset.
+          module_asset="obi-${tag}.module.zip"
+          if ! gh release view "${tag}" --json assets \
+                 --jq '.assets[].name' | grep -qxF "${module_asset}"; then
+            echo "Release '${tag}' has no '${module_asset}' asset; nothing to index."
+            exit 0
+          fi
+
+          work_dir="$(mktemp -d)"
+          list_file="${work_dir}/list.txt"
+
+          # Fetch the existing index, or start empty (and create the utility
+          # release) if it does not exist yet.
+          if gh release view "${INDEX_RELEASE}" >/dev/null 2>&1; then
+            if gh release download "${INDEX_RELEASE}" \
+                 --pattern list.txt --dir "${work_dir}" 2>/dev/null; then
+              echo "Downloaded existing module index."
+            else
+              echo "module-index release exists without a list.txt; starting empty."
+              : > "${list_file}"
+            fi
+          else
+            echo "Creating module-index utility release."
+            gh release create "${INDEX_RELEASE}" \
+              --notes "Utility release holding the Go module proxy version index. Do not delete." \
+              --latest=false
+            : > "${list_file}"
+          fi
+
+          [ -f "${list_file}" ] || : > "${list_file}"
+
+          # Append the tag if absent, then sort (semver, unique).
+          if grep -qxF "${tag}" "${list_file}"; then
+            echo "Tag '${tag}' already present in index; nothing to do."
+          else
+            echo "${tag}" >> "${list_file}"
+          fi
+          sort -V -u -o "${list_file}" "${list_file}"
+
+          echo "Module index now contains:"
+          cat "${list_file}"
+
+          gh release upload "${INDEX_RELEASE}" "${list_file}" --clobber

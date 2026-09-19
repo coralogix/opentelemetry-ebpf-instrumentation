@@ -178,6 +178,13 @@ The release also includes a custom source archive, `obi-v<version>-source-genera
 - Source files from the exact tagged revision
 - Generated artifacts produced by the release generation pipeline (including bpf2go-generated `.go` and `.o` outputs and the Java agent JAR `obi-java-agent.jar`)
 
+Each release additionally publishes Go module proxy assets
+(`obi-v<version>.module.zip`, `obi-v<version>.module.mod`,
+`obi-v<version>.module.info`) so OBI can be consumed as a Go module through a
+vanity redirector. See [docs/module-proxy.md](docs/module-proxy.md) for the
+asset layout, the version index (`module-index`) release, and the
+`scripts/verify-module-zip.sh` release gate.
+
 ### Building Release Artifacts Locally
 
 To test the release artifact generation locally before tagging:
@@ -186,20 +193,25 @@ To test the release artifact generation locally before tagging:
 make release GOARCH=amd64
 make release GOARCH=arm64
 make release-source
+make release-module RELEASE_VERSION=v<version>
 ```
 
 This will:
 
 1. Build artifacts for both amd64 and arm64 architectures
 2. Build a source+generated archive from the current release version ref
-3. Verify archive contents
-4. Generate a single `SHA256SUMS` file for all `obi-v<version>-*.tar.gz` release archives and SBOM assets
+3. Build the Go module proxy assets from the generated tree (run after `release-source`)
+4. Verify archive contents
+5. Generate a single `SHA256SUMS` file for all `obi-v<version>-*.tar.gz` and `obi-v<version>.module.*` release assets and SBOM assets
 
 The `dist/` directory will contain:
 
 - `obi-v<version>-linux-amd64.tar.gz`
 - `obi-v<version>-linux-arm64.tar.gz`
 - `obi-v<version>-source-generated.tar.gz`
+- `obi-v<version>.module.zip`
+- `obi-v<version>.module.mod`
+- `obi-v<version>.module.info`
 - `obi-v<version>-linux-amd64.cyclonedx.json`
 - `obi-v<version>-linux-arm64.cyclonedx.json`
 - `obi-v<version>-source-generated.cyclonedx.json`
