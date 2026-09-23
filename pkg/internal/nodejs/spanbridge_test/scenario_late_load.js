@@ -25,7 +25,7 @@ fs.existsSync = (p, ...rest) => {
 
 // Inject the bridge FIRST — @opentelemetry/api is not loaded yet.
 (function injectBridge() {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'spanbridge.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'spanbridge.js'), 'utf8').replace('= false; /*OBI_SPANS_ENABLED*/', '= true; /*OBI_SPANS_ENABLED*/');
   // eslint-disable-next-line no-eval
   eval(src);
 })();

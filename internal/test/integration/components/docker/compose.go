@@ -202,6 +202,14 @@ func (c *Compose) Stop() error {
 	return c.command("stop", "--timeout", stopTimeout)
 }
 
+// StopService stops one service and leaves the rest of the suite running, so a
+// test can observe what the others look like after it is gone. The timeout is
+// the grace period before SIGKILL, which is what lets the stopped service run
+// its own shutdown path.
+func (c *Compose) StopService(service string) error {
+	return c.command("stop", "--timeout", stopTimeout, service)
+}
+
 func (c *Compose) Remove() error {
 	cmdArgs := []string{"compose", "--ansi", "never", "-f", c.Path, "rm", "-f", "-s", "-v"}
 	cmd := exec.Command("docker", cmdArgs...)

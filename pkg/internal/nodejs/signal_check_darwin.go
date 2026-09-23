@@ -4,6 +4,7 @@
 package nodejs // import "go.opentelemetry.io/obi/pkg/internal/nodejs"
 
 import (
+	"context"
 	"debug/elf"
 	"errors"
 
@@ -34,6 +35,6 @@ func hasUserSIGUSR1Handler(_ int, _ *elf.File, _ nodeSymbols) signalCheckResult 
 }
 
 // sourceHasSIGUSR1Reference is a no-op on non-Linux platforms.
-func sourceHasSIGUSR1Reference(_ int) bool {
+func sourceHasSIGUSR1Reference(_ context.Context, _ int) bool {
 	return false
 }

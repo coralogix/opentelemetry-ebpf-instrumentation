@@ -144,7 +144,46 @@ The injected agent reports in-process readings over an eBPF side channel:
   same scope as the standard OTel Node.js SDK). See the design notes for
   options to extend coverage.
 - Injection is single-shot per discovered process; a transient failure at
-  process startup is not retried.
+  process startup is not retried. A process that is rediscovered while it still
+  carries the agent — after OBI restarts, say — is injected again: the
+  extractor rebuilds its state, and the span bridge leaves the resident copy
+  alone, because tracers the application already holds are bound to it.
+- On a clean shutdown OBI removes what it injected. Every process it injected is
+  signaled again to reopen its inspector, and the agent scripts are evaluated
+  once more with their gates off, which is what uninstalls them. The same gates
+  as injection decide whether that signal is sent, so a process that has since
+  taken `SIGUSR1` over is left alone, and the process is reopened through the
+  start time recorded at injection so a recycled PID is never signaled. Four
+  processes are handled at a time.
+
+  The pass has one budgeted quantity: it returns within half of
+  `shutdown_timeout`, measured from the moment it is entered. Every deadline
+  inside is a slice carved out of that allowance rather than added to it, so no
+  combination of steps can make the pass outlive it.
+
+  That bounds this pass, not the whole of shutdown. The injection queue drains
+  first, and an injection already past its gates when cancellation arrives runs
+  on its own fixed timeouts rather than on the shutdown clock — so a target
+  whose inspector has stopped answering can hold shutdown open well past
+  `shutdown_timeout` before this pass is even entered. That is existing
+  behaviour of the injection path, unchanged here; the halving keeps this pass
+  from adding to it more than it has to.
+
+  One target's work is a fixed share of the allowance, and each step is bounded
+  by its own slice of that share: the gates, the wait for the reopened
+  inspector, the evaluate, and the close. A target is taken up only
+  while that whole share still fits, so the last one admitted finishes by the
+  deadline and the pass never returns with a handshake in flight. This matters
+  because only a completed handshake ends with the `process._debugEnd()` that
+  closes the inspector again; a half-finished one would leave the application
+  listening on `127.0.0.1:9229` for the rest of its life. For the same reason a
+  target whose remaining share can no longer hold the reopen-and-close is not
+  signaled at all. A `shutdown_timeout` whose allowance cannot hold one target's
+  share disables the pass, which is reported once and removes nothing.
+
+  Past the budget, and on any exit that runs no shutdown, the scripts stay
+  resident until the application restarts: a resident extractor keeps its
+  per-callback signal, and a resident bridge keeps its module-loader hook.
 - Injection runs on one worker goroutine off the discovery loop, because it
   waits on the target: for the runtime's own signal handler, and for the
   inspector to answer. The queue holds 100 pending processes; beyond that a

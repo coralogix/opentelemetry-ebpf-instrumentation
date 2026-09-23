@@ -34,7 +34,7 @@ fs.existsSync = (p, ...rest) => {
 // Load and run the bridge the same way OBI's injector does: evaluate the file
 // (it is a self-executing IIFE), rather than require()-caching it.
 function injectBridge() {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'spanbridge.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'spanbridge.js'), 'utf8').replace('= false; /*OBI_SPANS_ENABLED*/', '= true; /*OBI_SPANS_ENABLED*/');
   // eslint-disable-next-line no-eval
   eval(src);
 }

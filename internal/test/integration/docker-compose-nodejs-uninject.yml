@@ -1,0 +1,39 @@
+services:
+  testserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/nodejsruntime/Dockerfile
+    image: hatest-testserver-nodejs-runtime-metrics
+    ports:
+      - "${TEST_SERVICE_PORTS}"
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security:/sys/kernel/security
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-nodejs-uninject:/var/run/obi
+      - /sys/kernel/tracing:/sys/kernel/tracing:rw
+    image: hatest-obi
+    privileged: true
+    network_mode: "service:testserver"
+    pid: "service:testserver"
+    # The pass is bounded by half of this, measured from SIGTERM.
+    stop_grace_period: 30s
+    environment:
+      OTEL_EBPF_CONFIG_PATH: /configs/obi-config-nodejs-uninject.yml
+      GOCOVERDIR: "/coverage"
+      OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms
+      OTEL_EBPF_SERVICE_NAMESPACE: "integration-test"
+      OTEL_EBPF_LOG_LEVEL: "DEBUG"
+      OTEL_EBPF_HOSTNAME: "obi"
+      OTEL_EBPF_PROCESSES_INTERVAL: "100ms"
+      OTEL_EBPF_EXECUTABLE_PATH: "node"
+      OTEL_SERVICE_NAME: "nodejs-uninject"
+      OTEL_EBPF_SHUTDOWN_TIMEOUT: "10s"
+    depends_on:
+      testserver:
+        condition: service_started

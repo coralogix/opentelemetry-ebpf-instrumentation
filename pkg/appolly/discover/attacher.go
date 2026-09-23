@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	stdmaps "maps"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -133,6 +134,24 @@ func (ta *traceAttacher) attacherLoop(_ context.Context) (swarm.RunFunc, error) 
 
 	in := ta.InputInstrumentables.Subscribe(msg.SubscriberName("traceAttacher"))
 	return func(ctx context.Context) {
+		// The uninject pass gets a deadline measured from here, not from when
+		// it starts. Everything ahead of it in this teardown shares the same
+		// shutdown timeout, and the injection queues below can spend all of it
+		// waiting on a target that stopped answering; a pass that measured its
+		// own share from its own start would then reopen debugger ports with
+		// no time left to close them again.
+		var shutdownAt atomic.Int64
+
+		go func() {
+			<-ctx.Done()
+			shutdownAt.Store(time.Now().UnixNano())
+		}()
+
+		// Registered first so it runs last: downstream sees the channel close
+		// before the uninject pass spends what remains of the shutdown timeout.
+		defer func() {
+			ta.nodeInjector.UninjectAll(time.Unix(0, shutdownAt.Load()))
+		}()
 		defer ta.OutputTracerEvents.Close()
 
 		var dotnetSessions *dotnet.SessionManager
@@ -225,6 +244,7 @@ func (ta *traceAttacher) attacherLoop(_ context.Context) (swarm.RunFunc, error) 
 					if dotnetSessions != nil {
 						dotnetSessions.Remove(instr.Obj.FileInfo)
 					}
+					ta.nodeInjector.Forget(instr.Obj.FileInfo.Pid())
 					ta.notifyProcessDeletion(ctx, &instr.Obj)
 				}
 			}

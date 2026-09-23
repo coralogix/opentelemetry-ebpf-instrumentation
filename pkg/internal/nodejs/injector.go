@@ -41,6 +41,34 @@ type evalParams struct {
 
 const inspectorRequestTimeout = 5 * time.Second
 
+// debugEndBudget is what the evaluate that closes the inspector again gets. It
+// is held back from the handshake deadline rather than shared with it: a
+// conversation that ran out of time still has to close the port it opened.
+const debugEndBudget = 500 * time.Millisecond
+
+// stepTimeout bounds one step of an inspector conversation. The zero deadline
+// means the caller works against no deadline of its own, and every step gets
+// the full inspectorRequestTimeout.
+func stepTimeout(deadline time.Time) time.Duration {
+	if deadline.IsZero() {
+		return inspectorRequestTimeout
+	}
+
+	return min(time.Until(deadline), inspectorRequestTimeout)
+}
+
+// debugEndTimeout never derives from what is left of the handshake deadline.
+// Closing the inspector is what keeps a signaled application from being left
+// with an open debugger port, so it keeps its budget even when the handshake
+// has already overrun.
+func debugEndTimeout(deadline time.Time) time.Duration {
+	if deadline.IsZero() {
+		return inspectorRequestTimeout
+	}
+
+	return debugEndBudget
+}
+
 // IMPORTANT: the code in this file needs to run in the network namespace of the
 // target process in order to be able to connect to its inspector port - the
 // network namespace switching is done by the withNetNS function, which locks
@@ -101,17 +129,15 @@ func connectWait(ip string, port int, timeout time.Duration, interval time.Durat
 			return conn, nil
 		}
 
-		if time.Now().After(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return nil, fmt.Errorf("timed out waiting for %s:%d", ip, port)
 		}
 
-		time.Sleep(interval)
-		continue
+		// Clamped: a full interval here would overrun the timeout, and callers
+		// size the rest of their budget on this returning within it.
+		time.Sleep(min(interval, remaining))
 	}
-}
-
-func httpGet(conn net.Conn, path string) ([]byte, error) {
-	return httpGetWithTimeout(conn, path, inspectorRequestTimeout)
 }
 
 func httpGetWithTimeout(conn net.Conn, path string, timeout time.Duration) ([]byte, error) {
@@ -146,8 +172,8 @@ func httpGetWithTimeout(conn net.Conn, path string, timeout time.Duration) ([]by
 	return body, nil
 }
 
-func (i *NodeInjector) requestDebuggerURL(conn net.Conn) (string, error) {
-	res, err := httpGet(conn, "/json/list")
+func (i *NodeInjector) requestDebuggerURL(conn net.Conn, deadline time.Time) (string, error) {
+	res, err := httpGetWithTimeout(conn, "/json/list", stepTimeout(deadline))
 	if err != nil {
 		return "", err
 	}
@@ -167,13 +193,9 @@ func (i *NodeInjector) requestDebuggerURL(conn net.Conn) (string, error) {
 	return targets[0].WebSocketDebuggerURL, nil
 }
 
-func upgradeConn(conn net.Conn, wsURL string, writeBufferSize int) (*websocket.Conn, *http.Response, error) {
-	return upgradeConnWithTimeout(conn, wsURL, writeBufferSize, inspectorRequestTimeout)
-}
-
-func upgradeConnWithTimeout(conn net.Conn, wsURL string, writeBufferSize int, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func upgradeConnWithTimeout(conn net.Conn, wsURL string, writeBufferSize int, timeout time.Duration) (*websocket.Conn, error) {
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, nil, fmt.Errorf("connection deadline error: %w", err)
+		return nil, fmt.Errorf("connection deadline error: %w", err)
 	}
 	defer func() {
 		_ = conn.SetDeadline(time.Time{})
@@ -192,8 +214,9 @@ func upgradeConnWithTimeout(conn net.Conn, wsURL string, writeBufferSize int, ti
 		},
 	}
 
-	wsConn, resp, err := dialer.Dial(wsURL, nil)
-	return wsConn, resp, err
+	wsConn, _, err := dialer.Dial(wsURL, nil)
+
+	return wsConn, err
 }
 
 func evaluateRequest(exp string, id int) ([]byte, error) {
@@ -213,23 +236,25 @@ func evaluateRequest(exp string, id int) ([]byte, error) {
 	return data, nil
 }
 
-func sendEvaluate(wsConn *websocket.Conn, exp string, id int) error {
-	return sendEvaluateWithTimeout(wsConn, exp, id, inspectorRequestTimeout)
-}
-
 func sendEvaluateWithTimeout(wsConn *websocket.Conn, exp string, id int, timeout time.Duration) error {
 	data, err := evaluateRequest(exp, id)
 	if err != nil {
 		return err
 	}
-	return sendMessageWithTimeout(wsConn, data, timeout)
+
+	_, err = sendMessageWithTimeout(wsConn, data, timeout)
+
+	return err
 }
 
-func sendMessageWithTimeout(wsConn *websocket.Conn, data []byte, timeout time.Duration) error {
+// sendMessageWithTimeout reports whether the message was written, separately
+// from whether the exchange succeeded: a reply that never arrives does not undo
+// a script the target has already evaluated.
+func sendMessageWithTimeout(wsConn *websocket.Conn, data []byte, timeout time.Duration) (bool, error) {
 	deadline := time.Now().Add(timeout)
 
 	if err := wsConn.SetWriteDeadline(deadline); err != nil {
-		return fmt.Errorf("websocket write deadline error: %w", err)
+		return false, fmt.Errorf("websocket write deadline error: %w", err)
 	}
 	defer func() {
 		_ = wsConn.SetWriteDeadline(time.Time{})
@@ -237,11 +262,11 @@ func sendMessageWithTimeout(wsConn *websocket.Conn, data []byte, timeout time.Du
 	}()
 
 	if err := wsConn.SetReadDeadline(deadline); err != nil {
-		return fmt.Errorf("websocket read deadline error: %w", err)
+		return false, fmt.Errorf("websocket read deadline error: %w", err)
 	}
 
 	if err := wsConn.WriteMessage(websocket.TextMessage, data); err != nil {
-		return fmt.Errorf("websocket write error: %w", err)
+		return false, fmt.Errorf("websocket write error: %w", err)
 	}
 
 	// NOTE: the next message is assumed to be the response to `data`: valid as
@@ -249,80 +274,90 @@ func sendMessageWithTimeout(wsConn *websocket.Conn, data []byte, timeout time.Du
 	// Runtime.enable), since events would interleave before the response
 	_, msg, err := wsConn.ReadMessage()
 	if err != nil {
-		return fmt.Errorf("websocket read error: %w", err)
+		return true, fmt.Errorf("websocket read error: %w", err)
 	}
 
 	var resp cdpResponse
 
 	if err := json.Unmarshal(msg, &resp); err != nil {
-		return fmt.Errorf("response unmarshal error: %w", err)
+		return true, fmt.Errorf("response unmarshal error: %w", err)
 	}
 
 	if resp.Error != nil {
-		return fmt.Errorf("protocol error: %+v", resp.Error)
+		return true, fmt.Errorf("protocol error: %+v", resp.Error)
 	}
 
 	result := resp.Result["result"]
 
 	if resultMap, ok := result.(map[string]any); ok {
 		if subtype, ok := resultMap["subtype"]; ok && subtype == "error" {
-			return fmt.Errorf("exception: %v", resultMap["description"])
+			return true, fmt.Errorf("exception: %v", resultMap["description"])
 		}
 	}
 
 	if ed, ok := resp.Result["exceptionDetails"]; ok {
-		return fmt.Errorf("uncaught exception: %v", ed)
+		return true, fmt.Errorf("uncaught exception: %v", ed)
 	}
 
-	return nil
+	return true, nil
 }
 
-// injectFileWS evaluates the agent over an established inspector session.
+// injectFileWS evaluates the agent over an established inspector session and
+// reports whether the script reached the target. That is true from the moment
+// the message is written: a failure reading the reply leaves a script that may
+// already have been evaluated, and one that is resident but unrecorded is never
+// removed.
 //
 // closeInspector says whether this injection is what opened the debugger port.
 // When it is, the port is closed again on the way out; when the application was
 // already listening — it was started with --inspect — the port is left as the
 // operator configured it. Closing it would drop any attached debugger and leave
 // no way to reattach short of restarting the process.
-func (i *NodeInjector) injectFileWS(wsConn *websocket.Conn, payload []byte, closeInspector bool) error {
+func (i *NodeInjector) injectFileWS(wsConn *websocket.Conn, payload []byte, deadline time.Time, closeInspector bool) (bool, error) {
+	defer wsConn.Close()
+
 	defer func() {
 		if !closeInspector {
 			return
 		}
 
-		_ = sendEvaluate(wsConn, "process._debugEnd();", 2)
+		_ = sendEvaluateWithTimeout(wsConn, "process._debugEnd();", 2, debugEndTimeout(deadline))
 	}()
 
-	if err := sendMessageWithTimeout(wsConn, payload, inspectorRequestTimeout); err != nil {
-		return err
+	sent, err := sendMessageWithTimeout(wsConn, payload, stepTimeout(deadline))
+	if err != nil {
+		return sent, err
 	}
 
 	i.log.Info("Script successfully injected")
 
-	return nil
+	return true, nil
 }
 
-func (i *NodeInjector) injectViaConn(conn net.Conn, closeInspector bool) error {
-	wsURL, err := i.requestDebuggerURL(conn)
+// injectViaConn runs the whole inspector conversation. The zero deadline leaves
+// every step its own timeout; a caller working against a deadline passes it so
+// the conversation cannot outlive the budget that allowed it to start.
+func (i *NodeInjector) injectViaConn(conn net.Conn, code string, deadline time.Time, closeInspector bool) (bool, error) {
+	wsURL, err := i.requestDebuggerURL(conn, deadline)
 	if err != nil {
 		conn.Close()
-		return err
+		return false, err
 	}
 
 	i.log.Debug("found debugger url", "url", wsURL)
 
-	payload, err := evaluateRequest(i.agentCode(), 1)
+	payload, err := evaluateRequest(code, 1)
 	if err != nil {
 		conn.Close()
-		return err
+		return false, err
 	}
 
 	// buffer sized to the payload: the inspector rejects fragmented messages
-	wsConn, _, err := upgradeConn(conn, wsURL, len(payload))
+	wsConn, err := upgradeConnWithTimeout(conn, wsURL, len(payload), stepTimeout(deadline))
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("failed to connect to inspector WebSocket: %w", err)
+		return false, fmt.Errorf("failed to connect to inspector WebSocket: %w", err)
 	}
 
-	return i.injectFileWS(wsConn, payload, closeInspector)
+	return i.injectFileWS(wsConn, payload, deadline, closeInspector)
 }
