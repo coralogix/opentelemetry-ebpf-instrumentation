@@ -153,6 +153,8 @@ Not allowed before a major release:
 
 #### Emitted telemetry
 
+[TELEMETRY.md](./TELEMETRY.md) is the source of truth for which emitted telemetry is stable. Telemetry it does not cover is outside these rules.
+
 Allowed in minor releases:
 
 - new spans
