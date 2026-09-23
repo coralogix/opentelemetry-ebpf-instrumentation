@@ -1,0 +1,12 @@
+# Span names are built from the route, not the raw path, and the default
+# unmatched mode is a cardinality heuristic that can replace segments with a
+# wildcard. The assertions name exact endpoints, so pin the route to the path.
+routes:
+  unmatched: path
+otel_traces_export:
+  endpoint: http://jaeger:4318
+  otel_sdk_log_level: debug
+attributes:
+  select:
+    "*":
+      include: ["*"]
