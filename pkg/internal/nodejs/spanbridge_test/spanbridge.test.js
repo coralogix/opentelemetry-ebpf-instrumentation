@@ -70,6 +70,55 @@ test('throwing transport: span.end() never throws into the app', () => {
   assert.deepStrictEqual(r.bridge, ['s1'], 'the span is still emitted before the transport fails');
 });
 
+test('cached tracer: startActiveSpan forwards with the caller\'s own arity', () => {
+  // The SDK branches on arguments.length, so a fixed four-argument forward
+  // reaches it with an undefined callback and throws into the application.
+  const r = runScript('scenario_active_span_arity.js');
+  assert.strictEqual(r.threw, null, 'the two-argument form must not throw into the app');
+  assert.ok(r.ran, 'the two-argument callback must run');
+  assert.ok(r.recording, 'the callback must receive a real span from the app SDK');
+  assert.strictEqual(r.threwThree, null, 'the three-argument form must not throw either');
+  assert.ok(r.ranThree, 'the three-argument callback must run');
+  assert.ok(r.app.includes('two-arg'), 'the app SDK records the forwarded span');
+});
+
+test('a stranded wrapper stays inert across the next injection', () => {
+  // OBI's wrapper cannot be removed once another agent has chained over it, so
+  // it must never come back to life. Reading the current injection's state
+  // instead of its own revives it and double-emits the sentinel.
+  const r = runScript('scenario_stranded_wrapper_inert.js');
+  assert.strictEqual(r.emitted, 1, 'a correlated write must emit the sentinel exactly once');
+  assert.ok(r.baseWrites > 0, 'sanity: the write chain reached the underlying function');
+});
+
+test('upgrading over a previously released agent does not recurse', () => {
+  // The released agent's wrappers read the shared store when they run, so the
+  // new agent must not reassign what that store holds. Getting this wrong
+  // overflows the stack on the application's next socket write.
+  const r = runScript('scenario_upgrade_over_released_agent.js');
+  assert.ok(r.releasedWrapped, 'the released agent must wrap the prototype to begin with');
+  assert.ok(r.rewrapped, 'the upgraded agent must install its own wrapper');
+  assert.strictEqual(r.threw, null, 'the upgraded chain must not recurse');
+  assert.ok(r.reachedBaseOnce, 'and must reach the underlying write exactly once');
+});
+
+test('another agent\'s net wrapper survives both uninstall and re-injection', () => {
+  // The other agent chains, as real ones do. Resetting the prototypes to what
+  // OBI captured would uninstall it; re-wrapping without rebinding what each
+  // wrapper calls would put an older OBI wrapper back into a chain it is
+  // already part of and recurse until the stack blows on every write.
+  const r = runScript('scenario_foreign_net_wrapper.js');
+  assert.ok(r.obiWrapped, 'the agent must wrap net.Socket.prototype.write to begin with');
+  assert.ok(r.foreignSurvived, "another agent's wrapper must survive the uninstall");
+  assert.ok(!r.resetToBase, 'the uninstall must not reset the prototype under a foreign wrapper');
+  assert.ok(r.rewrapped, 'the re-injection must install its own wrapper');
+  assert.strictEqual(r.threw, null, 'the re-injected chain must not recurse');
+  assert.ok(r.foreignStillInPath, "the re-injected wrapper must call through the other agent's");
+  assert.ok(r.reachedBase, 'and the chain must reach the underlying write exactly once');
+  assert.ok(r.ownWrapperDiffers, 'sanity: the agent wrapper is not the underlying function');
+  assert.ok(r.restoredWhenOurs, 'with nothing layered on top, the uninstall does restore it');
+});
+
 test('hostile attribute/name: span.end() never throws into the app', () => {
   // A value whose toString() throws must not escape span.end() — the baseline
   // (no SDK) is a silent NoopSpan, so a throw here would be a regression that
@@ -225,4 +274,54 @@ test('SDK registers after injection: bridge yields and the app SDK takes over', 
     !r.bridge.includes('after-new') && !r.bridge.includes('after-preacquired'),
     'bridge stops emitting once the app SDK is registered'
   );
+});
+
+test('injecting with the gate off uninstalls a prior injection', () => {
+  const r = runScript('scenario_uninstall.js');
+  assert.deepStrictEqual(r.installed, {
+    active: true,
+    loadPatched: true,
+    setTPWrapped: true,
+    setCMWrapped: true,
+  });
+  assert.deepStrictEqual(r.removed, {
+    globalCleared: true,
+    latchCleared: true,
+    loadRestored: true,
+    setTPRestored: true,
+    setCMRestored: true,
+  });
+  assert.strictEqual(r.emittedWhileInstalled, 1);
+  assert.strictEqual(r.emittedAfterUninstall, 0);
+});
+
+// A ProxyTracer caches the first delegate it resolves, so tearing the bridge
+// down under a tracer the application already holds would silence that tracer
+// for the life of the process. A re-injection must leave the resident bridge
+// installed rather than replace it.
+test('re-injecting leaves a tracer acquired before the first injection emitting', () => {
+  const r = runScript('scenario_uninstall.js');
+  assert.strictEqual(r.emittedAfterReinjection, 1);
+});
+
+// The agent-upgrade sequence. A cached ProxyTracer holds the retired bridge's
+// Tracer, so the successor has to be reachable through it; and once no
+// successor is installed, the same path must go quiet again.
+test('a tracer cached before an uninstall still emits through the next injection', () => {
+  const r = runScript('scenario_reinject_after_uninstall.js');
+  assert.strictEqual(r.emittedInFirstRun, 1);
+  assert.strictEqual(r.emittedWhileShutDown, 0);
+  assert.strictEqual(r.emittedInSecondRun, 1);
+  assert.strictEqual(r.emittedAfterFinalShutdown, 0);
+});
+
+// AsyncLocalStorage.run() re-enables an instance the uninstall disabled, and
+// nothing is left to disable it again, so a retired bridge must not reach it.
+test('using a cached tracer after the uninstall does not re-enable the ALS', () => {
+  const r = runScript('scenario_uninstall_async_residual.js');
+  assert.strictEqual(r.installedCallbackRan, true);
+  assert.strictEqual(r.runsWhileInstalled, 1, 'the installed bridge establishes context');
+  assert.strictEqual(r.retiredCallbackRan, true, 'the application callback still runs');
+  assert.strictEqual(r.retiredSpanRecording, false);
+  assert.strictEqual(r.runsWhileRetired, 0, 'a retired bridge must not touch AsyncLocalStorage');
 });

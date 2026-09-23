@@ -148,7 +148,7 @@ func TestUpgradeConnTimesOutWhenInspectorDoesNotRespond(t *testing.T) {
 	})
 
 	err := runWithOperationTimeout(t, "upgradeConnWithTimeout", func() error {
-		wsConn, _, err := upgradeConnWithTimeout(conn, "ws://127.0.0.1/json", 0, testInspectorTimeout)
+		wsConn, err := upgradeConnWithTimeout(conn, "ws://127.0.0.1/json", 0, testInspectorTimeout)
 		if wsConn != nil {
 			_ = wsConn.Close()
 		}
@@ -169,7 +169,7 @@ func TestUpgradeConnClearsDeadline(t *testing.T) {
 	}
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	wsConn, _, err := upgradeConnWithTimeout(conn, wsURL, 0, testInspectorTimeout)
+	wsConn, err := upgradeConnWithTimeout(conn, wsURL, 0, testInspectorTimeout)
 	if err != nil {
 		_ = conn.Close()
 		t.Fatalf("upgrade websocket: %v", err)
@@ -436,7 +436,7 @@ func TestInjectionPayloadIsNeverFragmented(t *testing.T) {
 		defer conn.Close()
 
 		wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-		wsConn, _, err := upgradeConnWithTimeout(conn, wsURL, writeBufferSize, testInspectorOperationTimeout)
+		wsConn, err := upgradeConnWithTimeout(conn, wsURL, writeBufferSize, testInspectorOperationTimeout)
 		if err != nil {
 			t.Fatalf("upgrade websocket: %v", err)
 		}

@@ -1,0 +1,8 @@
+# Traces turn on the agent's trace path, which is what wraps the net
+# prototypes and records the install the test watches come and go.
+# The trace printer is enough for that and needs no collector.
+trace_printer: text
+attributes:
+  select:
+    "*":
+      include: ["*"]

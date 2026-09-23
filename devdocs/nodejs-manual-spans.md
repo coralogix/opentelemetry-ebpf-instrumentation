@@ -295,7 +295,11 @@ would otherwise leave two providers active in one process.
 - **Span kind** is exported from the payload (`spanKind()` in tracesgen
   consumes `request.Span.SpanKind` for manual spans, as on the Go Auto path).
 - **One bridge per process.** A `globalThis` marker makes re-injection a
-  no-op.
+  no-op, because a `ProxyTracer` caches the first delegate it resolves: a
+  replacement bridge would never be reached by tracers the application already
+  holds. The same script with its gate off is the uninstall, run at OBI's
+  shutdown; a bridge retired that way forwards those cached tracers to its
+  successor if a later OBI injects one, and records nothing if none does.
 - **Never breaks the app.** All bridge failure paths are swallowed; the
   sentinel costs ~0.6 µs per finished span, zero when the feature is off.
   The `fs.accessSync` it replaced rejected every call, and building that

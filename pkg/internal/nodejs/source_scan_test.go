@@ -6,12 +6,15 @@
 package nodejs
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/obi/pkg/internal/transform/route/harvest"
 )
@@ -33,7 +36,7 @@ func TestSourceScan_DoubleQuoted(t *testing.T) {
 const signals = ["SIGINT", "SIGTERM", "SIGUSR1"];
 signals.forEach((sig) => process.on(sig, () => shutdown()));
 `)
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected (double quotes)")
 	}
 }
@@ -45,7 +48,7 @@ process.on('SIGUSR1', () => {
   console.log('reloading config');
 });
 `)
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected (single quotes)")
 	}
 }
@@ -53,7 +56,7 @@ process.on('SIGUSR1', () => {
 func TestSourceScan_BacktickQuoted(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "app.ts", "const sig = `SIGUSR1`;\nprocess.on(sig, handler);\n")
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected (backtick)")
 	}
 }
@@ -65,7 +68,7 @@ const http = require('http');
 const server = http.createServer((req, res) => res.end('ok'));
 server.listen(3000);
 `)
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected no SIGUSR1 reference")
 	}
 }
@@ -77,7 +80,7 @@ func TestSourceScan_CommentIgnored(t *testing.T) {
 /* "SIGUSR1" is handled elsewhere */
 const server = require('http').createServer();
 `)
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 in comments to be ignored")
 	}
 }
@@ -88,7 +91,7 @@ func TestSourceScan_UnquotedIgnored(t *testing.T) {
 // This app does not handle SIGUSR1
 console.log("Starting server");
 `)
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected unquoted SIGUSR1 to be ignored")
 	}
 }
@@ -104,7 +107,7 @@ const http = require('http');
 */
 const server = http.createServer();
 `)
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 in multi-line block comment to be ignored")
 	}
 }
@@ -126,7 +129,7 @@ func TestSourceScan_ArrayPattern(t *testing.T) {
   });
 });
 `)
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected in array pattern")
 	}
 }
@@ -137,7 +140,7 @@ func TestSourceScan_TypeScriptFile(t *testing.T) {
 import { createServer } from 'http';
 process.on('SIGUSR1', () => console.log('debug'));
 `)
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected in .ts file")
 	}
 }
@@ -147,7 +150,7 @@ func TestSourceScan_SkipsNodeModules(t *testing.T) {
 	writeFile(t, dir, "app.js", `const server = require('http').createServer();`)
 	writeFile(t, dir, "node_modules/some-lib/index.js", `process.on("SIGUSR1", handler);`)
 
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 in node_modules to be skipped")
 	}
 }
@@ -159,7 +162,7 @@ export function setup() {
   process.on("SIGUSR1", () => reloadConfig());
 }
 `)
-	if !dirHasSIGUSR1Reference(dir) {
+	if !dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected SIGUSR1 to be detected in nested source file")
 	}
 }
@@ -170,7 +173,7 @@ func TestSourceScan_NonJSFileIgnored(t *testing.T) {
 	writeFile(t, dir, "config.json", `{"signal": "SIGUSR1"}`)
 	writeFile(t, dir, "app.py", `import signal; signal.signal(signal.SIGUSR1, handler)`)
 
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected non-JS files to be ignored")
 	}
 }
@@ -184,7 +187,7 @@ func TestSourceScan_NonRegularJSFileIgnored(t *testing.T) {
 
 	result := make(chan bool, 1)
 	go func() {
-		result <- dirHasSIGUSR1Reference(dir)
+		result <- dirHasSIGUSR1Reference(t.Context(), dir)
 	}()
 
 	select {
@@ -204,14 +207,34 @@ func TestSourceScan_OversizedJSFileIgnored(t *testing.T) {
 		`process.on("SIGUSR1", handler);`
 	writeFile(t, dir, "large.js", content)
 
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected oversized JS file to be ignored")
 	}
 }
 
 func TestSourceScan_EmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
-	if dirHasSIGUSR1Reference(dir) {
+	if dirHasSIGUSR1Reference(t.Context(), dir) {
 		t.Error("expected false for empty directory")
 	}
+}
+
+// A scan abandoned because the gate budget ran out reports "no reference
+// found", which reads as "safe to signal". Callers must not act on that alone:
+// they re-check the context before signaling. This pins both halves, because
+// the fail-open answer is only safe while that re-check exists.
+func TestDirScanFailsOpenWhenCancelled(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "index.js", "process.on('SIGUSR1', () => {});")
+
+	require.True(t, dirHasSIGUSR1Reference(t.Context(), dir),
+		"the reference is there to be found when the scan may run")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.False(t, dirHasSIGUSR1Reference(ctx, dir),
+		"an abandoned scan reports no reference, the same as an unreadable tree")
+	require.Error(t, ctx.Err(),
+		"so the caller must re-check the context before treating that as safe")
 }
