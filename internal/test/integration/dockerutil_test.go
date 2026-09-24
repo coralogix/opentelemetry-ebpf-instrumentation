@@ -43,7 +43,7 @@ const (
 	// `internal/test/integration/components/weaver/service.yml` so the
 	// programmatic-setup tests run weaver with the same image as the
 	// compose-driven ones.
-	imgWeaver = img.Docker("otel/weaver:v0.26.1@sha256:9094862c0ab261bdbcb079bb981f9a573b3659b130a6d2ab8616eca6ba37aaec")
+	imgWeaver = img.Docker("otel/weaver:main@sha256:2fbc65b4285eb61c676ec74028a583a5fddfc0b308514b10dee80e6745f381dc")
 )
 
 // setupDockerNetwork initializes a custom network for the test.

@@ -175,6 +175,10 @@ section empty once drained.
   implies it, and `gen_ai.operation.name` on MCP spans is conditional on a tool call,
   the only MCP operation that sets it. These correct the declarations; the emitted
   telemetry is unchanged.
+- The registry moves to weaver's `definition/2` format. A span definition is identified
+  by its `type`, so the span ids in `site/docs/spans.md` lose their `span.` prefix
+  (`span.obi.http.server` becomes `obi.http.server`) and a link anchored on an old id no
+  longer resolves. Every span now documents its name. The emitted telemetry is unchanged.
 
 ## Hosting notes
 
