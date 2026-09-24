@@ -36,7 +36,7 @@ const (
 // Weaver being unreachable is itself a failure (the group forgot to wire the
 // shared weaver compose fragment), unless the run explicitly opts out via
 // TESTCASE_SKIP_WEAVER=true.
-func validateWeaver() {
+func validateWeaver(outputDir, name string) {
 	if os.Getenv(skipWeaverEnv) == "true" {
 		ginkgo.GinkgoWriter.Printf("%s=true — skipping weaver validation\n", skipWeaverEnv)
 		return
@@ -45,7 +45,7 @@ func validateWeaver() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	report, err := weavercheck.FetchReport(ctx, weaverAdminURL)
+	raw, err := weavercheck.FetchRawReport(ctx, weaverAdminURL)
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) {
 			ginkgo.Fail(fmt.Sprintf(
@@ -56,6 +56,18 @@ func validateWeaver() {
 					"local debugging): %v", skipWeaverEnv, err))
 			return
 		}
+		ginkgo.Fail(fmt.Sprintf("weaver: %v", err))
+		return
+	}
+
+	if reportPath, err := weavercheck.ArchiveReport(outputDir, name, raw); err != nil {
+		ginkgo.GinkgoWriter.Printf("warn: failed to archive weaver report: %v\n", err)
+	} else {
+		ginkgo.GinkgoWriter.Printf("weaver report saved to %s\n", reportPath)
+	}
+
+	report, err := weavercheck.Parse(raw)
+	if err != nil {
 		ginkgo.Fail(fmt.Sprintf("weaver: %v", err))
 		return
 	}

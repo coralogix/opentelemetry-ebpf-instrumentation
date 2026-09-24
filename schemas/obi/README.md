@@ -124,6 +124,36 @@ and are mutually exclusive; `TestEmittedSpansMatchTheirDeclaredSpan` in
 when a span matches any type other than its own. A new span type needs a
 matcher, or the weaver-validated suites fail on its unmatched spans.
 
+## Telemetry coverage
+
+Every weaver-validated suite archives its `compact` live-check report as
+`weaver-report-<name>.json`, and `cmd/obi-weaver-coverage` measures their union
+against this registry, resolved with `weaver registry resolve --v2`:
+
+- **Signals**: every metric and span definition. A signal is covered when
+  live-check matched a sample to it in some report.
+- **Signal attributes**: for each covered signal, its declared attributes
+  against the keys seen on its matched samples (span attributes, metric
+  data-point attributes), which the template lists under `signal_attributes`.
+  Gaps are grouped by requirement level; recommended and opt-in gaps are
+  informational.
+- **Resource attributes**: the `target.info` carrier labels and the entity
+  attributes, against the `seen_*` statistics.
+
+It also warns about metrics the code emits that the registry does not declare.
+To run it on a directory of downloaded reports:
+
+```sh
+make weaver-coverage WEAVER_REPORTS_DIR=<dir> WEAVER_COVERAGE_OUT=<out-dir>
+```
+
+It writes `coverage.md` and `coverage.json` to the output directory. Add
+`WEAVER_COVERAGE_ARGS=--fail-on-gap` to exit non-zero on an uncovered signal,
+or on a required or conditionally required attribute missing from a covered
+signal. In CI, `weaver_coverage_combined.yml` aggregates the reports of every
+suite for a commit, and a maintainer can post the result on a pull request by
+commenting `/weaver-coverage`.
+
 ## Two override styles
 
 - **Closed enum, extended**: the upstream value space is enumerable and OBI

@@ -318,6 +318,16 @@ type liveCheckReport struct {
 // schemas/obi/.weaver.toml, and returns its JSON report.
 func liveCheck(t *testing.T, samples []liveCheckSample) liveCheckReport {
 	t.Helper()
+
+	var report liveCheckReport
+	runLiveCheck(t, samples, &report, "--format", "json")
+	return report
+}
+
+// runLiveCheck feeds the samples to live-check with the given output flags and
+// decodes its report into report.
+func runLiveCheck(t *testing.T, samples any, report any, formatArgs ...string) {
+	t.Helper()
 	ociBin := requireWeaverRuntime(t)
 
 	input, err := json.Marshal(samples)
@@ -326,24 +336,24 @@ func liveCheck(t *testing.T, samples []liveCheckSample) liveCheckReport {
 	ctx, cancel := context.WithTimeout(t.Context(), liveCheckTimeout)
 	defer cancel()
 
-	cmd := weaverCommand(ctx, t, ociBin,
+	args := append([]string{
 		"registry", "live-check", "--registry", "/obi-registry",
 		"--input-source", "stdin", "--input-format", "json",
-		"--format", "json", "--no-stream")
+		"--no-stream",
+	}, formatArgs...)
+	cmd := weaverCommand(ctx, t, ociBin, args...)
 	cmd.Stdin = bytes.NewReader(input)
 
 	// live-check exits non-zero when it reports a violation, which the
-	// assertions below surface in detail; only a missing report is fatal here.
+	// assertions surface in detail; only a missing report is fatal here.
 	out, runErr := cmd.Output()
-	var report liveCheckReport
-	if jsonErr := json.Unmarshal(out, &report); jsonErr != nil {
+	if jsonErr := json.Unmarshal(out, report); jsonErr != nil {
 		var stderr []byte
 		if exitErr, ok := errors.AsType[*exec.ExitError](runErr); ok {
 			stderr = exitErr.Stderr
 		}
 		require.NoErrorf(t, jsonErr, "weaver live-check produced no parseable report (run error: %v)\n%s", runErr, stderr)
 	}
-	return report
 }
 
 // Live-check pairs a span with its span definition only through the matchers
@@ -402,4 +412,53 @@ func TestEmittedSpansMatchTheirDeclaredSpan(t *testing.T) {
 			assert.Containsf(t, covered, s.Type, "no span case covers span definition %q", s.Type)
 		}
 	}
+}
+
+// The compact report lists, per matched signal, the attribute keys seen on its
+// samples: span attributes, and the data-point attributes of a metric.
+// cmd/obi-weaver-coverage compares them with each signal's declared attributes.
+func TestCompactReportListsAttributesPerSignal(t *testing.T) {
+	attribute := func(name string, value any) map[string]any {
+		return map[string]any{"name": name, "value": value}
+	}
+	samples := []map[string]any{
+		{"span": map[string]any{
+			"name": "GET /users", "kind": "server",
+			"attributes": []map[string]any{
+				attribute("http.request.method", "GET"),
+				attribute("url.path", "/users"),
+				attribute("http.response.status_code", 200),
+			},
+		}},
+		{"span": map[string]any{
+			"name": "GET", "kind": "server",
+			"attributes": []map[string]any{
+				attribute("http.request.method", "GET"),
+				attribute("url.path", "/"),
+				attribute("error.type", "500"),
+			},
+		}},
+		{"metric": map[string]any{
+			"name": "http.server.request.duration", "instrument": "histogram", "unit": "s",
+			"data_points": []map[string]any{{
+				"attributes": []map[string]any{
+					attribute("http.request.method", "GET"),
+					attribute("url.scheme", "http"),
+				},
+				"count": 1, "sum": 0.1, "bucket_counts": []int{1}, "explicit_bounds": []float64{},
+			}},
+		}},
+	}
+
+	var report struct {
+		MatchedSignals   map[string]int      `json:"matched_signals"`
+		SignalAttributes map[string][]string `json:"signal_attributes"`
+	}
+	runLiveCheck(t, samples, &report, "--format", "compact", "--templates", "/obi-registry/.live_check_templates")
+
+	assert.Equal(t, map[string]int{"obi.http.server": 2, "http.server.request.duration": 1}, report.MatchedSignals)
+	assert.Equal(t, map[string][]string{
+		"obi.http.server":              {"error.type", "http.request.method", "http.response.status_code", "url.path"},
+		"http.server.request.duration": {"http.request.method", "url.scheme"},
+	}, report.SignalAttributes)
 }

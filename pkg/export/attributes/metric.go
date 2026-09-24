@@ -5,6 +5,7 @@ package attributes // import "go.opentelemetry.io/obi/pkg/export/attributes"
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/prometheus/otlptranslator"
@@ -72,7 +73,25 @@ func metric(n Name) Name {
 	}
 
 	n.Prom = prom
+	if n.Section != "" && n.Type != InstrumentUnknown {
+		selectableMetrics = append(selectableMetrics, n)
+	}
 	return n
+}
+
+// selectableMetrics holds every instrument metric() declared with a Section.
+var selectableMetrics []Name
+
+// EmittedMetricNames returns the OTLP names of the user-selectable metrics, sorted and
+// deduplicated. OBI's internal metrics and the span-metrics and service-graph families carry
+// no Section, so they are not part of it.
+func EmittedMetricNames() []string {
+	names := make([]string, 0, len(selectableMetrics))
+	for _, m := range selectableMetrics {
+		names = append(names, m.OTEL)
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 var (

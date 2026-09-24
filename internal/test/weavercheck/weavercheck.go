@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -122,6 +124,17 @@ func Parse(rawReport []byte) (*Report, error) {
 // transport-agnostic and logging-agnostic (returns an error rather than failing
 // a test).
 func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
+	raw, err := FetchRawReport(ctx, adminURL)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(raw)
+}
+
+// FetchRawReport is FetchReport without the parsing, for callers that also
+// archive the report verbatim: cmd/obi-weaver-coverage reads the statistics
+// and per-signal attributes that the parsed Report does not carry.
+func FetchRawReport(ctx context.Context, adminURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, adminURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building weaver /stop request: %w", err)
@@ -141,7 +154,20 @@ func FetchReport(ctx context.Context, adminURL string) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading weaver /stop response body: %w", err)
 	}
-	return Parse(raw)
+	return raw, nil
+}
+
+// ArchiveReport writes a raw report to dir as weaver-report-<name>.json, the
+// name cmd/obi-weaver-coverage collects, and returns the path written.
+func ArchiveReport(dir, name string, raw []byte) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("creating %s: %w", dir, err)
+	}
+	reportPath := filepath.Join(dir, fmt.Sprintf("weaver-report-%s.json", strings.ReplaceAll(name, "/", "_")))
+	if err := os.WriteFile(reportPath, raw, 0o644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", reportPath, err)
+	}
+	return reportPath, nil
 }
 
 // Validate logs the full advisory breakdown and the matcher statistics, and

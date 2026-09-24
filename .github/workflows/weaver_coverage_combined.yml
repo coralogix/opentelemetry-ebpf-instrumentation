@@ -1,0 +1,112 @@
+name: Weaver coverage (combined)
+
+# Computes weaver live-check coverage across every weaver-wired suite (the
+# integration matrix, OATS, and the Kubernetes suite), each of which runs as an
+# independent workflow and uploads its per-suite reports as `weaver-reports-*`
+# artifacts. This workflow fires when any of them completes, but only proceeds
+# once EVERY suite that ran for the commit has finished, then unions their
+# reports via `make weaver-coverage` and uploads the covered/total summary as an
+# artifact.
+#
+# It deliberately does NOT comment on the PR: posting is on-demand via the
+# `/weaver-coverage` slash command (weaver_coverage_comment.yml), so the number
+# is posted when a maintainer asks for it rather than re-posted on every push.
+
+on: # zizmor: ignore[dangerous-triggers] cross-workflow artifact aggregation requires workflow_run; the job checks out the trusted default branch (never the PR head) and only consumes PR reports as data artifacts, so no untrusted code runs in this privileged context
+  workflow_run:
+    workflows:
+      - "Integration tests"
+      - "OATS tests"
+      - "Integration tests K8S"
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Serialize the firings for one commit so the gate and upload are not raced.
+  group: weaver-coverage-combined-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    name: Aggregate weaver telemetry coverage (all suites)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Check out the trusted default branch, NOT the workflow_run head SHA: only
+      # weaver reports — pure data — are pulled from the PR's runs, as artifacts
+      # below. The coverage tool and schema come from the default branch, whose
+      # semconv registry is the correct denominator once a schema change merges.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+        with:
+          go-version-file: "go.mod"
+
+      # Gate: only aggregate once every contributing suite that ran for this
+      # commit has finished, so the artifact carries the complete number rather
+      # than a partial one. A suite skipped by path filters simply has no run and
+      # is not waited on; a suite still running defers to its own later firing.
+      - name: Wait until every contributing suite for this commit has finished
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api --paginate \
+            "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq '[.workflow_runs[]
+                   | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S")]
+                  | group_by(.name) | map(max_by(.run_number))')
+          total=$(echo "$latest" | jq 'length')
+          pending=$(echo "$latest" | jq '[.[] | select(.status != "completed")] | length')
+          echo "contributing workflows for ${HEAD_SHA}: ${total}, still running: ${pending}"
+          if [ "$total" -eq 0 ] || [ "$pending" -gt 0 ]; then
+            echo "not all suites have finished; a later completion will re-fire this workflow"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect weaver reports from all suites for this commit
+        id: collect
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p all-weaver-reports
+          run_ids=$(gh api --paginate \
+            "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq '.workflow_runs[]
+                  | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S")
+                  | select(.status == "completed")
+                  | .id' | sort -u)
+          echo "contributing completed runs: ${run_ids:-none}"
+          for id in $run_ids; do
+            gh run download "$id" --dir all-weaver-reports --pattern 'weaver-reports-*' 2>/dev/null || true
+          done
+          count=$(find all-weaver-reports -name 'weaver-report-*.json' | wc -l | tr -d ' ')
+          echo "collected ${count} weaver report file(s)"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      - name: Aggregate coverage
+        if: steps.gate.outputs.ready == 'true' && steps.collect.outputs.count != '0'
+        run: make weaver-coverage WEAVER_REPORTS_DIR=all-weaver-reports WEAVER_COVERAGE_OUT=weaver-coverage-out
+
+      - name: Upload coverage summary
+        if: steps.gate.outputs.ready == 'true' && steps.collect.outputs.count != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: weaver-coverage-combined-${{ github.event.workflow_run.head_sha }}
+          path: weaver-coverage-out/
+          retention-days: 30

@@ -199,6 +199,7 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 	// times before declaring the tap pipeline broken.
 	adminURL := fmt.Sprintf("http://%s/stop", addr)
 	var report *weavercheck.Report
+	var rawReport []byte
 	var finalDrops tapDropCounts
 	var finalDropsErr error
 	for attempt := 1; ; attempt++ {
@@ -211,7 +212,12 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 		finalDrops, finalDropsErr = k.tapDropCount(ctx)
 
 		var err error
-		report, err = weavercheck.FetchReport(ctx, adminURL)
+		rawReport, err = weavercheck.FetchRawReport(ctx, adminURL)
+		if err != nil {
+			t.Errorf("%v", err)
+			return
+		}
+		report, err = weavercheck.Parse(rawReport)
 		if err != nil {
 			t.Errorf("%v", err)
 			return
@@ -232,6 +238,12 @@ func (k *Kind) validateWeaver(parent context.Context, t weavercheck.TestingT) {
 			t.Errorf("restarted weaver never became reachable: %v", err)
 			return
 		}
+	}
+
+	// Archiving only feeds the coverage aggregate, so a failure must not fail
+	// the validation.
+	if _, err := weavercheck.ArchiveReport(k.logsDir, "k8s-"+k.clusterName, rawReport); err != nil {
+		t.Logf("could not archive the weaver report: %v", err)
 	}
 
 	// A drop on either tap hop may have carried the sole sample of a violating
