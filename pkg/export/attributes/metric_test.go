@@ -131,3 +131,14 @@ func TestPrometheusNameDerivationFailsFast(t *testing.T) {
 		metric(Name{Section: "unnameable", OTEL: "..."})
 	})
 }
+
+func TestEmittedMetricNames(t *testing.T) {
+	names := EmittedMetricNames()
+
+	assert.Contains(t, names, HTTPServerDuration.OTEL)
+	assert.Contains(t, names, GenAIClientInputTokenUsage.OTEL)
+	assert.NotContains(t, names, Resource.OTEL, "resource is a selector section, not a metric")
+	assert.NotContains(t, names, SpanMetricsCallsOTel.OTEL, "span metrics carry no section")
+	assert.NotContains(t, names, NewInternalMetrics("obi").BuildInfo.OTEL, "internal metrics carry no section")
+	assert.IsIncreasing(t, names, "names are sorted and deduplicated")
+}

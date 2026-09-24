@@ -1,0 +1,128 @@
+name: Weaver coverage (comment)
+
+# On-demand weaver coverage comment. A maintainer comments `/weaver-coverage` on
+# a PR and this unions the `weaver-reports-*` artifacts from that commit's
+# completed suite runs (integration, OATS, k8s), runs `make weaver-coverage`,
+# and upserts the covered/total summary as a single PR comment. Posting is
+# deliberately manual so the number lands once, when asked for, rather than
+# being re-posted automatically on every push (the auto workflow,
+# weaver_coverage_combined.yml, only computes and archives the artifact).
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+concurrency:
+  # One run at a time per PR so repeated commands upsert the same comment.
+  group: weaver-coverage-comment-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Post weaver telemetry coverage on demand
+    # Only maintainers, and only on PR comments that invoke the command. The
+    # author-association gate keeps this privileged (pull-requests: write) run
+    # from being triggered by arbitrary commenters.
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/weaver-coverage') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Acknowledge the command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes >/dev/null || true
+
+      # Trusted default branch only — never the PR head. PR run artifacts are
+      # consumed purely as data below.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+        with:
+          go-version-file: "go.mod"
+
+      - name: Collect weaver reports for the PR's head commit
+        id: collect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          head_sha=$(gh api "repos/${REPO}/pulls/${PR}" --jq '.head.sha')
+          echo "PR #${PR} head: ${head_sha}"
+          mkdir -p all-weaver-reports
+          run_ids=$(gh api --paginate \
+            "repos/${REPO}/actions/runs?head_sha=${head_sha}&per_page=100" \
+            --jq '.workflow_runs[]
+                  | select(.name == "Integration tests" or .name == "OATS tests" or .name == "Integration tests K8S")
+                  | select(.status == "completed")
+                  | .id' | sort -u)
+          echo "contributing completed runs: ${run_ids:-none}"
+          for id in $run_ids; do
+            gh run download "$id" --dir all-weaver-reports --pattern 'weaver-reports-*' 2>/dev/null || true
+          done
+          count=$(find all-weaver-reports -name 'weaver-report-*.json' | wc -l | tr -d ' ')
+          echo "collected ${count} weaver report file(s)"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+
+      - name: Aggregate coverage
+        if: steps.collect.outputs.count != '0'
+        run: make weaver-coverage WEAVER_REPORTS_DIR=all-weaver-reports WEAVER_COVERAGE_OUT=weaver-coverage-out
+
+      - name: Upsert the coverage comment
+        if: steps.collect.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          marker='<!-- weaver-coverage-combined -->'
+          { printf '%s\n\n' "$marker"; cat weaver-coverage-out/coverage.md; } > comment.md
+          jq -n --rawfile body comment.md '{body: $body}' > payload.json
+          cid=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+                  --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -1)
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${cid}" --input payload.json >/dev/null
+            echo "updated PR #${PR} comment ${cid}"
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR}/comments" --input payload.json >/dev/null
+            echo "created comment on PR #${PR}"
+          fi
+
+      - name: Report that no reports were found
+        if: steps.collect.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          marker='<!-- weaver-coverage-combined -->'
+          body="${marker}
+
+          No weaver reports were found for this commit yet — the suites may still be running, or their artifacts (retention: 5 days) have expired. Re-run the suites, then \`/weaver-coverage\` again."
+          jq -n --arg body "$body" '{body: $body}' > payload.json
+          cid=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+                  --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -1)
+          if [ -n "$cid" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${cid}" --input payload.json >/dev/null
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR}/comments" --input payload.json >/dev/null
+          fi
