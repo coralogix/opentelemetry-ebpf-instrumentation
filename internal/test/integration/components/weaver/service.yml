@@ -23,7 +23,7 @@
 # large reports hit when weaver closes the connection on exit.
 services:
   weaver:
-    image: otel/weaver:v0.26.1@sha256:9094862c0ab261bdbcb079bb981f9a573b3659b130a6d2ab8616eca6ba37aaec
+    image: otel/weaver:main@sha256:2fbc65b4285eb61c676ec74028a583a5fddfc0b308514b10dee80e6745f381dc
     container_name: weaver
     user: "0:0"
     working_dir: /obi-registry
