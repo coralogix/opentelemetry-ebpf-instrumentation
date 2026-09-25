@@ -78,7 +78,7 @@ func fetchWeaverReportDocker(t *testing.T) (*weavercheck.Report, bool) {
 	}
 
 	if !priorFailure {
-		if err := weavercheck.DrainDockerTap(context.Background()); err != nil {
+		if err := weavercheck.DrainDockerTap(context.Background(), t.Logf); err != nil {
 			t.Errorf("%v", err)
 		}
 	}

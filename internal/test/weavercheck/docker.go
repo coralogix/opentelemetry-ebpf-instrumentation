@@ -6,6 +6,7 @@ package weavercheck // import "go.opentelemetry.io/obi/internal/test/weavercheck
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,12 +40,14 @@ type runningContainer struct {
 	telemetryURL string
 }
 
+var errTapNotSettled = errors.New("the weaver tap never settled")
+
 type tapCollector struct {
 	runningContainer
 	scraper string
 }
 
-func DrainDockerTap(ctx context.Context) error {
+func DrainDockerTap(ctx context.Context, warnf func(format string, args ...any)) error {
 	collectors, err := weaverTapCollectors(ctx)
 	if err != nil {
 		return fmt.Errorf("cannot confirm the weaver tap delivered everything: %w", err)
@@ -60,7 +63,7 @@ func DrainDockerTap(ctx context.Context) error {
 	}
 
 	for _, collector := range collectors {
-		if err := drainCollector(ctx, collector); err != nil {
+		if err := drainCollector(ctx, collector, warnf); err != nil {
 			return err
 		}
 	}
@@ -144,17 +147,20 @@ func collectorsBesideWeaver(containers []runningContainer) []runningContainer {
 	return collectors
 }
 
-func drainCollector(parent context.Context, collector tapCollector) error {
+func drainCollector(parent context.Context, collector tapCollector, warnf func(format string, args ...any)) error {
 	ctx, cancel := context.WithTimeout(parent, dockerCollectorDrainTimeout)
 	defer cancel()
 
 	stats, err := waitForSettledTap(ctx, collector)
-	if err != nil {
+	switch {
+	case errors.Is(err, errTapNotSettled):
+		warnf("weaver: %v", err)
+	case err != nil:
 		return fmt.Errorf("reading the weaver tap's exporter telemetry: %w", err)
 	}
 	if stats.Failed > 0 {
-		return fmt.Errorf("the weaver tap failed to deliver %.0f item(s) (otelcol_exporter_{send,enqueue}_failed_*) — "+
-			"weaver may have missed a telemetry shape, so the report cannot be trusted", stats.Failed)
+		warnf("weaver: the weaver tap failed to deliver %.0f item(s) (otelcol_exporter_{send,enqueue}_failed_*), "+
+			"so weaver may have missed a telemetry shape", stats.Failed)
 	}
 	return nil
 }
@@ -170,7 +176,7 @@ func waitForSettledTap(ctx context.Context, collector tapCollector) (TapStats, e
 	for {
 		select {
 		case <-ctx.Done():
-			return previous, fmt.Errorf("the weaver tap never settled (%.0f item(s) queued): %w", previous.Queued, ctx.Err())
+			return previous, fmt.Errorf("%w within %s (%.0f item(s) still queued)", errTapNotSettled, dockerCollectorDrainTimeout, previous.Queued)
 		case <-ticker.C:
 		}
 

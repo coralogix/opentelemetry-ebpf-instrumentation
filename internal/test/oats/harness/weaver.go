@@ -36,13 +36,17 @@ const (
 // Weaver being unreachable is itself a failure (the group forgot to wire the
 // shared weaver compose fragment), unless the run explicitly opts out via
 // TESTCASE_SKIP_WEAVER=true.
+func warnf(format string, args ...any) {
+	ginkgo.GinkgoWriter.Printf(format+"\n", args...)
+}
+
 func validateWeaver() {
 	if os.Getenv(skipWeaverEnv) == "true" {
 		ginkgo.GinkgoWriter.Printf("%s=true — skipping weaver validation\n", skipWeaverEnv)
 		return
 	}
 
-	drainErr := weavercheck.DrainDockerTap(context.Background())
+	drainErr := weavercheck.DrainDockerTap(context.Background(), warnf)
 	if drainErr != nil {
 		ginkgo.GinkgoWriter.Printf("weaver: %v\n", drainErr)
 	}
