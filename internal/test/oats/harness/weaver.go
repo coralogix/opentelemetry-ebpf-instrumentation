@@ -42,6 +42,11 @@ func validateWeaver() {
 		return
 	}
 
+	drainErr := weavercheck.DrainDockerTap(context.Background())
+	if drainErr != nil {
+		ginkgo.GinkgoWriter.Printf("weaver: %v\n", drainErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -60,4 +65,7 @@ func validateWeaver() {
 		return
 	}
 	weavercheck.Validate(ginkgo.GinkgoT(), report)
+	if drainErr != nil {
+		ginkgo.Fail(fmt.Sprintf("weaver: %v", drainErr))
+	}
 }
