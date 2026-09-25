@@ -1,8 +1,15 @@
-groups:
-  - id: span.obi.dns
-    type: span
-    span_kind: internal
+file_format: definition/2
+spans:
+  - type: obi.dns
+    kind: internal
+    name:
+      note: >
+        The DNS operation followed by the question,
+        `{operation} {dns.question.name}`, the operation alone when no question
+        was read, or `DNS`. The operation is not emitted as an attribute, so the
+        name cannot be expressed as a template.
     stability: development
+    requirement_level: recommended
     brief: OBI DNS resolution span.
     attributes:
       - ref: dns.question.name
@@ -20,8 +27,7 @@ groups:
         requirement_level:
           conditionally_required: if the port was observed on the connection
       - ref: span.metrics.skip
-        requirement_level:
-          conditionally_required: if a span-metrics feature is enabled
+        requirement_level: opt_in
       - ref: error.type
         requirement_level:
           conditionally_required: if the operation ended in an error

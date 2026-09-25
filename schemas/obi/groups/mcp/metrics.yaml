@@ -1,7 +1,6 @@
-groups:
-  - id: metric.obi.mcp.client.operation.duration
-    type: metric
-    metric_name: mcp.client.operation.duration
+file_format: definition/2
+metrics:
+  - name: mcp.client.operation.duration
     annotations:
       obi:
         upstream_override: true
@@ -9,6 +8,7 @@ groups:
     instrument: histogram
     unit: "s"
     stability: development
+    requirement_level: recommended
     attributes:
       - ref: error.type
         requirement_level:
@@ -34,9 +34,7 @@ groups:
       - ref: server.port
         requirement_level: recommended
 
-  - id: metric.obi.mcp.server.operation.duration
-    type: metric
-    metric_name: mcp.server.operation.duration
+  - name: mcp.server.operation.duration
     annotations:
       obi:
         upstream_override: true
@@ -44,6 +42,7 @@ groups:
     instrument: histogram
     unit: "s"
     stability: development
+    requirement_level: recommended
     attributes:
       - ref: error.type
         requirement_level:
