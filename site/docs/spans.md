@@ -7,13 +7,15 @@ Spans that OpenTelemetry eBPF Instrumentation emits, grouped by the shape OBI pr
 for each protocol it recognises. The span kind is part of the contract; which attributes
 appear depends on the enabled features and on `attributes.select`.
 
-## `span.obi.aws.s3.client`
+## `obi.aws.s3.client`
 
 OBI AWS S3 client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name: `s3.{method}`, or `s3.Operation` when the S3 method was not read. `rpc.method` reports the method as `S3/{method}`, so the name cannot be expressed as a template.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -30,16 +32,18 @@ OBI AWS S3 client span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.aws.sns.client`
+## `obi.aws.sns.client`
 
 OBI AWS SNS client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `SNS.{messaging.operation.name}`, `SNS.`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -60,16 +64,18 @@ OBI AWS SNS client span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.aws.sqs.client`
+## `obi.aws.sqs.client`
 
 OBI AWS SQS client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `sqs.{messaging.operation.name}`, `sqs.Operation`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -88,10 +94,10 @@ OBI AWS SQS client span.
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.db.client`
+## `obi.db.client`
 
 OBI outbound database client span.
 
@@ -99,13 +105,14 @@ OBI outbound database client span.
 | --- | --- |
 | client | development |
 
+Name: Built per database system from the operation and its target, falling back to the system: Redis and Memcached report `{db.operation.name}` or `REDIS` / `MEMCACHED`; MongoDB `{db.operation.name} {db.collection.name}`, `{db.collection.name}`, `{db.operation.name}` or `mongodb`; Couchbase `{db.operation.name} {db.collection.name}`, `{db.operation.name}` or `COUCHBASE`; Aerospike `{db.operation.name} {db.namespace}.{db.collection.name}` or `AEROSPIKE`; SQL++ `{db.operation.name} {db.collection.name}`, `{db.operation.name} {db.namespace}` or `{db.system.name}`. One template list cannot order the Aerospike and MongoDB forms correctly for both, so the name is described rather than templated.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `db.collection.name` | string | `conditionally_required`: if the exchange named a collection | stable | The name of a collection (table, container) within the database. | public.users; customers |
 | `db.namespace` | string | `conditionally_required`: if the exchange named a database | stable | The name of the database, fully qualified within the server address and port. | customers; test.users |
 | `db.operation.batch.size` | int | `recommended`: if the operation is a batch | stable | The number of queries included in a batch operation. | 2; 3; 4 |
 | `db.operation.name` | string | `conditionally_required`: if the operation could be parsed from the exchange | stable | The name of the operation or command being executed. | findAndModify; HMSET; SELECT |
-| `db.query.summary` | string | `recommended`: if a summary could be derived from the query | stable | Low cardinality summary of a database query. | SELECT wuser_table; INSERT shipping_details SELECT orders; get user by id |
 | `db.query.text` | string | `opt_in` | stable | The database query being executed. | SELECT * FROM wuser_table where username = ?; SET mykey ? |
 | `db.response.status_code` | string | `conditionally_required`: if the operation failed and the status code is available | stable | Database response status code. | 102; ORA-17002; 08P01; 404 |
 | `db.system.name` | enum | `required` | stable | The database management system (DBMS) product as identified by the client instrumentation. | other_sql; softwareag.adabas; actian.ingres; aws.dynamodb; aws.redshift; azure.cosmosdb; intersystems.cache; cassandra; … |
@@ -114,16 +121,18 @@ OBI outbound database client span.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if using a port other than the default port for this DBMS and if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.db.server`
+## `obi.db.server`
 
 OBI inbound database server span.
 
 | Span kind | Stability |
 | --- | --- |
 | server | development |
+
+Name: The same form as the client span of the database system: SQL servers are named like `obi.db.sql.client`, and Redis, Memcached and Aerospike servers like `obi.db.client`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -139,15 +148,44 @@ OBI inbound database server span.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the host address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.dns`
+## `obi.db.sql.client`
+
+OBI outbound SQL database client span.
+
+| Span kind | Stability |
+| --- | --- |
+| client | stable |
+
+Name, from the first template that applies: `{db.query.summary}`, `{db.operation.name} {db.collection.name}`, `{db.operation.name} {db.namespace}`, `{db.operation.name}`, `SQL`.
+
+| Attribute | Type | Requirement level | Stability | Description | Examples |
+| --- | --- | --- | --- | --- | --- |
+| `db.collection.name` | string | `conditionally_required`: if the operation could be parsed and names a table | stable | The name of a collection (table, container) within the database. | public.users; customers |
+| `db.namespace` | string | `conditionally_required`: if the exchange named a database | stable | The name of the database, fully qualified within the server address and port. | customers; test.users |
+| `db.operation.name` | string | `conditionally_required`: if the operation could be parsed from the query | stable | The name of the operation or command being executed. | findAndModify; HMSET; SELECT |
+| `db.query.summary` | string | `recommended`: if a summary could be derived from the query | stable | Low cardinality summary of a database query. | SELECT wuser_table; INSERT shipping_details SELECT orders; get user by id |
+| `db.query.text` | string | `opt_in` | stable | The database query being executed. | SELECT * FROM wuser_table where username = ?; SET mykey ? |
+| `db.response.status_code` | string | `conditionally_required`: if the operation failed and the status code is available | stable | Database response status code. | 102; ORA-17002; 08P01; 404 |
+| `db.system.name` | enum | `required` | stable | The database management system (DBMS) product as identified by the client instrumentation. | other_sql; softwareag.adabas; actian.ingres; aws.dynamodb; aws.redshift; azure.cosmosdb; intersystems.cache; cassandra; … |
+| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
+| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
+| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
+| `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
+| `server.port` | int | `conditionally_required`: if using a port other than the default port for this DBMS and if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+
+## `obi.dns`
 
 OBI DNS resolution span.
 
 | Span kind | Stability |
 | --- | --- |
 | internal | development |
+
+Name: The DNS operation followed by the question, `{operation} {dns.question.name}`, the operation alone when no question was read, or `DNS`. The operation is not emitted as an attribute, so the name cannot be expressed as a template.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -157,15 +195,17 @@ OBI DNS resolution span.
 | `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.elasticsearch.client`
+## `obi.elasticsearch.client`
 
 OBI Elasticsearch client span, detected from HTTP client traffic.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{db.operation.name} {db.collection.name}`, `{db.operation.name} {db.namespace}`, `{db.operation.name} {server.address}:{server.port}`, `{db.operation.name}`, `elasticsearch`. Name: The address fallback uses the peer address of the connection, which `server.address` carries only when no host name was resolved for it.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -179,17 +219,17 @@ OBI Elasticsearch client span, detected from HTTP client traffic.
 | `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
 | `http.request.method_original` | string | `conditionally_required`: if the wire method is outside the semconv enum | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
 | `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
-| `http.response.body.size` | int | `recommended` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
 | `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 | `url.full` | string | `required` | stable | Absolute URL describing a network resource according to [RFC3986](https://www.rfc-editor.org/rfc/rfc3986) | https://www.foo.bar/search?q=OpenTelemetry#SemConv; //localhost |
 
-## `span.obi.failed_connect`
+## `obi.failed_connect`
 
 OBI failed outbound connection span.
 
@@ -197,21 +237,25 @@ OBI failed outbound connection span.
 | --- | --- |
 | client | development |
 
+Name, from the first template that applies: `CONNECT`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `client.address` | string | `recommended` | stable | Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | client.example.com; 10.1.2.80; /tmp/my.sock |
 | `error.type` | string | `required` | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.gen_ai.embeddings.client`
+## `obi.gen_ai.embeddings.client`
 
 OBI GenAI embeddings client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{gen_ai.operation.name} {gen_ai.request.model}`, `{gen_ai.operation.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -230,16 +274,18 @@ OBI GenAI embeddings client span.
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.gen_ai.inference.client`
+## `obi.gen_ai.inference.client`
 
 OBI GenAI inference client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{gen_ai.operation.name} {gen_ai.request.model}`, `{gen_ai.operation.name} {gen_ai.response.model}`, `{gen_ai.operation.name}`. Name: OpenAI-compatible gateway spans are currently named after the HTTP request instead, `{method} {route}`, which these templates do not render.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -284,16 +330,18 @@ OBI GenAI inference client span.
 | `openai.response.system_fingerprint` | string | `recommended`: if the provider is OpenAI and the response reported a system fingerprint | development | A fingerprint to track any eventual change in the Generative AI environment. | fp_44709d6fcb |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.gen_ai.rerank.client`
+## `obi.gen_ai.rerank.client`
 
 OBI GenAI rerank client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{gen_ai.operation.name} {gen_ai.request.model}`, `{gen_ai.operation.name} {gen_ai.response.model}`, `{gen_ai.operation.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -313,16 +361,18 @@ OBI GenAI rerank client span.
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.gen_ai.retrieval.client`
+## `obi.gen_ai.retrieval.client`
 
 OBI GenAI vector-retrieval client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{gen_ai.operation.name} {gen_ai.data_source.id}`, `{gen_ai.operation.name} {gen_ai.provider.name}`, `{gen_ai.operation.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -333,6 +383,7 @@ OBI GenAI vector-retrieval client span.
 | `gen_ai.output.messages` | any | `opt_in` | development | Messages returned by the model where each message represents a specific model response (choice, candidate). | [   {     "role": "assistant",     "parts": [       {         "type": "text",         "content": "The weather in Paris is currently rainy with a temperature of 57°F."       }     ],     "finish_reason": "stop"   } ] |
 | `gen_ai.provider.name` | enum | `required` | development | The Generative AI provider as identified by the client or server instrumentation. | openai; gcp.gen_ai; gcp.vertex_ai; gcp.gemini; anthropic; cohere; azure.ai.inference; azure.ai.openai; … |
 | `gen_ai.request.model` | string | `conditionally_required`: if the request named a model | development | The name of the GenAI model a request is being made to. | gpt-4 |
+| `gen_ai.request.top_k` | double | `recommended`: if the request set a result count | development | The top_k sampling setting for the GenAI request. | 1 |
 | `gen_ai.response.id` | string | `recommended`: if the response carried an id | development | The unique identifier for the completion. | chatcmpl-123 |
 | `gen_ai.response.model` | string | `recommended`: if the request or the response named a model | development | The name of the model that generated the response. | gpt-4-0613 |
 | `gen_ai.usage.input_tokens` | int | `recommended`: if the provider reported token usage | development | The number of tokens used in the GenAI input (prompt). | 100 |
@@ -342,102 +393,128 @@ OBI GenAI vector-retrieval client span.
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.http.client`
+## `obi.graphql.server`
 
-OBI outbound HTTP client span.
-
-| Span kind | Stability |
-| --- | --- |
-| client | development |
-
-| Attribute | Type | Requirement level | Stability | Description | Examples |
-| --- | --- | --- | --- | --- | --- |
-| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
-| `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
-| `http.request.body.size` | int | `recommended` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
-| `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
-| `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
-| `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
-| `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
-| `http.response.body.size` | int | `recommended` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
-| `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
-| `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
-| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
-| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
-| `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
-| `obi.http.response.observed` | boolean | `conditionally_required`: if no response was observed | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
-| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
-| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
-| `url.full` | string | `conditionally_required`: if the scheme or the host was captured on the connection | stable | Absolute URL describing a network resource according to [RFC3986](https://www.rfc-editor.org/rfc/rfc3986) | https://www.foo.bar/search?q=OpenTelemetry#SemConv; //localhost |
-| `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
-| `url.scheme` | string | `conditionally_required`: if the scheme was captured on the connection | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
-| `user_agent.original` | string | `opt_in` | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
-
-## `span.obi.http.server`
-
-OBI inbound HTTP server span.
+OBI inbound GraphQL over HTTP server span.
 
 | Span kind | Stability |
 | --- | --- |
 | server | development |
 
+Name, from the first template that applies: `GraphQL {graphql.operation.type}`, `GraphQL Operation`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `client.address` | string | `recommended` | stable | Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | client.example.com; 10.1.2.80; /tmp/my.sock |
 | `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
-| `gen_ai.operation.name` | string | `conditionally_required`: if the request was identified as a GenAI or MCP operation | development | The name of the operation being performed. | chat; embeddings; response; conversation; invoke_model; rerank; execute_tool; _OTHER |
-| `gen_ai.prompt.name` | string | `conditionally_required`: if the request named a prompt template | development | The name of the prompt that uniquely identifies it. | analyze-code |
-| `gen_ai.tool.call.arguments` | any | `opt_in` | development | Parameters passed to the tool call. | {     "location": "San Francisco?",     "date": "2025-10-01" } |
-| `gen_ai.tool.call.result` | any | `opt_in` | development | The result returned by the tool call (if any and if execution was successful). | {   "temperature_range": {     "high": 75,     "low": 60   },   "conditions": "sunny" } |
-| `gen_ai.tool.name` | string | `conditionally_required`: if the operation executes a tool | development | Name of the tool utilized by the agent. | Flights |
-| `gen_ai.tool.type` | string | `recommended`: if the operation executes a tool | development | Type of the tool utilized by the agent | function; extension; datastore |
 | `graphql.document` | string | `opt_in` | development | The GraphQL document being executed. | query findBookById { bookById(id: ?) { name } } |
-| `graphql.operation.name` | string | `conditionally_required`: if the request was identified as GraphQL | development | The name of the operation being executed. | findBookById |
-| `graphql.operation.type` | enum | `conditionally_required`: if the request was identified as GraphQL | development | The type of the operation being executed. | query; mutation; subscription |
+| `graphql.operation.name` | string | `conditionally_required`: if the GraphQL document was parsed | development | The name of the operation being executed. | findBookById |
+| `graphql.operation.type` | enum | `conditionally_required`: if the GraphQL document was parsed | development | The type of the operation being executed. | query; mutation; subscription |
 | `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
-| `http.request.body.size` | int | `recommended` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.request.body.size` | int | `opt_in` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
 | `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
 | `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
 | `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
 | `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
-| `http.response.body.size` | int | `recommended` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
 | `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
 | `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
 | `http.route` | string | `conditionally_required`: if route collection is enabled and the route was matched | stable | The matched route template for the request. This MUST be low-cardinality and include all static path segments, with dynamic path segments represented with placeholders. | /users/:userID?; my-controller/my-action/{id?} |
-| `jsonrpc.protocol.version` | string | `conditionally_required`: if the request was identified as JSON-RPC or MCP | development | Protocol version, as specified in the `jsonrpc` property of the request and its corresponding response. | 2.0; 1.0 |
-| `jsonrpc.request.id` | string | `conditionally_required`: if the request was identified as JSON-RPC or MCP | development | A string representation of the `id` property of the request and its corresponding response. | 10; request-7 |
-| `mcp.method.name` | enum | `conditionally_required`: if the request was identified as MCP | development | The name of the request or notification method. | notifications/cancelled; initialize; notifications/initialized; notifications/progress; ping; resources/list; resources/templates/list; resources/read; … |
-| `mcp.protocol.version` | string | `recommended`: if the request was identified as MCP | development | The [version](https://modelcontextprotocol.io/specification/versioning) of the Model Context Protocol used. | 2025-06-18 |
-| `mcp.resource.uri` | string | `conditionally_required`: if the request was identified as MCP | development | The value of the resource uri. | postgres://database/customers/schema; file:///home/user/documents/report.pdf |
-| `mcp.session.id` | string | `recommended`: if the request was identified as MCP | development | Identifies [MCP session](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management). | 191c4850af6c49e08843a3f6c80e5046 |
 | `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
-| `obi.http.response.observed` | boolean | `conditionally_required`: if no response was observed | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
-| `rpc.method_original` | string | `conditionally_required`: if the qualified method differs from the raw one | release_candidate | The original name of the method used by the client. | com.myservice.EchoService/catchAll; com.myservice.EchoService/unknownMethod; InvalidMethod |
-| `rpc.method` | string | `conditionally_required`: if the call was identified as an RPC protocol | release_candidate | The fully-qualified logical name of the method from the RPC interface perspective. | com.example.ExampleService/exampleMethod; EchoService/Echo; _OTHER |
-| `rpc.response.status_code` | string | `conditionally_required`: if the RPC protocol reported a status code | release_candidate | Status code of the RPC returned by the RPC server or generated by the client | OK; DEADLINE_EXCEEDED; -32602 |
-| `rpc.system.name` | enum | `conditionally_required`: if the call was identified as an RPC protocol | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
+| `obi.http.response.observed` | boolean | `opt_in` | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
 | `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 | `url.path` | string | `conditionally_required`: if the front end reported a request URI, and the params frame carrying it was captured whole | stable | The [URI path](https://www.rfc-editor.org/rfc/rfc3986#section-3.3) component | /search |
 | `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
 | `url.scheme` | string | `conditionally_required`: if the front end reported a scheme, and the params frame carrying it was captured whole | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
 | `user_agent.original` | string | `recommended`: if the request carried a user agent header | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
 
-## `span.obi.jsonrpc.client`
+## `obi.http.client`
+
+OBI outbound HTTP client span.
+
+| Span kind | Stability |
+| --- | --- |
+| client | stable |
+
+Name: The method, or `HTTP` when it is outside the semantic-convention enum, followed by the route when OBI classified the request path into one: `{http.request.method} {route}`. Client spans do not emit the route as an attribute, so the name cannot be expressed as a template.
+
+| Attribute | Type | Requirement level | Stability | Description | Examples |
+| --- | --- | --- | --- | --- | --- |
+| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
+| `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
+| `http.request.body.size` | int | `opt_in` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
+| `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
+| `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
+| `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
+| `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
+| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
+| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
+| `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
+| `obi.http.response.observed` | boolean | `opt_in` | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
+| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
+| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `url.full` | string | `conditionally_required`: if the scheme or the host was captured on the connection | stable | Absolute URL describing a network resource according to [RFC3986](https://www.rfc-editor.org/rfc/rfc3986) | https://www.foo.bar/search?q=OpenTelemetry#SemConv; //localhost |
+| `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
+| `url.scheme` | string | `conditionally_required`: if the scheme was captured on the connection | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
+| `user_agent.original` | string | `opt_in` | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
+
+## `obi.http.server`
+
+OBI inbound HTTP server span.
+
+| Span kind | Stability |
+| --- | --- |
+| server | stable |
+
+Name, from the first template that applies: `{http.request.method} {http.route}`, `{http.request.method}`, `HTTP {http.route}`, `HTTP`.
+
+| Attribute | Type | Requirement level | Stability | Description | Examples |
+| --- | --- | --- | --- | --- | --- |
+| `client.address` | string | `recommended` | stable | Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | client.example.com; 10.1.2.80; /tmp/my.sock |
+| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
+| `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
+| `http.request.body.size` | int | `opt_in` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
+| `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
+| `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
+| `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
+| `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
+| `http.route` | string | `conditionally_required`: if route collection is enabled and the route was matched | stable | The matched route template for the request. This MUST be low-cardinality and include all static path segments, with dynamic path segments represented with placeholders. | /users/:userID?; my-controller/my-action/{id?} |
+| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
+| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
+| `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
+| `obi.http.response.observed` | boolean | `opt_in` | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
+| `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
+| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `url.path` | string | `conditionally_required`: if the front end reported a request URI, and the params frame carrying it was captured whole | stable | The [URI path](https://www.rfc-editor.org/rfc/rfc3986#section-3.3) component | /search |
+| `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
+| `url.scheme` | string | `conditionally_required`: if the front end reported a scheme, and the params frame carrying it was captured whole | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
+| `user_agent.original` | string | `recommended`: if the request carried a user agent header | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
+
+## `obi.jsonrpc.client`
 
 OBI outbound JSON-RPC over HTTP client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{rpc.method}`, `jsonrpc`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -457,17 +534,61 @@ OBI outbound JSON-RPC over HTTP client span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 | `user_agent.original` | string | `opt_in` | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
 
-## `span.obi.mcp.client`
+## `obi.jsonrpc.server`
+
+OBI inbound JSON-RPC over HTTP server span.
+
+| Span kind | Stability |
+| --- | --- |
+| server | development |
+
+Name, from the first template that applies: `{rpc.method}`, `jsonrpc`.
+
+| Attribute | Type | Requirement level | Stability | Description | Examples |
+| --- | --- | --- | --- | --- | --- |
+| `client.address` | string | `recommended` | stable | Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | client.example.com; 10.1.2.80; /tmp/my.sock |
+| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
+| `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
+| `http.request.body.size` | int | `opt_in` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
+| `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
+| `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
+| `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
+| `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
+| `http.route` | string | `conditionally_required`: if route collection is enabled and the route was matched | stable | The matched route template for the request. This MUST be low-cardinality and include all static path segments, with dynamic path segments represented with placeholders. | /users/:userID?; my-controller/my-action/{id?} |
+| `jsonrpc.protocol.version` | string | `conditionally_required`: upstream declares it conditional; OBI always emits it, since it recognises only JSON-RPC 2.0 | development | Protocol version, as specified in the `jsonrpc` property of the request and its corresponding response. | 2.0; 1.0 |
+| `jsonrpc.request.id` | string | `conditionally_required`: if the request carried a JSON-RPC id | development | A string representation of the `id` property of the request and its corresponding response. | 10; request-7 |
+| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
+| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
+| `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
+| `obi.http.response.observed` | boolean | `opt_in` | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
+| `rpc.method_original` | string | `conditionally_required`: if the qualified method differs from the raw one | release_candidate | The original name of the method used by the client. | com.myservice.EchoService/catchAll; com.myservice.EchoService/unknownMethod; InvalidMethod |
+| `rpc.method` | string | `required` | release_candidate | The fully-qualified logical name of the method from the RPC interface perspective. | com.example.ExampleService/exampleMethod; EchoService/Echo; _OTHER |
+| `rpc.response.status_code` | string | `conditionally_required`: if the response carried a JSON-RPC error code | release_candidate | Status code of the RPC returned by the RPC server or generated by the client | OK; DEADLINE_EXCEEDED; -32602 |
+| `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
+| `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
+| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `url.path` | string | `conditionally_required`: if the front end reported a request URI, and the params frame carrying it was captured whole | stable | The [URI path](https://www.rfc-editor.org/rfc/rfc3986#section-3.3) component | /search |
+| `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
+| `url.scheme` | string | `conditionally_required`: if the front end reported a scheme, and the params frame carrying it was captured whole | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
+| `user_agent.original` | string | `recommended`: if the request carried a user agent header | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
+
+## `obi.mcp.client`
 
 OBI Model Context Protocol client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{mcp.method.name} {gen_ai.tool.name}`, `{mcp.method.name} {gen_ai.prompt.name}`, `{mcp.method.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -489,30 +610,58 @@ OBI Model Context Protocol client span.
 | `rpc.response.status_code` | string | `conditionally_required`: if the response carried a JSON-RPC error code | release_candidate | Status code of the RPC returned by the RPC server or generated by the client | OK; DEADLINE_EXCEEDED; -32602 |
 | `server.address` | string | `recommended`: if the server address could be resolved | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `recommended`: when `server.address` is set | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.amqp.client`
+## `obi.mcp.server`
 
-OBI AMQP span for a receive or a settle operation.
+OBI inbound Model Context Protocol over HTTP server span.
 
 | Span kind | Stability |
 | --- | --- |
-| client | development |
+| server | development |
+
+Name, from the first template that applies: `{mcp.method.name} {gen_ai.tool.name}`, `{mcp.method.name} {gen_ai.prompt.name}`, `{mcp.method.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
-| `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
-| `messaging.operation.type` | enum | `conditionally_required`: upstream declares it conditional; OBI always emits it, since group membership requires the operation to have been parsed | development | A string identifying the type of the messaging operation. | create; send; receive; process; settle; deliver; publish |
-| `messaging.system` | enum | `required` | development | The messaging system as identified by the client instrumentation. | activemq; aws.sns; aws_sqs; eventgrid; eventhubs; servicebus; gcp_pubsub; jms; … |
+| `client.address` | string | `recommended` | stable | Client address - domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | client.example.com; 10.1.2.80; /tmp/my.sock |
+| `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
+| `gen_ai.operation.name` | string | `conditionally_required`: if the operation executes a tool | development | The name of the operation being performed. | chat; embeddings; response; conversation; invoke_model; rerank; execute_tool; _OTHER |
+| `gen_ai.prompt.name` | string | `conditionally_required`: if the request named a prompt template | development | The name of the prompt that uniquely identifies it. | analyze-code |
+| `gen_ai.tool.call.arguments` | any | `opt_in` | development | Parameters passed to the tool call. | {     "location": "San Francisco?",     "date": "2025-10-01" } |
+| `gen_ai.tool.call.result` | any | `opt_in` | development | The result returned by the tool call (if any and if execution was successful). | {   "temperature_range": {     "high": 75,     "low": 60   },   "conditions": "sunny" } |
+| `gen_ai.tool.name` | string | `conditionally_required`: if the operation executes a tool | development | Name of the tool utilized by the agent. | Flights |
+| `gen_ai.tool.type` | string | `recommended`: if the operation executes a tool | development | Type of the tool utilized by the agent | function; extension; datastore |
+| `http.request.body.content` | string | `opt_in` | development | Captured HTTP request body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"user":"alice"} |
+| `http.request.body.size` | int | `opt_in` | development | The size of the request payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.request.header` | template[string[]] | `opt_in` | stable | HTTP request headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["1.2.3.4","1.2.3.5"] |
+| `http.request.method_original` | string | `conditionally_required`: if the wire method was read and differs from `http.request.method` | stable | Original HTTP method sent by the client in the request line. | GeT; ACL; foo |
+| `http.request.method` | enum | `required` | stable | HTTP request method. | GET; POST; HEAD |
+| `http.response.body.content` | string | `opt_in` | development | Captured HTTP response body content. Only populated when OBI's body capture is enabled and subject to OBI's body-extraction rules (size limits, content-type filtering, obfuscation). | {"status":"ok"} |
+| `http.response.body.size` | int | `opt_in` | development | The size of the response payload body in bytes. This is the number of bytes transferred excluding headers and is often, but not always, present as the [Content-Length](https://www.rfc-editor.org/rfc/rfc9110.html#field.content-length) header. For requests using transport encoding, this should be the compressed size. | 3495 |
+| `http.response.header` | template[string[]] | `opt_in` | stable | HTTP response headers, `<key>` being the normalized HTTP Header name (lowercase), the value being the header values. | ["application/json"]; ["abc","def"] |
+| `http.response.status_code` | int | `conditionally_required`: if a response was observed | stable | [HTTP response status code](https://tools.ietf.org/html/rfc7231#section-6). | 200 |
+| `http.route` | string | `conditionally_required`: if route collection is enabled and the route was matched | stable | The matched route template for the request. This MUST be low-cardinality and include all static path segments, with dynamic path segments represented with placeholders. | /users/:userID?; my-controller/my-action/{id?} |
+| `jsonrpc.request.id` | string | `conditionally_required`: if the request carried a JSON-RPC id | development | A string representation of the `id` property of the request and its corresponding response. | 10; request-7 |
+| `mcp.method.name` | enum | `required` | development | The name of the request or notification method. | notifications/cancelled; initialize; notifications/initialized; notifications/progress; ping; resources/list; resources/templates/list; resources/read; … |
+| `mcp.protocol.version` | string | `recommended`: if the peer reported a protocol version | development | The [version](https://modelcontextprotocol.io/specification/versioning) of the Model Context Protocol used. | 2025-06-18 |
+| `mcp.resource.uri` | string | `conditionally_required`: if the request named a resource | development | The value of the resource uri. | postgres://database/customers/schema; file:///home/user/documents/report.pdf |
+| `mcp.session.id` | string | `recommended`: if the exchange is part of a session | development | Identifies [MCP session](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management). | 191c4850af6c49e08843a3f6c80e5046 |
 | `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
-| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
+| `network.protocol.version` | string | `recommended`: if the protocol version was observed on the wire | stable | The actual version of the protocol used for network communication. | 1.1; 2 |
+| `obi.http.response.observed` | boolean | `opt_in` | development | Present and false on an HTTP span whose response was never seen; absent otherwise. `http.response.status_code` is emitted instead once a response is observed. | false |
+| `rpc.response.status_code` | string | `conditionally_required`: if the response carried a JSON-RPC error code | release_candidate | Status code of the RPC returned by the RPC server or generated by the client | OK; DEADLINE_EXCEEDED; -32602 |
+| `server.address` | string | `recommended` | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `url.path` | string | `conditionally_required`: if the front end reported a request URI, and the params frame carrying it was captured whole | stable | The [URI path](https://www.rfc-editor.org/rfc/rfc3986#section-3.3) component | /search |
+| `url.query` | string | `conditionally_required`: if the request carried a query string | stable | The [URI query](https://www.rfc-editor.org/rfc/rfc3986#section-3.4) component | q=OpenTelemetry |
+| `url.scheme` | string | `conditionally_required`: if the front end reported a scheme, and the params frame carrying it was captured whole | stable | The [URI scheme](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) component identifying the used protocol. | https; ftp; telnet |
+| `user_agent.original` | string | `recommended`: if the request carried a user agent header | stable | Value of the [HTTP User-Agent](https://www.rfc-editor.org/rfc/rfc9110.html#field.user-agent) header sent by the client. | CERN-LineMode/2.15 libwww/2.17b3; Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1; YourApp/1.0.0 grpc-java-okhttp/1.27.2 |
 
-## `span.obi.messaging.amqp.consumer`
+## `obi.messaging.amqp.consumer`
 
 OBI AMQP span for a process operation.
 
@@ -520,6 +669,8 @@ OBI AMQP span for a process operation.
 | --- | --- |
 | consumer | development |
 
+Name: The operation followed by the exchange, `{messaging.operation.name} {exchange}`, or the operation alone when no exchange was read. The exchange is not emitted as an attribute on AMQP spans, so the name cannot be expressed as a template.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
@@ -529,10 +680,10 @@ OBI AMQP span for a process operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.amqp.producer`
+## `obi.messaging.amqp.producer`
 
 OBI AMQP span for a send or a publish operation.
 
@@ -540,6 +691,8 @@ OBI AMQP span for a send or a publish operation.
 | --- | --- |
 | producer | development |
 
+Name: The operation followed by the exchange, `{messaging.operation.name} {exchange}`, or the operation alone when no exchange was read. The exchange is not emitted as an attribute on AMQP spans, so the name cannot be expressed as a template.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
@@ -549,39 +702,18 @@ OBI AMQP span for a send or a publish operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.kafka.client`
-
-OBI Kafka span for a receive or a settle operation.
-
-| Span kind | Stability |
-| --- | --- |
-| client | development |
-
-| Attribute | Type | Requirement level | Stability | Description | Examples |
-| --- | --- | --- | --- | --- | --- |
-| `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
-| `messaging.destination.name` | string | `required` | development | The message destination name | MyQueue; MyTopic |
-| `messaging.destination.partition.id` | string | `conditionally_required`: if the record carried partition metadata | development | The identifier of the partition messages are sent to or received from, unique within the `messaging.destination.name`. | 1 |
-| `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
-| `messaging.operation.type` | enum | `conditionally_required`: upstream declares it conditional; OBI always emits it, since group membership requires the operation to have been parsed | development | A string identifying the type of the messaging operation. | create; send; receive; process; settle; deliver; publish |
-| `messaging.system` | enum | `required` | development | The messaging system as identified by the client instrumentation. | activemq; aws.sns; aws_sqs; eventgrid; eventhubs; servicebus; gcp_pubsub; jms; … |
-| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
-| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
-| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
-| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
-
-## `span.obi.messaging.kafka.consumer`
+## `obi.messaging.kafka.consumer`
 
 OBI Kafka span for a process operation.
 
 | Span kind | Stability |
 | --- | --- |
 | consumer | development |
+
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -596,16 +728,18 @@ OBI Kafka span for a process operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.kafka.producer`
+## `obi.messaging.kafka.producer`
 
 OBI Kafka span for a send or a publish operation.
 
 | Span kind | Stability |
 | --- | --- |
 | producer | development |
+
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -619,32 +753,10 @@ OBI Kafka span for a send or a publish operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.mqtt.client`
-
-OBI MQTT span for a receive or a settle operation.
-
-| Span kind | Stability |
-| --- | --- |
-| client | development |
-
-| Attribute | Type | Requirement level | Stability | Description | Examples |
-| --- | --- | --- | --- | --- | --- |
-| `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
-| `messaging.destination.name` | string | `required` | development | The message destination name | MyQueue; MyTopic |
-| `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
-| `messaging.operation.type` | enum | `conditionally_required`: upstream declares it conditional; OBI always emits it, since group membership requires the operation to have been parsed | development | A string identifying the type of the messaging operation. | create; send; receive; process; settle; deliver; publish |
-| `messaging.system` | enum | `required` | development | The messaging system as identified by the client instrumentation. | activemq; aws.sns; aws_sqs; eventgrid; eventhubs; servicebus; gcp_pubsub; jms; … |
-| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
-| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
-| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
-| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
-
-## `span.obi.messaging.mqtt.consumer`
+## `obi.messaging.mqtt.consumer`
 
 OBI MQTT span for a process operation.
 
@@ -652,6 +764,8 @@ OBI MQTT span for a process operation.
 | --- | --- |
 | consumer | development |
 
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
@@ -663,10 +777,10 @@ OBI MQTT span for a process operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.mqtt.producer`
+## `obi.messaging.mqtt.producer`
 
 OBI MQTT span for a send or a publish operation.
 
@@ -674,6 +788,8 @@ OBI MQTT span for a send or a publish operation.
 | --- | --- |
 | producer | development |
 
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
@@ -685,33 +801,10 @@ OBI MQTT span for a send or a publish operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.nats.client`
-
-OBI NATS span for a receive or a settle operation.
-
-| Span kind | Stability |
-| --- | --- |
-| client | development |
-
-| Attribute | Type | Requirement level | Stability | Description | Examples |
-| --- | --- | --- | --- | --- | --- |
-| `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
-| `messaging.destination.name` | string | `required` | development | The message destination name | MyQueue; MyTopic |
-| `messaging.message.envelope.size` | int | `recommended` | development | The size of the message body and metadata in bytes. | 2738 |
-| `messaging.operation.name` | string | `required` | development | The system-specific name of the messaging operation. | ack; nack; send |
-| `messaging.operation.type` | enum | `conditionally_required`: upstream declares it conditional; OBI always emits it, since group membership requires the operation to have been parsed | development | A string identifying the type of the messaging operation. | create; send; receive; process; settle; deliver; publish |
-| `messaging.system` | enum | `required` | development | The messaging system as identified by the client instrumentation. | activemq; aws.sns; aws_sqs; eventgrid; eventhubs; servicebus; gcp_pubsub; jms; … |
-| `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |
-| `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
-| `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
-| `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
-
-## `span.obi.messaging.nats.consumer`
+## `obi.messaging.nats.consumer`
 
 OBI NATS span for a process operation.
 
@@ -719,6 +812,8 @@ OBI NATS span for a process operation.
 | --- | --- |
 | consumer | development |
 
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
@@ -731,10 +826,10 @@ OBI NATS span for a process operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.messaging.nats.producer`
+## `obi.messaging.nats.producer`
 
 OBI NATS span for a send or a publish operation.
 
@@ -742,6 +837,8 @@ OBI NATS span for a send or a publish operation.
 | --- | --- |
 | producer | development |
 
+Name, from the first template that applies: `{messaging.operation.name} {messaging.destination.name}`, `{messaging.operation.name}`.
+
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
 | `messaging.client.id` | string | `recommended` | development | A unique identifier for the client that consumes or produces a message. | client-5; myhost@8742@s8083jm |
@@ -754,16 +851,30 @@ OBI NATS span for a send or a publish operation.
 | `network.peer.port` | int | `recommended`: if `network.peer.address` is set and the port is known | stable | Peer port number of the network connection. | 65123 |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if OBI observed the exchange from the client side and resolved the peer service name | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.rpc.grpc.client`
+## `obi.request.phase`
+
+OBI child span splitting a request that waited before it was processed into its queued and processing phases.
+
+| Span kind | Stability |
+| --- | --- |
+| internal | development |
+
+Name: `in queue` for the time between the request arriving and its handler starting, and `processing` for the time the handler ran. Neither is derived from an attribute.
+
+No attributes.
+
+## `obi.rpc.grpc.client`
 
 OBI outbound gRPC client span.
 
 | Span kind | Stability |
 | --- | --- |
-| client | development |
+| client | release_candidate |
+
+Name, from the first template that applies: `{rpc.method}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -776,16 +887,18 @@ OBI outbound gRPC client span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.rpc.grpc.server`
+## `obi.rpc.grpc.server`
 
 OBI inbound gRPC server span.
 
 | Span kind | Stability |
 | --- | --- |
-| server | development |
+| server | release_candidate |
+
+Name, from the first template that applies: `{rpc.method}`.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -799,15 +912,17 @@ OBI inbound gRPC server span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the host address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.rpc.onc_rpc.client`
+## `obi.rpc.onc_rpc.client`
 
 OBI outbound ONC/Sun RPC client span.
 
 | Span kind | Stability |
 | --- | --- |
 | client | development |
+
+Name, from the first template that applies: `{onc_rpc.program.name}/{onc_rpc.procedure.name}`, `{onc_rpc.program.name}/{onc_rpc.procedure.number}`, `sunrpc/{onc_rpc.procedure.name}`, `sunrpc/{onc_rpc.procedure.number}`. Name: A reply OBI could not pair with its call is named `{onc_rpc.program.name}/reply`, which no template renders.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -823,16 +938,18 @@ OBI outbound ONC/Sun RPC client span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the peer address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `service.peer.name` | string | `recommended`: if the peer service name could be resolved | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `service.peer.name` | string | `opt_in` | development | Logical name of the service on the other side of the connection. SHOULD be equal to the actual [`service.name`](/docs/resource/README.md#service) resource attribute of the remote service if any. | shoppingcart |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
 
-## `span.obi.rpc.onc_rpc.server`
+## `obi.rpc.onc_rpc.server`
 
 OBI inbound ONC/Sun RPC server span.
 
 | Span kind | Stability |
 | --- | --- |
 | server | development |
+
+Name, from the first template that applies: `{onc_rpc.program.name}/{onc_rpc.procedure.name}`, `{onc_rpc.program.name}/{onc_rpc.procedure.number}`, `sunrpc/{onc_rpc.procedure.name}`, `sunrpc/{onc_rpc.procedure.number}`. Name: A reply OBI could not pair with its call is named `{onc_rpc.program.name}/reply`, which no template renders.
 
 | Attribute | Type | Requirement level | Stability | Description | Examples |
 | --- | --- | --- | --- | --- | --- |
@@ -848,4 +965,4 @@ OBI inbound ONC/Sun RPC server span.
 | `rpc.system.name` | enum | `required` | release_candidate | The Remote Procedure Call (RPC) system. | grpc; dubbo; connectrpc; jsonrpc; aws-api; onc_rpc |
 | `server.address` | string | `conditionally_required`: if the host address was resolved from the connection | stable | Server domain name if available without reverse DNS lookup; otherwise, IP address or Unix domain socket name. | example.com; 10.1.2.80; /tmp/my.sock |
 | `server.port` | int | `conditionally_required`: if the port was observed on the connection | stable | Server port number. | 80; 8080; 443 |
-| `span.metrics.skip` | boolean | `conditionally_required`: if a span-metrics feature is enabled | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |
+| `span.metrics.skip` | boolean | `opt_in` | development | Hint set on a span by the producer to tell downstream span-metrics processors that this span is already accounted for in upstream span-metrics emissions and should be excluded from aggregation, to avoid double counting. |  |

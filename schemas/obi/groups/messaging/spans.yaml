@@ -1,14 +1,16 @@
-groups:
+file_format: definition/2
+attribute_groups:
   # The exporter has one branch per broker and they emit different attribute
   # sets, so each broker gets its own groups rather than one union no span can
   # satisfy. The kind follows the messaging operation, not the side OBI observed
   # the exchange from: send and publish are producer, process is consumer, and
   # receive and settle are client, because OBI observes the exchange with the
   # broker rather than what the application afterwards does with the message.
-  - id: span.obi.messaging.common
-    type: attribute_group
-    stability: development
-    brief: Attributes OBI emits on every messaging span, whatever the broker.
+  #
+  # The attributes OBI emits on every messaging span, whatever the broker, are
+  # shared through this group.
+  - id: attributes.obi.messaging.common
+    visibility: internal
     attributes:
       - ref: messaging.system
         requirement_level: required
@@ -24,11 +26,9 @@ groups:
         requirement_level:
           conditionally_required: if the port was observed on the connection
       - ref: service.peer.name
-        requirement_level:
-          recommended: if OBI observed the exchange from the client side and resolved the peer service name
+        requirement_level: opt_in
       - ref: span.metrics.skip
-        requirement_level:
-          conditionally_required: if a span-metrics feature is enabled
+        requirement_level: opt_in
       - ref: network.peer.address
         requirement_level:
           recommended: if the peer address is an IP rather than a name
@@ -36,13 +36,18 @@ groups:
         requirement_level:
           recommended: if `network.peer.address` is set and the port is known
 
-  - id: span.obi.messaging.kafka.producer
-    type: span
-    span_kind: producer
+spans:
+  - type: obi.messaging.kafka.producer
+    kind: producer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI Kafka span for a send or a publish operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
@@ -51,13 +56,17 @@ groups:
         requirement_level:
           conditionally_required: if the record carried partition metadata
 
-  - id: span.obi.messaging.kafka.consumer
-    type: span
-    span_kind: consumer
+  - type: obi.messaging.kafka.consumer
+    kind: consumer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI Kafka span for a process operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
@@ -69,64 +78,49 @@ groups:
         requirement_level:
           recommended: if the record carried partition metadata
 
-  - id: span.obi.messaging.kafka.client
-    type: span
-    span_kind: client
+  - type: obi.messaging.mqtt.producer
+    kind: producer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
-    brief: OBI Kafka span for a receive or a settle operation.
-    attributes:
-      - ref: messaging.destination.name
-        requirement_level: required
-      - ref: messaging.client.id
-        requirement_level: recommended
-      - ref: messaging.destination.partition.id
-        requirement_level:
-          conditionally_required: if the record carried partition metadata
-
-  - id: span.obi.messaging.mqtt.producer
-    type: span
-    span_kind: producer
-    stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI MQTT span for a send or a publish operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
         requirement_level: recommended
 
-  - id: span.obi.messaging.mqtt.consumer
-    type: span
-    span_kind: consumer
+  - type: obi.messaging.mqtt.consumer
+    kind: consumer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI MQTT span for a process operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
         requirement_level: recommended
 
-  - id: span.obi.messaging.mqtt.client
-    type: span
-    span_kind: client
+  - type: obi.messaging.nats.producer
+    kind: producer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
-    brief: OBI MQTT span for a receive or a settle operation.
-    attributes:
-      - ref: messaging.destination.name
-        requirement_level: required
-      - ref: messaging.client.id
-        requirement_level: recommended
-
-  - id: span.obi.messaging.nats.producer
-    type: span
-    span_kind: producer
-    stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI NATS span for a send or a publish operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
@@ -134,13 +128,17 @@ groups:
       - ref: messaging.message.envelope.size
         requirement_level: recommended
 
-  - id: span.obi.messaging.nats.consumer
-    type: span
-    span_kind: consumer
+  - type: obi.messaging.nats.consumer
+    kind: consumer
+    name:
+      templates:
+        - "{messaging.operation.name} {messaging.destination.name}"
+        - "{messaging.operation.name}"
     stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI NATS span for a process operation.
     attributes:
+      - ref_group: attributes.obi.messaging.common
       - ref: messaging.destination.name
         requirement_level: required
       - ref: messaging.client.id
@@ -148,37 +146,30 @@ groups:
       - ref: messaging.message.envelope.size
         requirement_level: recommended
 
-  - id: span.obi.messaging.nats.client
-    type: span
-    span_kind: client
+  - type: obi.messaging.amqp.producer
+    kind: producer
+    name:
+      note: >
+        The operation followed by the exchange,
+        `{messaging.operation.name} {exchange}`, or the operation alone when no
+        exchange was read. The exchange is not emitted as an attribute on AMQP
+        spans, so the name cannot be expressed as a template.
     stability: development
-    extends: span.obi.messaging.common
-    brief: OBI NATS span for a receive or a settle operation.
-    attributes:
-      - ref: messaging.destination.name
-        requirement_level: required
-      - ref: messaging.client.id
-        requirement_level: recommended
-      - ref: messaging.message.envelope.size
-        requirement_level: recommended
-
-  - id: span.obi.messaging.amqp.producer
-    type: span
-    span_kind: producer
-    stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI AMQP span for a send or a publish operation.
+    attributes:
+      - ref_group: attributes.obi.messaging.common
 
-  - id: span.obi.messaging.amqp.consumer
-    type: span
-    span_kind: consumer
+  - type: obi.messaging.amqp.consumer
+    kind: consumer
+    name:
+      note: >
+        The operation followed by the exchange,
+        `{messaging.operation.name} {exchange}`, or the operation alone when no
+        exchange was read. The exchange is not emitted as an attribute on AMQP
+        spans, so the name cannot be expressed as a template.
     stability: development
-    extends: span.obi.messaging.common
+    requirement_level: recommended
     brief: OBI AMQP span for a process operation.
-
-  - id: span.obi.messaging.amqp.client
-    type: span
-    span_kind: client
-    stability: development
-    extends: span.obi.messaging.common
-    brief: OBI AMQP span for a receive or a settle operation.
+    attributes:
+      - ref_group: attributes.obi.messaging.common
