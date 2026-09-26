@@ -181,6 +181,9 @@ func waitForSettledTap(ctx context.Context, collector tapCollector) (TapStats, e
 		}
 
 		current, err := scrapeCollectorTelemetry(ctx, collector)
+		if err != nil && ctx.Err() != nil {
+			return previous, fmt.Errorf("%w within %s (%.0f item(s) still queued)", errTapNotSettled, dockerCollectorDrainTimeout, previous.Queued)
+		}
 		if err != nil {
 			return current, err
 		}
