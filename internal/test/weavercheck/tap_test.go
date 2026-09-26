@@ -52,19 +52,13 @@ func TestParseTapStatsReportsWhetherTheExporterIsPresent(t *testing.T) {
 	require.Zero(t, stats.Queued)
 }
 
-func TestParseTapStatsSumsSentItems(t *testing.T) {
-	stats, err := ParseTapStats(strings.NewReader(tapTelemetry), "otlp/weaver")
-	require.NoError(t, err)
-	require.InDelta(t, 100, stats.Sent, 0)
-}
-
 func TestTapStatsSettled(t *testing.T) {
-	previous := TapStats{Found: true, Sent: 100, Failed: 1}
+	empty := TapStats{Found: true}
+	queued := TapStats{Found: true, Queued: 2}
 
-	require.True(t, TapStats{Found: true, Sent: 100, Failed: 1}.Settled(previous))
-	require.False(t, TapStats{Found: true, Sent: 100, Failed: 1, Queued: 2}.Settled(previous), "items still queued")
-	require.False(t, TapStats{Found: true, Sent: 104, Failed: 1}.Settled(previous), "items still being sent")
-	require.False(t, TapStats{Found: true, Sent: 100, Failed: 2}.Settled(previous), "a send failed since the last scrape")
+	require.True(t, empty.Settled(empty))
+	require.False(t, queued.Settled(empty), "items still queued")
+	require.False(t, empty.Settled(queued), "the queue emptied only since the last scrape")
 }
 
 func TestParseTapStatsRejectsMalformedMetrics(t *testing.T) {

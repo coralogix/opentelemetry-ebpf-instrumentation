@@ -17,7 +17,6 @@ const AllExporters = ""
 
 const (
 	exporterMetricPrefix        = "otelcol_exporter_"
-	exporterSentPrefix          = "otelcol_exporter_sent_"
 	exporterFailedSendPrefix    = "otelcol_exporter_send_failed_"
 	exporterFailedEnqueuePrefix = "otelcol_exporter_enqueue_failed_"
 	exporterQueueSize           = "otelcol_exporter_queue_size"
@@ -29,20 +28,18 @@ type exporterMetricKind int
 const (
 	notExporterMetric exporterMetricKind = iota
 	otherExporterMetric
-	sentExporterMetric
 	failedExporterMetric
 	queueExporterMetric
 )
 
 type TapStats struct {
 	Found  bool
-	Sent   float64
 	Failed float64
 	Queued float64
 }
 
 func (s TapStats) Settled(previous TapStats) bool {
-	return s.Queued == 0 && s.Sent == previous.Sent && s.Failed == previous.Failed
+	return s.Queued == 0 && previous.Queued == 0
 }
 
 func ParseTapStats(reader io.Reader, exporter string) (TapStats, error) {
@@ -76,8 +73,6 @@ func exporterMetricKindOf(name string) exporterMetricKind {
 	switch {
 	case !strings.HasPrefix(name, exporterMetricPrefix):
 		return notExporterMetric
-	case strings.HasPrefix(name, exporterSentPrefix):
-		return sentExporterMetric
 	case strings.HasPrefix(name, exporterFailedSendPrefix), strings.HasPrefix(name, exporterFailedEnqueuePrefix):
 		return failedExporterMetric
 	case name == exporterQueueSize:
@@ -89,15 +84,11 @@ func exporterMetricKindOf(name string) exporterMetricKind {
 
 func (s *TapStats) add(kind exporterMetricKind, name string, metric *dto.Metric) error {
 	switch kind {
-	case sentExporterMetric, failedExporterMetric:
+	case failedExporterMetric:
 		if metric.Counter == nil {
-			return fmt.Errorf("exporter metric %s is not a counter", name)
+			return fmt.Errorf("exporter failure metric %s is not a counter", name)
 		}
-		if kind == sentExporterMetric {
-			s.Sent += metric.Counter.GetValue()
-		} else {
-			s.Failed += metric.Counter.GetValue()
-		}
+		s.Failed += metric.Counter.GetValue()
 	case queueExporterMetric:
 		if metric.Gauge == nil {
 			return fmt.Errorf("exporter queue metric %s is not a gauge", name)
