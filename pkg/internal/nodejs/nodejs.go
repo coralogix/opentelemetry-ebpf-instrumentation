@@ -12,10 +12,12 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
 
+	"go.opentelemetry.io/obi/pkg/appolly/app"
 	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
 	"go.opentelemetry.io/obi/pkg/ebpf"
 	"go.opentelemetry.io/obi/pkg/internal/netns"
@@ -26,6 +28,16 @@ import (
 type NodeInjector struct {
 	log *slog.Logger
 	cfg *obi.Config
+
+	openHandle func(app.PID, uint64) (*procs.ProcessHandle, error)
+
+	mu       sync.Mutex
+	injected map[app.PID]injectedProcess
+}
+
+type injectedProcess struct {
+	startTime uint64
+	gates     *signalGates
 }
 
 func NewNodeInjector(cfg *obi.Config) *NodeInjector {
@@ -37,8 +49,10 @@ func NewNodeInjector(cfg *obi.Config) *NodeInjector {
 	}
 
 	return &NodeInjector{
-		cfg: cfg,
-		log: log,
+		cfg:        cfg,
+		log:        log,
+		openHandle: openProcessHandle,
+		injected:   map[app.PID]injectedProcess{},
 	}
 }
 
@@ -117,10 +131,28 @@ func (i *NodeInjector) Inject(ctx context.Context, target InjectionTarget) {
 		return
 	}
 
-	if err := i.attachAgent(ctx, target, elfFile); err != nil {
+	gates := &signalGates{}
+	injected, err := i.attachAgent(ctx, target, elfFile, gates)
+
+	// Recorded once sent: a script evaluated before a failed reply is still resident.
+	if injected {
+		i.mu.Lock()
+		i.injected[pid] = injectedProcess{startTime: target.StartTime, gates: gates}
+		i.mu.Unlock()
+	}
+
+	if err != nil {
 		i.log.Error("couldn't attach NodeJS injector", "pid", pid, "error", err)
 		i.log.Error("trace-context propagation and nodejs runtime metrics will not work for NodeJS services!")
 	}
+}
+
+// Forget drops a process from the uninjection set, so a PID discovery has
+// already seen exit is never reopened at shutdown.
+func (i *NodeInjector) Forget(pid app.PID) {
+	i.mu.Lock()
+	delete(i.injected, pid)
+	i.mu.Unlock()
 }
 
 // attachAgent injects the agent through the Node.js inspector, opening it with
@@ -130,40 +162,48 @@ func (i *NodeInjector) Inject(ctx context.Context, target InjectionTarget) {
 // Deciding whether the signal is safe to send reads /proc and the application's
 // files, needs no namespace of its own, and can wait on the runtime for as long
 // as dispositionWait.
-func (i *NodeInjector) attachAgent(ctx context.Context, target InjectionTarget, elfFile *elf.File) error {
+func (i *NodeInjector) attachAgent(ctx context.Context, target InjectionTarget, elfFile *elf.File, gates *signalGates) (bool, error) {
 	pid := int(target.Pid)
+	code := i.agentCode()
 
-	injected, err := i.injectViaOpenInspector(pid)
+	injected, err := i.injectViaOpenInspector(pid, code, time.Time{})
 	if injected || err != nil {
-		return err
+		return injected, err
 	}
 
-	reason := sigusr1Refusal(ctx, target.Process, elfFile)
+	reason := gates.refusal(ctx, target.Process, elfFile)
 
 	// Shutdown is not a refusal: the gates were abandoned rather than answered,
 	// so nothing was concluded about this process and nothing is reported.
 	if err := ctx.Err(); err != nil {
-		return nil
+		return false, nil
 	}
 
 	if reason != "" {
 		i.log.Warn(skippingInjection, "pid", pid, "reason", reason)
-		return nil
+		return false, nil
 	}
 
 	if err := sendSIGUSR1(target.Process); err != nil {
-		return fmt.Errorf("error enabling node inspector: %w", err)
+		return false, fmt.Errorf("error enabling node inspector: %w", err)
 	}
 
-	return netns.WithNetNS(pid, func() error {
+	sent := false
+
+	err = netns.WithNetNS(pid, func() error {
 		conn, err := connectWait("127.0.0.1", 9229, 5*time.Second, 200*time.Millisecond)
 		if err != nil {
 			return fmt.Errorf("failed to connect to inspector after SIGUSR1: %w", err)
 		}
 
-		// SIGUSR1 opened this port, so this injection closes it again.
-		return i.injectViaConn(conn, true)
+		var injectErr error
+
+		sent, injectErr = i.injectViaConn(conn, code, time.Time{}, true)
+
+		return injectErr
 	})
+
+	return sent, err
 }
 
 // injectViaOpenInspector handles the case of an inspector already listening,
@@ -171,7 +211,7 @@ func (i *NodeInjector) attachAgent(ctx context.Context, target InjectionTarget, 
 // value reports whether the injection was carried out.
 //
 // The port was the application's before OBI connected, so it is left open.
-func (i *NodeInjector) injectViaOpenInspector(pid int) (bool, error) {
+func (i *NodeInjector) injectViaOpenInspector(pid int, code string, deadline time.Time) (bool, error) {
 	injected := false
 
 	err := netns.WithNetNS(pid, func() error {
@@ -182,14 +222,18 @@ func (i *NodeInjector) injectViaOpenInspector(pid int) (bool, error) {
 
 		// Validate this is actually a Node.js inspector, not some other
 		// service that happens to listen on port 9229.
-		if !i.isNodeInspector(conn) {
+		if !i.isNodeInspector(conn, deadline) {
 			conn.Close()
 			return nil
 		}
 
 		i.log.Debug("Node.js inspector already open, injecting directly", "pid", pid)
-		injected = true
-		return i.injectViaConn(conn, false)
+
+		var injectErr error
+
+		injected, injectErr = i.injectViaConn(conn, code, deadline, false)
+
+		return injectErr
 	})
 
 	return injected, err
@@ -245,13 +289,48 @@ func (i *NodeInjector) runtimeRefusal(target InjectionTarget, elfFile *elf.File)
 // otherwise refused for a condition that clears on its own.
 const dispositionWait = 500 * time.Millisecond
 
+// signalGates keeps what the SIGUSR1 gates learn that holds for the life of a
+// process — the executable's symbols and a completed source scan — so the
+// shutdown pass re-reads only the disposition and the handler tree.
+type signalGates struct {
+	symsRead bool
+	syms     nodeSymbols
+
+	scanned   bool
+	sourceHit bool
+}
+
+func (g *signalGates) symbols(elfFile *elf.File) nodeSymbols {
+	if !g.symsRead {
+		g.syms = readNodeSymbols(elfFile)
+		g.symsRead = true
+	}
+
+	return g.syms
+}
+
+// sourceReferencesSIGUSR1 remembers only a scan that finished: a cancelled one
+// reports no reference found.
+func (g *signalGates) sourceReferencesSIGUSR1(ctx context.Context, pid int) bool {
+	if !g.scanned {
+		g.sourceHit = sourceHasSIGUSR1Reference(ctx, pid)
+		g.scanned = ctx.Err() == nil
+	}
+
+	return g.sourceHit
+}
+
 // sigusr1Refusal reports why the signal is withheld, or an empty reason when
 // it is safe to send. Discovery has already established that this is a Node.js
 // runtime; what is left is whether the signal would terminate it, and whether
 // the application has taken the signal over.
 func sigusr1Refusal(ctx context.Context, process *procs.ProcessHandle, elfFile *elf.File) string {
+	return (&signalGates{}).refusal(ctx, process, elfFile)
+}
+
+func (g *signalGates) refusal(ctx context.Context, process *procs.ProcessHandle, elfFile *elf.File) string {
 	pid := int(process.PID())
-	syms := readNodeSymbols(elfFile)
+	syms := g.symbols(elfFile)
 
 	switch process.AwaitSignalDisposition(ctx, unix.SIGUSR1, dispositionWait) {
 	case procs.SignalDispositionFatal:
@@ -267,7 +346,7 @@ func sigusr1Refusal(ctx context.Context, process *procs.ProcessHandle, elfFile *
 	case signalCheckFailed:
 		// The runtime carries no readable libuv signal tree, so the
 		// application's own files are the only remaining evidence.
-		if sourceHasSIGUSR1Reference(pid) {
+		if g.sourceReferencesSIGUSR1(ctx, pid) {
 			return refusalSourceReferencesSIGUSR1
 		}
 	case signalCheckNotFound:
@@ -279,8 +358,8 @@ func sigusr1Refusal(ctx context.Context, process *procs.ProcessHandle, elfFile *
 // isNodeInspector validates that a connection to port 9229 is actually a
 // Node.js inspector by requesting /json/version and checking for a valid
 // JSON response.
-func (i *NodeInjector) isNodeInspector(conn net.Conn) bool {
-	resp, err := httpGet(conn, "/json/version")
+func (i *NodeInjector) isNodeInspector(conn net.Conn, deadline time.Time) bool {
+	resp, err := httpGetWithTimeout(conn, "/json/version", stepTimeout(deadline))
 	if err != nil {
 		return false
 	}
@@ -304,6 +383,8 @@ const (
 	rtEnabledOn              = "= true; /*OBI_RT_ENABLED*/"
 	tracesEnabledPlaceholder = "= false; /*OBI_TRACES_ENABLED*/"
 	tracesEnabledOn          = "= true; /*OBI_TRACES_ENABLED*/"
+	spansEnabledPlaceholder  = "= false; /*OBI_SPANS_ENABLED*/"
+	spansEnabledOn           = "= true; /*OBI_SPANS_ENABLED*/"
 
 	ctxHookEnabledPlaceholder = "= false; /*OBI_CTX_HOOK_ENABLED*/"
 	ctxHookEnabledOn          = "= true; /*OBI_CTX_HOOK_ENABLED*/"
@@ -327,7 +408,216 @@ func (i *NodeInjector) agentCode() string {
 		code = strings.Replace(code, ctxHookEnabledPlaceholder, ctxHookEnabledOn, 1)
 	}
 	if i.cfg.NodeJS.ManualSpans {
-		code += ";\n" + _spanBridgeCode
+		code += ";\n" + strings.Replace(_spanBridgeCode, spansEnabledPlaceholder, spansEnabledOn, 1)
 	}
 	return code
+}
+
+// uninstallCode is both scripts with every gate off: each prologue tears down
+// what a previous injection installed.
+func uninstallCode() string {
+	return _extractorCode + ";\n" + _spanBridgeCode
+}
+
+const (
+	// Half the shutdown timeout, so the rest of shutdown still fits.
+	uninjectAllowanceShare = 2
+	uninjectConcurrency    = 4
+)
+
+const (
+	uninjectGateBudget     = 250 * time.Millisecond
+	uninjectConnectBudget  = 2 * time.Second
+	uninjectEvaluateBudget = 500 * time.Millisecond
+	uninjectCommitTail     = uninjectGateBudget + uninjectConnectBudget + uninjectEvaluateBudget + debugEndBudget
+
+	// SIGUSR1 opens a port only a completed handshake closes, so it is sent
+	// only while the whole handshake still fits.
+	uninjectSignalTail = uninjectConnectBudget + uninjectEvaluateBudget + debugEndBudget
+)
+
+func (i *NodeInjector) uninjectAllowance() time.Duration {
+	return i.cfg.ShutdownTimeout / uninjectAllowanceShare
+}
+
+func (i *NodeInjector) uninjectDeadline(shutdownAt time.Time) time.Time {
+	if shutdownAt.IsZero() || shutdownAt.UnixNano() <= 0 {
+		return time.Now().Add(i.uninjectAllowance())
+	}
+
+	return shutdownAt.Add(i.uninjectAllowance())
+}
+
+// UninjectAll removes the injected script from every process this agent
+// injected, returning within the allowance measured from shutdownAt.
+func (i *NodeInjector) UninjectAll(shutdownAt time.Time) {
+	i.mu.Lock()
+	targets := i.injected
+	i.injected = map[app.PID]injectedProcess{}
+	i.mu.Unlock()
+
+	if len(targets) == 0 {
+		return
+	}
+
+	if i.uninjectAllowance() < uninjectCommitTail {
+		i.log.Warn("shutdown_timeout leaves no room to remove NodeJS instrumentation; "+
+			"the injected scripts stay resident until their applications restart",
+			"processes", len(targets), "shutdown_timeout", i.cfg.ShutdownTimeout,
+			"needs_at_least", uninjectCommitTail*uninjectAllowanceShare)
+
+		return
+	}
+
+	deadline := i.uninjectDeadline(shutdownAt)
+
+	if remaining := time.Until(deadline); remaining < uninjectCommitTail {
+		i.log.Warn("shutdown is already out of time to remove NodeJS instrumentation; "+
+			"the injected scripts stay resident until their applications restart",
+			"processes", len(targets), "remaining", remaining.Truncate(time.Millisecond))
+
+		return
+	}
+
+	i.log.Info("removing NodeJS instrumentation before shutdown", "processes", len(targets))
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+
+	code := uninstallCode()
+	sem := make(chan struct{}, uninjectConcurrency)
+
+	var wg sync.WaitGroup
+
+	admitted := 0
+
+	// A target is admitted only while a whole commit tail still fits.
+admission:
+	for pid, proc := range targets {
+		wait := time.NewTimer(time.Until(deadline) - uninjectCommitTail)
+
+		select {
+		case sem <- struct{}{}:
+			wait.Stop()
+		case <-wait.C:
+			break admission
+		}
+
+		admitted++
+
+		wg.Go(func() {
+			defer func() { <-sem }()
+
+			if err := i.uninject(ctx, pid, proc, code); err != nil {
+				i.log.Warn("couldn't remove NodeJS instrumentation; "+
+					"the injected script stays resident until the application restarts",
+					"pid", pid, "error", err)
+			}
+		})
+	}
+
+	if left := len(targets) - admitted; left > 0 {
+		i.log.Warn("out of time to remove NodeJS instrumentation from every process; "+
+			"the injected scripts stay resident until their applications restart",
+			"not_reached", left, "of", len(targets))
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	drain := time.NewTimer(time.Until(deadline))
+	defer drain.Stop()
+
+	select {
+	case <-done:
+	case <-drain.C:
+		i.log.Warn("gave up waiting for NodeJS instrumentation to be removed; " +
+			"the injected scripts stay resident until their applications restart")
+	}
+}
+
+// uninject reopens the process through a handle validated against the start
+// time recorded at injection, so a recycled PID is never signaled.
+func (i *NodeInjector) uninject(ctx context.Context, pid app.PID, proc injectedProcess, code string) error {
+	ctx, cancel := context.WithTimeout(ctx, uninjectCommitTail)
+	defer cancel()
+
+	deadline, _ := ctx.Deadline()
+
+	process, err := i.openHandle(pid, proc.startTime)
+	if err != nil {
+		return fmt.Errorf("reopening process %d to remove the agent: %w", pid, err)
+	}
+	defer process.Close()
+
+	numericPid := int(pid)
+
+	injected, err := i.injectViaOpenInspector(numericPid, code, deadline.Add(-debugEndBudget))
+	if injected || err != nil {
+		return err
+	}
+
+	// Same gates as injection: an --inspect process never went through them,
+	// and an application can take SIGUSR1 over after injection.
+	exe, err := process.Open("exe", os.O_RDONLY)
+	if err != nil {
+		return fmt.Errorf("opening the executable of process %d: %w", pid, err)
+	}
+	defer exe.Close()
+
+	elfFile, err := elf.NewFile(exe)
+	if err != nil {
+		return fmt.Errorf("reading the executable of process %d: %w", pid, err)
+	}
+	defer elfFile.Close()
+
+	gateCtx, gateCancel := context.WithTimeout(ctx, uninjectGateBudget)
+	gates := proc.gates
+	if gates == nil {
+		gates = &signalGates{}
+	}
+
+	reason := gates.refusal(gateCtx, process, elfFile)
+	gateErr := gateCtx.Err()
+	gateCancel()
+
+	// An abandoned source scan reports "no reference found", so the gate
+	// context decides, not the reason.
+	if gateErr != nil {
+		return fmt.Errorf("gates for process %d did not finish: %w", pid, gateErr)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if reason != "" {
+		return fmt.Errorf("not signaling process %d: %s", pid, reason)
+	}
+
+	if remaining := time.Until(deadline); remaining < uninjectSignalTail {
+		return fmt.Errorf("not signaling process %d: %v left, too little to reopen and close its inspector",
+			pid, remaining.Truncate(time.Millisecond))
+	}
+
+	if err := sendSIGUSR1(process); err != nil {
+		return fmt.Errorf("error reopening node inspector: %w", err)
+	}
+
+	return netns.WithNetNS(numericPid, func() error {
+		conn, err := connectWait("127.0.0.1", 9229, uninjectConnectBudget, 200*time.Millisecond)
+		if err != nil {
+			return fmt.Errorf("inspector did not answer after SIGUSR1 within %v; "+
+				"the debugger port of process %d stays open until it restarts: %w",
+				uninjectConnectBudget, pid, err)
+		}
+
+		_, err = i.injectViaConn(conn, code, deadline.Add(-debugEndBudget), true)
+
+		return err
+	})
 }

@@ -13,9 +13,43 @@
   }
 
   const orig = global[STORE];
-  net.Server.prototype.emit = orig.serverEmit;
-  net.Socket.prototype.connect = orig.socketConnect;
-  net.Socket.prototype.write = orig.socketWrite;
+
+  // An agent that predates install records resets to the originals, as it
+  // did itself; ours are restored by identity below.
+  if (!orig.managed) {
+    net.Server.prototype.emit = orig.serverEmit;
+    net.Socket.prototype.connect = orig.socketConnect;
+    net.Socket.prototype.write = orig.socketWrite;
+    orig.managed = true;
+  }
+
+  // orig.serverEmit / socketConnect / socketWrite are never reassigned: an
+  // agent from an earlier release reads them at call time, and pointing them at
+  // a wrapper recurses. Each injection keeps its own record instead, so a
+  // wrapper that cannot be removed goes inert for good.
+  const installed = orig.installed;
+  if (installed) {
+    // Restore only what is still ours; another agent may have wrapped since.
+    if (net.Server.prototype.emit === installed.serverEmit) {
+      net.Server.prototype.emit = installed.nextServerEmit;
+    }
+    if (net.Socket.prototype.connect === installed.socketConnect) {
+      net.Socket.prototype.connect = installed.nextSocketConnect;
+    }
+    if (net.Socket.prototype.write === installed.socketWrite) {
+      net.Socket.prototype.write = installed.nextSocketWrite;
+    }
+
+    installed.retired = true;
+
+    // An ALS that has run keeps the async_hooks hook alive until disabled.
+    if (installed.als) {
+      installed.als.disable();
+    }
+
+    orig.installed = undefined;
+  }
+
   if (orig.ctxHook) {
     orig.ctxHook.disable();
     orig.ctxHook = undefined;
@@ -53,11 +87,20 @@
   }
 
   if (TRACES_ENABLED) {
-    const als = new AsyncLocalStorage();
+    // Chain onto whatever is installed now, so another agent's wrapper stays in
+    // the call path.
+    const state = {
+      retired: false,
+      als: new AsyncLocalStorage(),
+      nextServerEmit: net.Server.prototype.emit,
+      nextSocketConnect: net.Socket.prototype.connect,
+      nextSocketWrite: net.Socket.prototype.write,
+    };
+
     const pad4 = n => String(n).padStart(4, '0');
 
     orig.requestFd = () => {
-      const store = als.getStore();
+      const store = state.retired ? undefined : state.als.getStore();
       return store && store.incomingFd != null ? store.incomingFd : -1;
     };
 
@@ -88,7 +131,7 @@
       typeof executionAsyncResource === 'function' && isMicrotask(executionAsyncResource());
 
     net.Server.prototype.emit = function (event, ...args) {
-      if (event === 'connection') {
+      if (event === 'connection' && !state.retired) {
         const socket = args[0];
         const incomingFd = socket._handle && socket._handle.fd;
 
@@ -98,12 +141,13 @@
           );
         }
 
-        return als.run({ incomingFd }, () =>
-          orig.serverEmit.call(this, event, ...args),
+        return state.als.run({ incomingFd }, () =>
+          state.nextServerEmit.call(this, event, ...args),
         );
       }
-      return orig.serverEmit.call(this, event, ...args);
+      return state.nextServerEmit.call(this, event, ...args);
     };
+    state.serverEmit = net.Server.prototype.emit;
 
     function correlate(incomingFd, outFd, socket) {
       if (incomingFd < 0 || outFd < 0 || incomingFd === outFd) {
@@ -126,9 +170,9 @@
     }
 
     net.Socket.prototype.connect = function (...args) {
-      const store = als.getStore();
+      const store = state.retired ? undefined : state.als.getStore();
       const sock = this;
-      const result = orig.socketConnect.apply(this, args);
+      const result = state.nextSocketConnect.apply(this, args);
 
       if (store) {
         sock.once('connect', () => {
@@ -139,9 +183,10 @@
 
       return result;
     };
+    state.socketConnect = net.Socket.prototype.connect;
 
     net.Socket.prototype.write = function (data, ...rest) {
-      const doWrite = () => orig.socketWrite.apply(this, [data, ...rest]);
+      const doWrite = () => state.nextSocketWrite.apply(this, [data, ...rest]);
 
       // skip ipc writes
       if (
@@ -151,7 +196,7 @@
         return doWrite();
       }
 
-      const store = als.getStore();
+      const store = state.retired ? undefined : state.als.getStore();
 
       if (store) {
         const outFd = this._handle && this._handle.fd;
@@ -170,6 +215,9 @@
 
       return doWrite();
     };
+    state.socketWrite = net.Socket.prototype.write;
+
+    orig.installed = state;
 
     // Signal the BPF layer before each async callback so it can restore the correct
     // trace context for this request into traces_ctx_v1.
@@ -187,7 +235,7 @@
     if (CTX_HOOK_ENABLED) {
       orig.ctxHook = createHook({
         before() {
-          const store = als.getStore();
+          const store = state.retired ? undefined : state.als.getStore();
           if (store && store.incomingFd != null && store.incomingFd >= 0) {
             if (store.incomingFd !== ctxFd || !runsMicrotask()) {
               signalCtx(store.incomingFd);
