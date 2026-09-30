@@ -70,6 +70,45 @@ test('throwing transport: span.end() never throws into the app', () => {
   assert.deepStrictEqual(r.bridge, ['s1'], 'the span is still emitted before the transport fails');
 });
 
+test('cached tracer: startActiveSpan forwards with the caller\'s own arity', () => {
+  const r = runScript('scenario_active_span_arity.js');
+  assert.strictEqual(r.threw, null, 'the two-argument form must not throw into the app');
+  assert.ok(r.ran, 'the two-argument callback must run');
+  assert.ok(r.recording, 'the callback must receive a real span from the app SDK');
+  assert.strictEqual(r.threwThree, null, 'the three-argument form must not throw either');
+  assert.ok(r.ranThree, 'the three-argument callback must run');
+  assert.ok(r.app.includes('two-arg'), 'the app SDK records the forwarded span');
+});
+
+test('a stranded wrapper stays inert across the next injection', () => {
+  const r = runScript('scenario_stranded_wrapper_inert.js');
+  assert.strictEqual(r.emitted, 1, 'a correlated write must emit the sentinel exactly once');
+  assert.ok(r.baseWrites > 0, 'sanity: the write chain reached the underlying function');
+});
+
+test('upgrading over a previously released agent does not recurse', () => {
+  const r = runScript('scenario_upgrade_over_released_agent.js');
+  assert.ok(r.releasedWrapped, 'the released agent must wrap the prototype to begin with');
+  assert.ok(r.rewrapped, 'the upgraded agent must install its own wrapper');
+  assert.strictEqual(r.threw, null, 'the upgraded chain must not recurse');
+  assert.ok(r.reachedBaseOnce, 'and must reach the underlying write exactly once');
+  assert.ok(r.releasedOutOfPath, "the released agent's wrapper must leave the call path");
+  assert.ok(r.restoredToBase, 'the uninstall after an upgrade must restore the original');
+});
+
+test('another agent\'s net wrapper survives both uninstall and re-injection', () => {
+  const r = runScript('scenario_foreign_net_wrapper.js');
+  assert.ok(r.obiWrapped, 'the agent must wrap net.Socket.prototype.write to begin with');
+  assert.ok(r.foreignSurvived, "another agent's wrapper must survive the uninstall");
+  assert.ok(!r.resetToBase, 'the uninstall must not reset the prototype under a foreign wrapper');
+  assert.ok(r.rewrapped, 'the re-injection must install its own wrapper');
+  assert.strictEqual(r.threw, null, 'the re-injected chain must not recurse');
+  assert.ok(r.foreignStillInPath, "the re-injected wrapper must call through the other agent's");
+  assert.ok(r.reachedBase, 'and the chain must reach the underlying write exactly once');
+  assert.ok(r.ownWrapperDiffers, 'sanity: the agent wrapper is not the underlying function');
+  assert.ok(r.restoredWhenOurs, 'with nothing layered on top, the uninstall does restore it');
+});
+
 test('hostile attribute/name: span.end() never throws into the app', () => {
   // A value whose toString() throws must not escape span.end() — the baseline
   // (no SDK) is a silent NoopSpan, so a throw here would be a regression that
@@ -248,4 +287,45 @@ test('pooled span and trace ids stay unique and well-formed across pool refills'
     assert.match(tid, /^[0-9a-f]{32}$/);
     assert.match(sid, /^[0-9a-f]{16}$/);
   }
+});
+
+test('injecting with the gate off uninstalls a prior injection', () => {
+  const r = runScript('scenario_uninstall.js');
+  assert.deepStrictEqual(r.installed, {
+    active: true,
+    loadPatched: true,
+    setTPWrapped: true,
+    setCMWrapped: true,
+  });
+  assert.deepStrictEqual(r.removed, {
+    globalCleared: true,
+    latchCleared: true,
+    loadRestored: true,
+    setTPRestored: true,
+    setCMRestored: true,
+  });
+  assert.strictEqual(r.emittedWhileInstalled, 1);
+  assert.strictEqual(r.emittedAfterUninstall, 0);
+});
+
+test('re-injecting leaves a tracer acquired before the first injection emitting', () => {
+  const r = runScript('scenario_uninstall.js');
+  assert.strictEqual(r.emittedAfterReinjection, 1);
+});
+
+test('a tracer cached before an uninstall still emits through the next injection', () => {
+  const r = runScript('scenario_reinject_after_uninstall.js');
+  assert.strictEqual(r.emittedInFirstRun, 1);
+  assert.strictEqual(r.emittedWhileShutDown, 0);
+  assert.strictEqual(r.emittedInSecondRun, 1);
+  assert.strictEqual(r.emittedAfterFinalShutdown, 0);
+});
+
+test('using a cached tracer after the uninstall does not re-enable the ALS', () => {
+  const r = runScript('scenario_uninstall_async_residual.js');
+  assert.strictEqual(r.installedCallbackRan, true);
+  assert.strictEqual(r.runsWhileInstalled, 1, 'the installed bridge establishes context');
+  assert.strictEqual(r.retiredCallbackRan, true, 'the application callback still runs');
+  assert.strictEqual(r.retiredSpanRecording, false);
+  assert.strictEqual(r.runsWhileRetired, 0, 'a retired bridge must not touch AsyncLocalStorage');
 });

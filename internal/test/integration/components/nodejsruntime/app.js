@@ -8,6 +8,8 @@
 // /gc endpoint needs global.gc).
 
 const http = require("http");
+const inspector = require("inspector");
+const net = require("net");
 const v8 = require("v8");
 const {
   monitorEventLoopDelay,
@@ -47,6 +49,27 @@ new PerformanceObserver((list) => {
     if (name) gcCounts[name]++;
   }
 }).observe({ entryTypes: ["gc"] });
+
+const AGENT_STORE = Symbol.for("otel-ebpf-instrumentation.fdextractor");
+const pristine = {
+  serverEmit: net.Server.prototype.emit,
+  socketConnect: net.Socket.prototype.connect,
+  socketWrite: net.Socket.prototype.write,
+};
+
+function agentState() {
+  const store = global[AGENT_STORE];
+  const installed = !!(store && store.installed);
+
+  return {
+    store_present: !!store,
+    installed,
+    server_emit_wrapped: net.Server.prototype.emit !== pristine.serverEmit,
+    socket_connect_wrapped: net.Socket.prototype.connect !== pristine.socketConnect,
+    socket_write_wrapped: net.Socket.prototype.write !== pristine.socketWrite,
+    inspector_open: inspector.url() !== undefined,
+  };
+}
 
 // Objects retained by /alloc so the allocated heap memory survives GC.
 const retained = [];
@@ -165,6 +188,9 @@ const server = http.createServer((req, res) => {
     // Ground truth: Node's own readings of the target metrics.
     case "/ground-truth":
       return json(res, 200, groundTruth());
+
+    case "/agent":
+      return json(res, 200, agentState());
 
     default:
       return json(res, 404, { error: "not found" });
