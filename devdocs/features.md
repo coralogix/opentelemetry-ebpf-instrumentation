@@ -159,6 +159,10 @@ provably a Node.js runtime, recent enough to run the agent, that the signal cann
 handler of its own (see [runtimes/nodejs.md](runtimes/nodejs.md) for the full list of refusal reasons). If the application registers an SDK,
 OBI leaves span creation to that SDK.
 
+On a clean shutdown OBI removes the scripts it injected, which costs each injected process one more `SIGUSR1` and a
+brief reopening of its inspector, under the same refusal gates. An exit that runs no shutdown leaves them resident
+until the application restarts.
+
 See [nodejs-manual-spans.md](nodejs-manual-spans.md).
 
 ## GPU Instrumentation

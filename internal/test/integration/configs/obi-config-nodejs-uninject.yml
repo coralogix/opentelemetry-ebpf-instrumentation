@@ -1,0 +1,5 @@
+trace_printer: text
+attributes:
+  select:
+    "*":
+      include: ["*"]

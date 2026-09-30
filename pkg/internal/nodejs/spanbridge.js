@@ -51,8 +51,22 @@
   const MAX_STATUS_MSG_LEN = 128;
 
   const g = globalThis;
+
+  // Substituted by the injector. The bridge tears down only when it is not
+  // reinstalling: a ProxyTracer caches its first delegate, so tracers acquired
+  // before a re-injection would route to a torn-down bridge forever.
+  const SPANS_ENABLED = false; /*OBI_SPANS_ENABLED*/
+
+  if (!SPANS_ENABLED) {
+    if (g.__obiSpanBridge && typeof g.__obiSpanBridge.uninstall === 'function') {
+      try {
+        g.__obiSpanBridge.uninstall();
+      } catch (_) {}
+    }
+    return;
+  }
+
   if (g.__obiSpanBridgeLoaded) return;
-  g.__obiSpanBridgeLoaded = true;
 
   const fs = require('fs');
   const crypto = require('crypto');
@@ -122,6 +136,9 @@
     debug('staying inert: a tracer provider/context manager is already registered');
     return;
   }
+
+  // Latched here, not above: an inert pass exports no uninstall to clear it.
+  g.__obiSpanBridgeLoaded = true;
   // We deliberately DO NOT write to the global registry (globalThis[API_KEY]).
   // Occupying its `trace`/`context` slots — or even creating the object with
   // our `version` — would make a later app `setGlobalTracerProvider` fail the
@@ -141,6 +158,10 @@
     yielded = true;
     debug('yielded to application-registered SDK: ' + why);
   };
+
+  // Run in reverse on uninstall. A delegate already cached by a ProxyTracer
+  // cannot be undone; it goes silent once yielded is set.
+  const undo = [];
 
   // --- transport -----------------------------------------------------------
 
@@ -213,6 +234,8 @@
 
   const ROOT_CONTEXT = new Context();
   const als = new AsyncLocalStorage();
+  // An ALS that has run keeps the async_hooks hook alive until disabled.
+  undo.push(() => als.disable());
 
   const contextManager = {
     active() {
@@ -449,11 +472,43 @@
   // to the app's current tracer instead of producing dead bridge spans. The
   // registry-appearance check also hands off for apps that registered through
   // a copy we could not wrap.
-  const activeAppTracer = (scope, version, options) => {
-    if (!yielded && !detectRegistryHandoff()) return null;
+  const steppedAside = () => yielded || !!detectRegistryHandoff();
+
+  // Returned once the bridge has stepped aside with nothing to forward to, so
+  // no span is built for nothing.
+  const INVALID_SPAN_CONTEXT = {
+    traceId: '0'.repeat(32),
+    spanId: '0'.repeat(16),
+    traceFlags: 0,
+    traceState: undefined,
+  };
+  const NOOP_SPAN = {
+    spanContext: () => INVALID_SPAN_CONTEXT,
+    setAttribute() { return this; },
+    setAttributes() { return this; },
+    addEvent() { return this; },
+    addLink() { return this; },
+    addLinks() { return this; },
+    setStatus() { return this; },
+    updateName() { return this; },
+    recordException() { return this; },
+    isRecording: () => false,
+    end() {},
+  };
+
+  const activeAppTracer = (scope, version, options, aside) => {
+    if (!(aside === undefined ? steppedAside() : aside)) return null;
     const reg = g[API_KEY];
     const prov = reg && reg.trace;
     if (prov && typeof prov.getTracer === 'function') return prov.getTracer(scope, version, options);
+
+    // Tracers cached before an uninstall and re-injection reach the new
+    // bridge only through here.
+    const successor = g.__obiSpanBridge && g.__obiSpanBridge.provider;
+    if (successor && successor !== tracerProvider && typeof successor.getTracer === 'function') {
+      return successor.getTracer(scope, version, options);
+    }
+
     return null;
   };
 
@@ -464,8 +519,10 @@
       this._options = options;
     }
     startSpan(name, options, context) {
-      const at = activeAppTracer(this._scope, this._version, this._options);
-      if (at) return at.startSpan(name, options, context);
+      if (steppedAside()) {
+        const at = activeAppTracer(this._scope, this._version, this._options, true);
+        return at ? at.startSpan(name, options, context) : NOOP_SPAN;
+      }
       const ctx = context ?? contextManager.active();
       const opts = options ?? {};
       let parent;
@@ -486,8 +543,12 @@
       return span;
     }
     startActiveSpan(name, arg2, arg3, arg4) {
-      const at = activeAppTracer(this._scope, this._version, this._options);
-      if (at) return at.startActiveSpan(name, arg2, arg3, arg4);
+      const aside = steppedAside();
+      if (aside) {
+        const at = activeAppTracer(this._scope, this._version, this._options, aside);
+        // Tracers dispatch on arguments.length, so the caller's count is kept.
+        if (at) return at.startActiveSpan(...arguments);
+      }
       let options, context, fn;
       if (typeof arg2 === 'function') {
         fn = arg2;
@@ -500,6 +561,8 @@
         fn = arg4;
       }
       if (typeof fn !== 'function') return undefined;
+      // Not through contextManager.with: als.run would re-enable the disabled ALS.
+      if (aside) return fn(NOOP_SPAN);
       const parentCtx = context ?? contextManager.active();
       const span = this.startSpan(name, options, parentCtx);
       const ctx = parentCtx.setValue(SPAN_KEY, span);
@@ -523,13 +586,19 @@
     if (!apiObj || typeof apiObj[method] !== 'function' || apiObj[method].__obiWrapped) {
       return;
     }
-    const orig = apiObj[method].bind(apiObj);
+    const raw = apiObj[method];
+    const orig = raw.bind(apiObj);
     const wrapped = function (...args) {
       yieldToApp(why);
       return orig(...args);
     };
     wrapped.__obiWrapped = true;
     apiObj[method] = wrapped;
+    undo.push(() => {
+      if (apiObj[method] === wrapped) {
+        apiObj[method] = raw;
+      }
+    });
   };
 
   // Wire a single @opentelemetry/api copy to the bridge. Because we never
@@ -600,11 +669,27 @@
       };
       patchedLoad.__obiWrapped = true;
       Module._load = patchedLoad;
+      undo.push(() => {
+        if (Module._load === patchedLoad) {
+          Module._load = origLoad;
+        }
+      });
     }
   } catch (err) {
     debug('failed to install module-load hook', err);
   }
 
-  g.__obiSpanBridge = { version: 2 };
+  const uninstall = () => {
+    yielded = true;
+    for (const restore of undo.splice(0).reverse()) {
+      try {
+        restore();
+      } catch (_) {}
+    }
+    g.__obiSpanBridgeLoaded = false;
+    g.__obiSpanBridge = undefined;
+  };
+
+  g.__obiSpanBridge = { version: 3, uninstall, provider: tracerProvider };
   debug('span bridge activated (pid ' + process.pid + ')');
 })();

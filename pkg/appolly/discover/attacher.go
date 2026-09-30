@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	stdmaps "maps"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/ebpf/link"
@@ -132,6 +133,18 @@ func (ta *traceAttacher) attacherLoop(_ context.Context) (swarm.RunFunc, error) 
 
 	in := ta.InputInstrumentables.Subscribe(msg.SubscriberName("traceAttacher"))
 	return func(ctx context.Context) {
+		// The uninject deadline is measured from shutdown, not from when the
+		// pass starts: draining the queues below spends the same timeout.
+		var shutdownAt atomic.Int64
+
+		go func() {
+			<-ctx.Done()
+			shutdownAt.Store(time.Now().UnixNano())
+		}()
+
+		defer func() {
+			ta.nodeInjector.UninjectAll(time.Unix(0, shutdownAt.Load()))
+		}()
 		defer ta.OutputTracerEvents.Close()
 
 		var dotnetSessions *dotnet.SessionManager
@@ -224,6 +237,7 @@ func (ta *traceAttacher) attacherLoop(_ context.Context) (swarm.RunFunc, error) 
 					if dotnetSessions != nil {
 						dotnetSessions.Remove(instr.Obj.FileInfo)
 					}
+					ta.nodeInjector.Forget(instr.Obj.FileInfo.Pid())
 					ta.notifyProcessDeletion(ctx, &instr.Obj)
 				}
 			}

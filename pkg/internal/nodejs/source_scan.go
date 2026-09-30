@@ -6,6 +6,7 @@
 package nodejs // import "go.opentelemetry.io/obi/pkg/internal/nodejs"
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
@@ -19,13 +20,13 @@ var sigusr1Quoted = []string{`"SIGUSR1"`, `'SIGUSR1'`, "`SIGUSR1`"}
 // references to "SIGUSR1", 'SIGUSR1', or `SIGUSR1`. This is a fallback
 // detection method used when the symbol-based detection fails (e.g. stripped
 // binaries with dynamic libuv).
-func sourceHasSIGUSR1Reference(pid int) bool {
+func sourceHasSIGUSR1Reference(ctx context.Context, pid int) bool {
 	dir, err := harvest.FindNodeJSAppDir(app.PID(pid))
 	if err != nil {
 		return false
 	}
 
-	return dirHasSIGUSR1Reference(dir)
+	return dirHasSIGUSR1Reference(ctx, dir)
 }
 
 func lineContainsSIGUSR1(line string) bool {
@@ -50,11 +51,16 @@ func scanFileForSIGUSR1(path string) bool {
 }
 
 // dirHasSIGUSR1Reference scans JS/TS source files in the given directory for
-// quoted SIGUSR1 references.
-func dirHasSIGUSR1Reference(dir string) bool {
+// quoted SIGUSR1 references. A cancelled walk reports no reference found, so
+// callers must check ctx before acting on the answer.
+func dirHasSIGUSR1Reference(ctx context.Context, dir string) bool {
 	found := false
 
 	_ = harvest.WalkJSFiles(dir, func(path string) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
+
 		if scanFileForSIGUSR1(path) {
 			found = true
 			return filepath.SkipAll

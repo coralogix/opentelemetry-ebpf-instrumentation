@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,7 @@ func dialRecordingInspector(t *testing.T, srv *httptest.Server) *websocket.Conn 
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
 
-	wsConn, _, err := upgradeConnWithTimeout(conn, wsURL, 0, testInspectorTimeout)
+	wsConn, err := upgradeConnWithTimeout(conn, wsURL, 0, testInspectorTimeout)
 	if err != nil {
 		_ = conn.Close()
 		t.Fatalf("upgrade websocket: %v", err)
@@ -108,7 +109,8 @@ func TestInjectClosesOnlyAnInspectorItOpened(t *testing.T) {
 			payload, err := evaluateRequest("1+1", 1)
 			require.NoError(t, err)
 
-			require.NoError(t, i.injectFileWS(wsConn, payload, tc.closeInspector))
+			_, err = i.injectFileWS(wsConn, payload, time.Time{}, tc.closeInspector)
+			require.NoError(t, err)
 
 			close(seen)
 
