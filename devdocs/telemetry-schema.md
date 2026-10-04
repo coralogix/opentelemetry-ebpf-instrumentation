@@ -88,6 +88,11 @@ published, immutable schema.
 The release owner drains this list into the release notes at release prep, and leaves the
 section empty once drained.
 
+- The registry moves to weaver's `definition/2` format. A span definition is identified
+  by its `type`, so the span ids in `site/docs/spans.md` lose their `span.` prefix
+  (`span.obi.http.server` becomes `obi.http.server`) and a link anchored on an old id no
+  longer resolves. Every span now documents its name. The emitted telemetry is unchanged.
+
 ## Hosting notes
 
 `site/` is published as static files with no markdown processing, so the generated

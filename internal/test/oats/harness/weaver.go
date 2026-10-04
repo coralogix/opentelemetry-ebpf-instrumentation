@@ -18,12 +18,11 @@ import (
 
 const (
 	// weaverAdminURL is where a weaver-wired OATS group publishes weaver's admin
-	// /stop endpoint on the test host; the POST both stops weaver and returns its
-	// live-check report in the response body. Every group is expected to wire
+	// API on the test host, which stops weaver and serves its live-check report. Every group is expected to wire
 	// weaver (append `weaver/docker-compose-weaver.yml` to the test case's compose
 	// file list); an unreachable admin port fails the spec so a new group can't
 	// silently skip semantic-convention validation.
-	weaverAdminURL = "http://localhost:4320/stop"
+	weaverAdminURL = "http://localhost:4320"
 
 	// skipWeaverEnv opts a run out of weaver validation entirely — intended
 	// only for local debugging of a compose setup, never for CI.
@@ -36,16 +35,25 @@ const (
 // Weaver being unreachable is itself a failure (the group forgot to wire the
 // shared weaver compose fragment), unless the run explicitly opts out via
 // TESTCASE_SKIP_WEAVER=true.
-func validateWeaver() {
+func warnf(format string, args ...any) {
+	ginkgo.GinkgoWriter.Printf(format+"\n", args...)
+}
+
+func validateWeaver(outputDir, name string) {
 	if os.Getenv(skipWeaverEnv) == "true" {
 		ginkgo.GinkgoWriter.Printf("%s=true — skipping weaver validation\n", skipWeaverEnv)
 		return
 	}
 
+	drainErr := weavercheck.DrainDockerTap(context.Background(), warnf)
+	if drainErr != nil {
+		ginkgo.GinkgoWriter.Printf("weaver: %v\n", drainErr)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	report, err := weavercheck.FetchReport(ctx, weaverAdminURL)
+	raw, err := weavercheck.FetchRawReport(ctx, weaverAdminURL)
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) {
 			ginkgo.Fail(fmt.Sprintf(
@@ -59,5 +67,20 @@ func validateWeaver() {
 		ginkgo.Fail(fmt.Sprintf("weaver: %v", err))
 		return
 	}
+
+	if reportPath, err := weavercheck.ArchiveReport(outputDir, name, raw); err != nil {
+		ginkgo.GinkgoWriter.Printf("warn: failed to archive weaver report: %v\n", err)
+	} else {
+		ginkgo.GinkgoWriter.Printf("weaver report saved to %s\n", reportPath)
+	}
+
+	report, err := weavercheck.Parse(raw)
+	if err != nil {
+		ginkgo.Fail(fmt.Sprintf("weaver: %v", err))
+		return
+	}
 	weavercheck.Validate(ginkgo.GinkgoT(), report)
+	if drainErr != nil {
+		ginkgo.Fail(fmt.Sprintf("weaver: %v", drainErr))
+	}
 }
