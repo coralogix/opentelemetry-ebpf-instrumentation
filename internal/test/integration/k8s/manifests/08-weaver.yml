@@ -68,7 +68,7 @@ spec:
       # after startup (weaver #1645), restarting weaver mid-suite and dropping
       # the early span burst from the teardown report. The live-check matchers in
       # schemas/obi/.weaver.toml need a build from weaver main.
-      image: otel/weaver:main@sha256:2fbc65b4285eb61c676ec74028a583a5fddfc0b308514b10dee80e6745f381dc
+      image: otel/weaver:v0.27.0@sha256:3049b4079049d4abb1b5632f511ada2c33505a1c60f3f8535e93f87f0696f056
       # Root, like the docker-compose weaver (user: "0:0").
       securityContext:
         runAsUser: 0
@@ -78,8 +78,6 @@ spec:
         - live-check
         - --registry
         - /obi-registry
-        - --inactivity-timeout
-        - "300"
         - --otlp-grpc-address
         - "0.0.0.0"
         - --admin-port
