@@ -74,7 +74,11 @@ spans:
   - type: obi.http.server
     kind: server
     name:
-      note: Not documented yet.
+      templates:
+        - "{http.request.method} {http.route}"
+        - "{http.request.method}"
+        - "HTTP {http.route}"
+        - "HTTP"
     stability: stable
     requirement_level: recommended
     brief: OBI inbound HTTP server span.
@@ -84,7 +88,11 @@ spans:
   - type: obi.http.client
     kind: client
     name:
-      note: Not documented yet.
+      note: >
+        The method, or `HTTP` when it is outside the semantic-convention enum,
+        followed by the route when OBI classified the request path into one:
+        `{http.request.method} {route}`. Client spans do not emit the route as
+        an attribute, so the name cannot be expressed as a template.
     stability: stable
     requirement_level: recommended
     brief: OBI outbound HTTP client span.
@@ -151,7 +159,9 @@ spans:
   - type: obi.jsonrpc.client
     kind: client
     name:
-      note: Not documented yet.
+      templates:
+        - "{rpc.method}"
+        - "jsonrpc"
     stability: development
     requirement_level: recommended
     brief: OBI outbound JSON-RPC over HTTP client span.
@@ -208,7 +218,9 @@ spans:
   - type: obi.graphql.server
     kind: server
     name:
-      note: Not documented yet.
+      templates:
+        - "GraphQL {graphql.operation.type}"
+        - "GraphQL Operation"
     stability: development
     requirement_level: recommended
     brief: OBI inbound GraphQL over HTTP server span.
@@ -226,7 +238,9 @@ spans:
   - type: obi.jsonrpc.server
     kind: server
     name:
-      note: Not documented yet.
+      templates:
+        - "{rpc.method}"
+        - "jsonrpc"
     stability: development
     requirement_level: recommended
     brief: OBI inbound JSON-RPC over HTTP server span.

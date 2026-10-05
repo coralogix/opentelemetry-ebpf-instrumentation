@@ -3,7 +3,19 @@ spans:
   - type: obi.db.client
     kind: client
     name:
-      note: Not documented yet.
+      note: >
+        Built per database system from the operation and its target, falling
+        back to the system: Redis and Memcached report `{db.operation.name}` or
+        `REDIS` / `MEMCACHED`; MongoDB
+        `{db.operation.name} {db.collection.name}`, `{db.collection.name}`,
+        `{db.operation.name}` or `mongodb`; Couchbase
+        `{db.operation.name} {db.collection.name}`, `{db.operation.name}` or
+        `COUCHBASE`; Aerospike
+        `{db.operation.name} {db.namespace}.{db.collection.name}` or
+        `AEROSPIKE`; SQL++ `{db.operation.name} {db.collection.name}`,
+        `{db.operation.name} {db.namespace}` or `{db.system.name}`. One template
+        list cannot order the Aerospike and MongoDB forms correctly for both, so
+        the name is described rather than templated.
     stability: development
     requirement_level: recommended
     brief: OBI outbound database client span.
@@ -51,7 +63,12 @@ spans:
   - type: obi.db.sql.client
     kind: client
     name:
-      note: Not documented yet.
+      templates:
+        - "{db.query.summary}"
+        - "{db.operation.name} {db.collection.name}"
+        - "{db.operation.name} {db.namespace}"
+        - "{db.operation.name}"
+        - "SQL"
     stability: stable
     requirement_level: recommended
     brief: OBI outbound SQL database client span.
@@ -101,7 +118,17 @@ spans:
   - type: obi.elasticsearch.client
     kind: client
     name:
-      note: Not documented yet.
+      templates:
+        - "{db.operation.name} {db.collection.name}"
+        - "{db.operation.name} {db.namespace}"
+        - "{db.operation.name} {network.peer.address}:{network.peer.port}"
+      note: >
+        The address form uses the peer address and port of the connection,
+        which `network.peer.address` carries only when the address is an IP and
+        the attribute is selected. Past that, OBI names the span
+        `{db.operation.name}` when no peer port was observed, and
+        `elasticsearch` when no operation was read; no attribute tells those
+        cases apart, so they have no template.
     stability: development
     requirement_level: recommended
     brief: OBI Elasticsearch client span, detected from HTTP client traffic.
@@ -158,7 +185,10 @@ spans:
   - type: obi.db.server
     kind: server
     name:
-      note: Not documented yet.
+      note: >
+        The same form as the client span of the database system: SQL servers are
+        named like `obi.db.sql.client`, and Redis, Memcached and Aerospike
+        servers like `obi.db.client`.
     stability: development
     requirement_level: recommended
     brief: OBI inbound database server span.
