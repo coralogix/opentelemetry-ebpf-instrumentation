@@ -32,8 +32,21 @@ permissions:
   contents: read
 
 jobs:
+  generate-bpf:
+    name: Generate BPF
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - uses: $/.github/actions/generate-bpf
+
   unit-test-privileged:
     name: "Unit tests (privileged ${{ matrix.platform.arch }})"
+    needs: generate-bpf
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 45
     strategy:
@@ -50,31 +63,13 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      - uses: $/.github/actions/setup-go-env
         with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: Go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
-        with:
-          path: ~/.cache/go-build
-          key: go-build-pr-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', 'go.sum') }}
-          restore-keys: |
-            go-build-pr-race-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Upstream semconv registry cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] pinned upstream semconv tarball, keyed on the version in schemas/obi/manifest.yaml
-        with:
-          path: schemas/obi/.deps
-          key: semconv-deps-${{ hashFiles('schemas/obi/manifest.yaml') }}
-
-      - name: Generate BPF + build test tools
-        run: make prereqs docker-generate
+          cache-profile: privileged-race
+          prereqs: 'true'
 
       - name: Run privileged unit tests
-        run: sudo make test-privileged
+        run: sudo --preserve-env=GOCACHE,GOMODCACHE make test-privileged
 
       - name: Cleanup coverage data
         run: make cov-exclude-generated

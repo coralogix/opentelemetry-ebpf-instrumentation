@@ -1,0 +1,101 @@
+name: Set up Go environment
+description: |
+  Install Go, restore the Go module and build caches, optionally download the
+  generated BPF artifact and run `make prereqs`. Caches are only saved on push
+  to main; every other run restores the newest main entry for its profile.
+  Caller must `actions/checkout` first.
+
+inputs:
+  cache-profile:
+    description: 'Go build cache profile. Jobs compiling with different flags (race, cover, tags, GOOS/GOARCH, CGO) must use different profiles.'
+    required: true
+  download-bpf:
+    description: 'Download the generated BPF artifact.'
+    required: false
+    default: 'true'
+  bpf-artifact-name:
+    description: 'Name of the generated BPF artifact.'
+    required: false
+    default: bpf-generated-${{ github.run_id }}
+  prereqs:
+    description: 'Restore the upstream semconv registry cache and run `make prereqs`.'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: "go.mod"
+        cache: false
+
+    - name: Resolve Go cache directories
+      id: go-env
+      shell: bash
+      run: |
+        gocache="$(go env GOCACHE)"
+        gomodcache="$(go env GOMODCACHE)"
+        {
+          echo "GOCACHE=${gocache}"
+          echo "GOMODCACHE=${gomodcache}"
+        } >> "$GITHUB_ENV"
+        {
+          echo "gocache=${gocache}"
+          echo "gomodcache=${gomodcache}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Download generated BPF files
+      if: inputs.download-bpf == 'true'
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.bpf-artifact-name }}
+
+    - name: Go module cache
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      with:
+        path: ${{ steps.go-env.outputs.gomodcache }}
+        key: go-mod-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          go-mod-${{ runner.os }}-
+
+    - name: Restore Go module cache
+      if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      with:
+        path: ${{ steps.go-env.outputs.gomodcache }}
+        key: go-mod-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          go-mod-${{ runner.os }}-
+
+    - name: Go build cache
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
+      with:
+        path: ${{ steps.go-env.outputs.gocache }}
+        key: go-build-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', '**/go.sum') }}
+        restore-keys: |
+          go-build-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Restore Go build cache
+      if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
+      with:
+        path: ${{ steps.go-env.outputs.gocache }}
+        key: go-build-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', '**/go.sum') }}
+        restore-keys: |
+          go-build-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Upstream semconv registry cache
+      if: inputs.prereqs == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] pinned upstream semconv tarball, keyed on the version in schemas/obi/manifest.yaml
+      with:
+        path: schemas/obi/.deps
+        key: semconv-deps-${{ hashFiles('schemas/obi/manifest.yaml') }}
+
+    - name: Build test tools
+      if: inputs.prereqs == 'true'
+      shell: bash
+      run: make prereqs

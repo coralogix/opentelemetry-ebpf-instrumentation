@@ -1,40 +1,55 @@
 name: Generate BPF
 description: |
-  Run `make docker-generate` and publish the resulting `_bpfel.go` +
-  `_bpfel.o` files as a workflow artifact. Caller must `actions/checkout`
-  first so this composite can resolve the local Go module + Makefile.
+  Restore the generated `_bpfel.go` + `_bpfel.o` files from a cache keyed on
+  every BPF generation input, run `make docker-generate` only on a miss, and
+  publish the files as a workflow artifact. Caller must `actions/checkout`
+  first so this composite can resolve the Makefile and BPF sources.
 
 inputs:
   artifact-name:
     description: 'Artifact name to upload BPF files under. Default keys on github.run_id.'
     required: false
     default: bpf-generated-${{ github.run_id }}
-  cache-key-prefix:
-    description: 'Prefix for the Go build cache. Defaults to the umbrella PR prefix.'
+  upload-artifact:
+    description: 'Upload the generated files as a workflow artifact.'
     required: false
-    default: go-build-pr-race
+    default: 'true'
 
 runs:
   using: composite
   steps:
-    - name: Set up Go
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
-      with:
-        go-version-file: "go.mod"
-        cache: true
-
-    - name: Go build cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
-      with:
-        path: ~/.cache/go-build
-        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', 'go.sum') }}
-        restore-keys: |
-          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-
-
-    - name: Pre-pull generator image
+    - name: Compute BPF cache key
+      id: key
       shell: bash
       run: |
-        IMG=$(grep -E "^GEN_IMG \?= " Makefile | awk '{print $3}')
+        set -euo pipefail
+        gen_img="${GEN_IMG:-$(grep -E '^GEN_IMG \?= ' Makefile | awk '{print $3}')}"
+        targets="${BPF_TARGETS:-$(grep -E '^BPF_TARGETS \?= ' Makefile | awk '{print $3}')}"
+        inputs_hash=$(
+          {
+            git ls-files -z -- bpf Makefile generator.Dockerfile internal/tools/go.mod internal/tools/go.sum internal/tools/generator
+            git grep -lz -E '^//go:generate .*BPF2GO' -- '*.go'
+          } | sort -zu | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+        )
+        key_hash=$(printf '%s\n' "$gen_img" "$targets" "$inputs_hash" | sha256sum | cut -d' ' -f1)
+        echo "gen-img=${gen_img}" >> "$GITHUB_OUTPUT"
+        echo "key=bpf-objects-${targets//,/-}-${key_hash}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore generated BPF files
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key hashes every BPF generation input, including the pinned generator image
+      with:
+        path: |
+          **/*_bpfel.go
+          **/*_bpfel.o
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Pre-pull generator image
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        IMG: ${{ steps.key.outputs.gen-img }}
+      run: |
         for i in 1 2 3 4 5; do
           if docker pull "$IMG"; then
             exit 0
@@ -46,10 +61,21 @@ runs:
         exit 1
 
     - name: Generate BPF files
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: make docker-generate
 
+    - name: Save generated BPF files
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key hashes every BPF generation input, including the pinned generator image
+      with:
+        path: |
+          **/*_bpfel.go
+          **/*_bpfel.o
+        key: ${{ steps.key.outputs.key }}
+
     - name: Upload generated BPF files
+      if: inputs.upload-artifact == 'true'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}

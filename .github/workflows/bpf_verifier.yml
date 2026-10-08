@@ -131,16 +131,9 @@ jobs:
         with:
           docker-prune: 'false'
 
-      - name: Download generated BPF files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: $/.github/actions/setup-go-env
         with:
-          name: bpf-generated-${{ github.run_id }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
-        with:
-          go-version-file: "go.mod"
-          cache: true
+          cache-profile: verifier
 
       - name: Install QEMU
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-utils qemu-system-x86 cpio
@@ -163,24 +156,9 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      - uses: $/.github/actions/setup-go-env
         with:
-          go-version-file: "go.mod"
-          cache: true
-
-      - name: Go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
-        with:
-          path: ~/.cache/go-build
-          key: go-build-pr-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', 'go.sum') }}
-          restore-keys: |
-            go-build-pr-race-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Download generated BPF files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: bpf-generated-${{ github.run_id }}
+          cache-profile: verifier
 
       - name: Run BPF verifier tests (host kernel)
         run: go test -exec=sudo -count=1 -timeout=55m -parallel=8 -tags=bpf_verifier_tests ./pkg/internal/ebpf/verifier/...
