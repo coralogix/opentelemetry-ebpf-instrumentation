@@ -21,3 +21,7 @@ func FindExeSymbols(_ *elf.File, _ []string, _ ...elf.SymType) (map[string]Sym, 
 func FindExeSymbolsMatching(_ *elf.File, _ func(string) bool, _ ...elf.SymType) (map[string]Sym, error) {
 	return nil, nil
 }
+
+func FindExeSymbolsByPrefix(_ *elf.File, _ []string) (map[string][]Sym, error) {
+	return nil, nil
+}
