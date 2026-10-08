@@ -7,6 +7,7 @@ on:
     branches: [main, release-*]
     paths:
       - ".github/workflows/pull_request.yml"
+      - ".github/actions/setup-go-env/**"
       - ".github/actions/generate-bpf/**"
       - "**.go"
       - "go.mod"

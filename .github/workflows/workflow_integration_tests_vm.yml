@@ -9,6 +9,9 @@ on:
     branches: [main, release-*]
     paths:
       - ".github/workflows/workflow_integration_tests_vm.yml"
+      - ".github/actions/dockerhub-login/**"
+      - ".github/actions/generate-bpf/**"
+      - ".github/actions/setup-go-env/**"
       - ".github/actions/free-disk/**"
       - ".github/actions/setup-lvh-kernel/**"
       - ".dockerignore"

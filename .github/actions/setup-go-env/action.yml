@@ -7,7 +7,7 @@ description: |
 
 inputs:
   cache-profile:
-    description: 'Go build cache profile. Jobs compiling with different flags (race, cover, tags, GOOS/GOARCH, CGO) must use different profiles.'
+    description: 'Go build cache profile. Jobs compiling with different flags (race, cover, tags, GOOS/GOARCH, CGO) or different package sets must use different profiles.'
     required: true
   download-bpf:
     description: 'Download the generated BPF artifact.'

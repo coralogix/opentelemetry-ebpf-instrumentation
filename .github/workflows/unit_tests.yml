@@ -7,6 +7,7 @@ on:
     branches: [main, release-*]
     paths:
       - ".github/workflows/unit_tests.yml"
+      - ".github/actions/setup-go-env/**"
       - ".github/actions/generate-bpf/**"
       - "**.go"
       - "go.mod"
@@ -93,7 +94,7 @@ jobs:
 
       - uses: $/.github/actions/setup-go-env
         with:
-          cache-profile: unit-race
+          cache-profile: unit-race-${{ matrix.shard.id }}
           prereqs: 'true'
 
       - name: Run unit tests
