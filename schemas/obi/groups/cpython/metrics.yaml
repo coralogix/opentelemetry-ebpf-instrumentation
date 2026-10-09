@@ -1,45 +1,34 @@
 # OBI's narrowed copies of the upstream CPython runtime metrics
 # (semconv model/cpython). service/container metadata is on the meter
 # resource, so these groups list only the GC generation data-point
-# attribute. Each carries the obi.upstream_override annotation so the
-# schemacheck drift test pins its unit/instrument/stability to upstream.
-groups:
-  - id: metric.obi.cpython.gc.collections
-    type: metric
-    metric_name: cpython.gc.collections
-    annotations:
-      obi:
-        upstream_override: true
+# attribute. The schemacheck drift test pins each one's unit, instrument and
+# stability to the upstream metric of the same name.
+file_format: definition/2
+metrics:
+  - name: cpython.gc.collections
     brief: OBI-emitted cpython.gc.collections
     instrument: counter
     unit: "{collection}"
     stability: development
+    requirement_level: recommended
     attributes:
       - ref: cpython.gc.generation
         requirement_level: required
-  - id: metric.obi.cpython.gc.collected_objects
-    type: metric
-    metric_name: cpython.gc.collected_objects
-    annotations:
-      obi:
-        upstream_override: true
+  - name: cpython.gc.collected_objects
     brief: OBI-emitted cpython.gc.collected_objects
     instrument: counter
     unit: "{object}"
     stability: development
+    requirement_level: recommended
     attributes:
       - ref: cpython.gc.generation
         requirement_level: required
-  - id: metric.obi.cpython.gc.uncollectable_objects
-    type: metric
-    metric_name: cpython.gc.uncollectable_objects
-    annotations:
-      obi:
-        upstream_override: true
+  - name: cpython.gc.uncollectable_objects
     brief: OBI-emitted cpython.gc.uncollectable_objects
     instrument: counter
     unit: "{object}"
     stability: development
+    requirement_level: recommended
     attributes:
       - ref: cpython.gc.generation
         requirement_level: required
