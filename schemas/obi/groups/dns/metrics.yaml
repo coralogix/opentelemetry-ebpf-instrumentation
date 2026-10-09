@@ -8,14 +8,14 @@
 # override: with live-check no longer using --include-unreferenced, the upstream
 # metric.dns.lookup.duration group is unreferenced and drops from resolution, so
 # OBI's copy wins without the sort-trick a same-metric_name duplicate needed.
-# The metric carries the obi.upstream_override annotation so the schemacheck
+# The metric carries the obi.upstream annotation so the schemacheck
 # drift test pins its unit/instrument/stability to upstream.
 file_format: definition/2
 metrics:
   - name: dns.lookup.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: dns.lookup.duration
     brief: OBI-emitted dns.lookup.duration
     instrument: histogram
     unit: "s"

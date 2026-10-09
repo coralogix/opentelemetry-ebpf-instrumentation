@@ -1,14 +1,14 @@
 # OBI's narrowed copies of the upstream Go runtime metrics
 # (semconv model/go). OBI's RuntimeMetricsReporter attaches service/container
 # metadata to the meter resource, so these groups list only the runtime
-# data-point attributes. Each carries the obi.upstream_override annotation so
+# data-point attributes. Each carries the obi.upstream annotation so
 # the schemacheck drift test pins its unit/instrument/stability to upstream.
 file_format: definition/2
 metrics:
   - name: go.config.gogc
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.config.gogc
     brief: OBI-emitted go.config.gogc
     instrument: updowncounter
     unit: "%"
@@ -17,7 +17,7 @@ metrics:
   - name: go.cpu.time
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.cpu.time
     brief: OBI-emitted go.cpu.time
     instrument: counter
     unit: "s"
@@ -32,7 +32,7 @@ metrics:
   - name: go.goroutine.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.goroutine.count
     brief: OBI-emitted go.goroutine.count
     instrument: updowncounter
     unit: "{goroutine}"
@@ -41,7 +41,7 @@ metrics:
   - name: go.memory.allocated
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.allocated
     brief: OBI-emitted go.memory.allocated
     instrument: counter
     unit: "By"
@@ -50,7 +50,7 @@ metrics:
   - name: go.memory.allocations
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.allocations
     brief: OBI-emitted go.memory.allocations
     instrument: counter
     unit: "{allocation}"
@@ -59,7 +59,7 @@ metrics:
   - name: go.memory.gc.cycles
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.gc.cycles
     brief: OBI-emitted go.memory.gc.cycles
     instrument: counter
     unit: "{gc_cycle}"
@@ -68,7 +68,7 @@ metrics:
   - name: go.memory.gc.goal
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.gc.goal
     brief: OBI-emitted go.memory.gc.goal
     instrument: updowncounter
     unit: "By"
@@ -77,7 +77,7 @@ metrics:
   - name: go.memory.gc.pause.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.gc.pause.duration
     brief: OBI-emitted go.memory.gc.pause.duration
     instrument: histogram
     unit: "s"
@@ -86,7 +86,7 @@ metrics:
   - name: go.memory.limit
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.limit
     brief: OBI-emitted go.memory.limit
     instrument: updowncounter
     unit: "By"
@@ -95,7 +95,7 @@ metrics:
   - name: go.memory.used
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.memory.used
     brief: OBI-emitted go.memory.used
     instrument: updowncounter
     unit: "By"
@@ -107,7 +107,7 @@ metrics:
   - name: go.processor.limit
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.processor.limit
     brief: OBI-emitted go.processor.limit
     instrument: updowncounter
     unit: "{thread}"
@@ -116,7 +116,7 @@ metrics:
   - name: go.schedule.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: go.schedule.duration
     brief: OBI-emitted go.schedule.duration
     instrument: histogram
     unit: "s"

@@ -9,6 +9,7 @@ package schemacheck
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,9 +28,7 @@ type metricFields struct {
 	Stability   string `yaml:"stability"`
 	Annotations struct {
 		OBI struct {
-			// upstream_override marks a metric OBI re-declares as a narrowed
-			// copy of an upstream semconv metric (vs an OBI-invented one).
-			UpstreamOverride bool `yaml:"upstream_override"`
+			Upstream upstreamLink `yaml:"upstream"`
 		} `yaml:"obi"`
 	} `yaml:"annotations"`
 }
@@ -53,6 +52,7 @@ type metricDef struct {
 	unit       string
 	instrument string
 	stability  string
+	link       upstreamLink
 	override   bool
 	source     string
 }
@@ -68,7 +68,8 @@ func metricsFromFile(t *testing.T, path string, out map[string]metricDef) {
 			unit:       m.Unit,
 			instrument: m.Instrument,
 			stability:  m.Stability,
-			override:   m.Annotations.OBI.UpstreamOverride,
+			link:       m.Annotations.OBI.Upstream,
+			override:   slices.Contains(m.Annotations.OBI.Upstream, name),
 			source:     path,
 		}
 	}
@@ -99,10 +100,10 @@ func obiMetrics(t *testing.T) map[string]metricDef {
 	return out
 }
 
-// overrideMetrics returns the OBI metrics tagged with the
-// annotations.obi.upstream_override marker across all group files — the
-// narrowed re-declarations of upstream semconv metrics, as opposed to
-// OBI-invented metrics.
+// overrideMetrics returns the OBI metrics that name their own upstream metric in
+// annotations.obi.upstream across all group files — the narrowed
+// re-declarations of upstream semconv metrics, as opposed to OBI-invented
+// metrics.
 func overrideMetrics(t *testing.T) map[string]metricDef {
 	t.Helper()
 	out := map[string]metricDef{}
@@ -134,24 +135,27 @@ func upstreamMetrics(t *testing.T) map[string]metricDef {
 	return out
 }
 
-// TestOBIMetricOverridesMatchUpstream asserts that every metric marked with
-// annotations.obi.upstream_override exists upstream and declares the same unit,
-// instrument and stability. Redeclaring a metric copies that wrapper and lets it
-// drift, so this test pins it; it also fails closed on a metric_name typo or an
-// upstream rename.
+// TestOBIMetricOverridesMatchUpstream asserts that every metric naming an
+// upstream metric in annotations.obi.upstream declares the same unit,
+// instrument and stability as the first one it names. Redeclaring a metric
+// copies that wrapper and lets it drift, so this test pins it; it also fails
+// closed on a typo or an upstream rename.
 func TestOBIMetricOverridesMatchUpstream(t *testing.T) {
-	overrides := overrideMetrics(t)
+	local := obiMetrics(t)
 	upstream := upstreamMetrics(t)
-	require.NotEmpty(t, overrides)
+	require.NotEmpty(t, overrideMetrics(t))
 	require.NotEmpty(t, upstream)
 
-	for name, m := range overrides {
-		up, ok := upstream[name]
+	for name, m := range local {
+		if len(m.link) == 0 || m.link.none() {
+			continue
+		}
+		up, ok := upstream[m.link[0]]
 		require.Truef(t, ok,
-			"metric %q is marked annotations.obi.upstream_override in %s but has no "+
-				"upstream semconv definition; fix the metric_name, or drop the "+
-				"annotation if it is an OBI-only metric",
-			name, m.source)
+			"metric %q names %q in annotations.obi.upstream in %s but that has no "+
+				"upstream semconv definition; fix the name, or set the annotation "+
+				"to none if it is an OBI-only metric",
+			name, m.link[0], m.source)
 		assert.Equalf(t, up.unit, m.unit,
 			"metric %q unit %q differs from upstream %q (%s vs %s)",
 			name, m.unit, up.unit, m.source, up.source)
@@ -180,9 +184,9 @@ func TestLocalMetricsMatchingUpstreamAreMarkedOverrides(t *testing.T) {
 		}
 		_, ok := upstream[name]
 		assert.Falsef(t, ok,
-			"metric %q is declared in %s but also exists upstream; mark it with "+
-				"annotations.obi.upstream_override, or import the upstream "+
-				"definition instead of redeclaring it",
+			"metric %q is declared in %s but also exists upstream; name it in "+
+				"annotations.obi.upstream, or import the upstream definition "+
+				"instead of redeclaring it",
 			name, m.source)
 	}
 }

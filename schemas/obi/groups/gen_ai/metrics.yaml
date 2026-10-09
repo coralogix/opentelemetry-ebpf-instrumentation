@@ -3,7 +3,7 @@ metrics:
   - name: gen_ai.client.operation.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: gen_ai.client.operation.duration
     brief: OBI-emitted gen_ai.client.operation.duration
     instrument: histogram
     unit: "s"
@@ -32,7 +32,7 @@ metrics:
   - name: gen_ai.client.token.usage
     annotations:
       obi:
-        upstream_override: true
+        upstream: gen_ai.client.token.usage
     brief: OBI-emitted gen_ai.client.token.usage
     instrument: histogram
     unit: "{token}"

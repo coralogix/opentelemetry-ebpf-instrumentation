@@ -5,7 +5,7 @@ metrics:
   - name: dotnet.process.cpu.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.process.cpu.count
     brief: Number of processors available to the .NET process.
     instrument: updowncounter
     unit: "{cpu}"
@@ -14,7 +14,7 @@ metrics:
   - name: dotnet.process.cpu.time
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.process.cpu.time
     brief: CPU time consumed by the .NET process.
     instrument: counter
     unit: "s"
@@ -27,7 +27,7 @@ metrics:
   - name: dotnet.gc.heap.total_allocated
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.gc.heap.total_allocated
     brief: Total bytes allocated on the .NET managed heap since the collector baseline.
     instrument: counter
     unit: "By"
@@ -36,7 +36,7 @@ metrics:
   - name: dotnet.gc.pause.time
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.gc.pause.time
     brief: Total .NET GC pause time since the collector baseline.
     instrument: counter
     unit: "s"
@@ -45,7 +45,7 @@ metrics:
   - name: dotnet.jit.compiled_il.size
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.jit.compiled_il.size
     brief: Total bytes of intermediate language compiled by the .NET JIT compiler.
     instrument: counter
     unit: "By"
@@ -54,7 +54,7 @@ metrics:
   - name: dotnet.jit.compiled_methods
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.jit.compiled_methods
     brief: Total methods compiled by the .NET JIT compiler.
     instrument: counter
     unit: "{method}"
@@ -63,7 +63,7 @@ metrics:
   - name: dotnet.jit.compilation.time
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.jit.compilation.time
     brief: Total .NET JIT compilation time since the collector baseline.
     instrument: counter
     unit: "s"
@@ -72,7 +72,7 @@ metrics:
   - name: dotnet.thread_pool.work_item.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.thread_pool.work_item.count
     brief: Total completed .NET thread-pool work items since the collector baseline.
     instrument: counter
     unit: "{work_item}"
@@ -81,7 +81,7 @@ metrics:
   - name: dotnet.monitor.lock_contentions
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.monitor.lock_contentions
     brief: Total .NET monitor lock contentions since the collector baseline.
     instrument: counter
     unit: "{contention}"
@@ -90,7 +90,7 @@ metrics:
   - name: dotnet.process.memory.working_set
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.process.memory.working_set
     brief: Physical memory mapped to the .NET process.
     instrument: updowncounter
     unit: "By"
@@ -99,7 +99,7 @@ metrics:
   - name: dotnet.gc.last_collection.memory.committed_size
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.gc.last_collection.memory.committed_size
     brief: Committed .NET GC memory observed during the latest collection.
     instrument: updowncounter
     unit: "By"
@@ -108,7 +108,7 @@ metrics:
   - name: dotnet.thread_pool.thread.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.thread_pool.thread.count
     brief: Number of .NET thread-pool threads that currently exist.
     instrument: updowncounter
     unit: "{thread}"
@@ -117,7 +117,7 @@ metrics:
   - name: dotnet.thread_pool.queue.length
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.thread_pool.queue.length
     brief: Number of queued .NET thread-pool work items.
     instrument: updowncounter
     unit: "{work_item}"
@@ -126,7 +126,7 @@ metrics:
   - name: dotnet.timer.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.timer.count
     brief: Number of active .NET timers.
     instrument: updowncounter
     unit: "{timer}"
@@ -135,7 +135,7 @@ metrics:
   - name: dotnet.assembly.count
     annotations:
       obi:
-        upstream_override: true
+        upstream: dotnet.assembly.count
     brief: Number of loaded .NET assemblies.
     instrument: updowncounter
     unit: "{assembly}"

@@ -3,7 +3,9 @@ metrics:
   - name: messaging.client.operation.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: messaging.client.operation.duration
+        upstream_omits:
+          messaging.destination.template: OBI sees the concrete destination on the wire, never the template it was built from
     brief: OBI-emitted messaging.client.operation.duration
     instrument: histogram
     unit: "s"
@@ -31,7 +33,9 @@ metrics:
   - name: messaging.process.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: messaging.process.duration
+        upstream_omits:
+          messaging.destination.template: OBI sees the concrete destination on the wire, never the template it was built from
     brief: OBI-emitted messaging.process.duration
     instrument: histogram
     unit: "s"

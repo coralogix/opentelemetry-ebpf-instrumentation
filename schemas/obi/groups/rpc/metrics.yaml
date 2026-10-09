@@ -3,7 +3,7 @@ metrics:
   - name: rpc.client.call.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: rpc.client.call.duration
     brief: OBI-emitted rpc.client.call.duration
     instrument: histogram
     unit: "s"
@@ -27,7 +27,7 @@ metrics:
   - name: rpc.server.call.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream: rpc.server.call.duration
     brief: OBI-emitted rpc.server.call.duration
     instrument: histogram
     unit: "s"
