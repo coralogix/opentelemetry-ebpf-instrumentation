@@ -3,6 +3,10 @@ metrics:
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
   - name: traces.span.metrics.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development
@@ -29,6 +33,10 @@ metrics:
         requirement_level: required
 
   - name: traces.span.metrics.duration
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: histogram
     unit: "s"
     stability: development
@@ -60,6 +68,10 @@ metrics:
   # metrics feature; the `traces.span.metrics.*` names above are the
   # replacement (`OTEL_EBPF_OTEL_METRICS_FEATURES=application_span_otel`).
   - name: traces_spanmetrics_calls_total
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development
@@ -90,6 +102,10 @@ metrics:
         requirement_level: required
 
   - name: traces_spanmetrics_latency
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: histogram
     unit: ""
     stability: development
@@ -120,6 +136,10 @@ metrics:
         requirement_level: required
 
   - name: traces_spanmetrics_size_total
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development
@@ -153,6 +173,10 @@ metrics:
         requirement_level: required
 
   - name: traces_spanmetrics_response_size_total
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib spanmetrics connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development

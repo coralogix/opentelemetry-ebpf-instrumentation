@@ -3,7 +3,9 @@ metrics:
   - name: messaging.client.operation.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          messaging.destination.subscription.name: not observable from the traffic OBI captures
+          messaging.destination.template: not observable from the traffic OBI captures
     brief: OBI-emitted messaging.client.operation.duration
     instrument: histogram
     unit: "s"
@@ -31,7 +33,9 @@ metrics:
   - name: messaging.process.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          messaging.destination.subscription.name: not observable from the traffic OBI captures
+          messaging.destination.template: not observable from the traffic OBI captures
     brief: OBI-emitted messaging.process.duration
     instrument: histogram
     unit: "s"

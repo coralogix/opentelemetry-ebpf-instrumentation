@@ -5,7 +5,7 @@ spans:
   # only ONC/Sun RPC reports onc_rpc.*. One group per system
   # rather than a union no span satisfies, which is also how upstream models
   # per-system RPC conventions.
-  - type: obi.rpc.grpc.server
+  - type: obi.rpc.grpc.call.server
     kind: server
     name:
       note: Not documented yet.
@@ -43,7 +43,7 @@ spans:
         requirement_level:
           conditionally_required: if the operation ended in an error
 
-  - type: obi.rpc.grpc.client
+  - type: obi.rpc.grpc.call.client
     kind: client
     name:
       note: Not documented yet.
@@ -82,6 +82,11 @@ spans:
           conditionally_required: if the operation ended in an error
 
   - type: obi.rpc.onc_rpc.server
+    annotations:
+      obi:
+        upstream_omits:
+          rpc.method_original: an ONC RPC method is never reported as _OTHER
+        upstream: rpc.call.server
     kind: server
     name:
       note: Not documented yet.
@@ -131,6 +136,11 @@ spans:
           conditionally_required: if the operation ended in an error
 
   - type: obi.rpc.onc_rpc.client
+    annotations:
+      obi:
+        upstream_omits:
+          rpc.method_original: an ONC RPC method is never reported as _OTHER
+        upstream: rpc.call.client
     kind: client
     name:
       note: Not documented yet.

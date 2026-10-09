@@ -59,6 +59,11 @@ spans:
         requirement_level: opt_in
 
   - type: obi.aws.sqs.client
+    annotations:
+      obi:
+        upstream_omits:
+          aws.extended_request_id: only S3 returns an extended request id
+        upstream: aws.client
     kind: client
     name:
       note: Not documented yet.
@@ -110,6 +115,11 @@ spans:
         requirement_level: opt_in
 
   - type: obi.aws.sns.client
+    annotations:
+      obi:
+        upstream_omits:
+          aws.extended_request_id: only S3 returns an extended request id
+        upstream: aws.client
     kind: client
     name:
       note: Not documented yet.

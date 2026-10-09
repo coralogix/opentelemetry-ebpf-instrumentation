@@ -104,8 +104,14 @@ spans:
         requirement_level:
           recommended: if the operation executes a tool
       - ref: gen_ai.tool.call.arguments
+        annotations:
+          obi:
+            upstream_deviation: the MCP server executes the tool call, so it observes its arguments
         requirement_level: opt_in
       - ref: gen_ai.tool.call.result
+        annotations:
+          obi:
+            upstream_deviation: the MCP server executes the tool call, so it observes its result
         requirement_level: opt_in
       - ref: gen_ai.prompt.name
         requirement_level:

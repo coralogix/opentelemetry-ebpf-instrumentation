@@ -270,6 +270,10 @@ spans:
   # reports gen_ai.operation.name as a fixed `rerank`. It carries no data source
   # and no request top-k; retrieval carries neither of its top-n.
   - type: obi.gen_ai.rerank.client
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no rerank operation
     kind: client
     name:
       note: Not documented yet.

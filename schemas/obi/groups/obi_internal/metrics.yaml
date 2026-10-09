@@ -7,6 +7,10 @@ metrics:
   # the OpenMetrics-convention `target_info` counterpart, which weaver does
   # not see (only the OTLP tap is validated).
   - name: target.info
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the Prometheus target_info convention, which semconv does not define
     instrument: updowncounter
     unit: ""
     stability: development
@@ -139,6 +143,10 @@ metrics:
   # Prometheus exporter emits the underscore `traces_target_info`
   # counterpart.
   - name: traces.target.info
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the Prometheus target_info convention, which semconv does not define
     instrument: updowncounter
     unit: ""
     stability: development

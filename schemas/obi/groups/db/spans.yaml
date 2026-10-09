@@ -98,7 +98,7 @@ spans:
   # the HTTP client base set on top of the db.* attributes. The native database
   # protocols covered by obi.db.client never emit http.* / url.*, which is
   # why this is a separate group rather than extra refs on the shared one.
-  - type: obi.elasticsearch.client
+  - type: obi.db.elasticsearch.client
     kind: client
     name:
       note: Not documented yet.
@@ -156,6 +156,10 @@ spans:
           conditionally_required: if a response was received
 
   - type: obi.db.server
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines database spans for the client side only
     kind: server
     name:
       note: Not documented yet.

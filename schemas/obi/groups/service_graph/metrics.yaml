@@ -3,6 +3,10 @@ metrics:
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
   - name: traces_service_graph_request_total
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib servicegraph connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development
@@ -41,6 +45,10 @@ metrics:
   # Counter has no explicit OTLP unit set; mirror that here so live-check
   # doesn't complain "Unit should be '1', but found ''".
   - name: traces_service_graph_request_failed_total
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib servicegraph connector, which OBI reproduces
     instrument: counter
     unit: ""
     stability: development
@@ -78,6 +86,10 @@ metrics:
           conditionally_required: if Kubernetes decoration is enabled
 
   - name: traces_service_graph_request_server
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib servicegraph connector, which OBI reproduces
     instrument: histogram
     unit: "s"
     stability: development
@@ -114,6 +126,10 @@ metrics:
           conditionally_required: if Kubernetes decoration is enabled
 
   - name: traces_service_graph_request_client
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: the output of the collector-contrib servicegraph connector, which OBI reproduces
     instrument: histogram
     unit: "s"
     stability: development

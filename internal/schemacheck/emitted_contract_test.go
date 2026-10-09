@@ -215,7 +215,7 @@ func emittedSpanCases() []emittedSpanCase {
 	return []emittedSpanCase{
 		{
 			name:     "grpc server",
-			spanType: "obi.rpc.grpc.server",
+			spanType: "obi.rpc.grpc.call.server",
 			span: &request.Span{
 				Type:         request.EventTypeGRPC,
 				Path:         "/pkg.Service/Method",
@@ -238,7 +238,7 @@ func emittedSpanCases() []emittedSpanCase {
 		{
 			name:     "grpc client",
 			absent:   []string{"service.peer.name"},
-			spanType: "obi.rpc.grpc.client",
+			spanType: "obi.rpc.grpc.call.client",
 			span: &request.Span{
 				Type:         request.EventTypeGRPCClient,
 				Path:         "/pkg.Service/Method",
@@ -357,7 +357,7 @@ func emittedSpanCases() []emittedSpanCase {
 		{
 			name:     "jsonrpc client",
 			absent:   []string{"service.peer.name"},
-			spanType: "obi.jsonrpc.client",
+			spanType: "obi.rpc.jsonrpc.call.client",
 			span: &request.Span{
 				Type:                request.EventTypeHTTPClient,
 				SubType:             request.HTTPSubtypeJSONRPC,
@@ -555,7 +555,7 @@ func emittedSpanCases() []emittedSpanCase {
 		},
 		{
 			name:     "elasticsearch client",
-			spanType: "obi.elasticsearch.client",
+			spanType: "obi.db.elasticsearch.client",
 			span: &request.Span{
 				Type:    request.EventTypeHTTPClient,
 				SubType: request.HTTPSubtypeElasticsearch,
@@ -712,7 +712,7 @@ func emittedSpanCases() []emittedSpanCase {
 		},
 		{
 			name:     "jsonrpc server",
-			spanType: "obi.jsonrpc.server",
+			spanType: "obi.rpc.jsonrpc.call.server",
 			span: func() *request.Span {
 				s := populatedHTTPServerSpan(request.HTTPSubtypeJSONRPC)
 				s.JSONRPC = &request.JSONRPC{

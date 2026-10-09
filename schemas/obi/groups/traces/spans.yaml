@@ -5,6 +5,10 @@
 file_format: definition/2
 spans:
   - type: obi.failed_connect
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no span for a connection that failed before any request
     kind: client
     name:
       note: Not documented yet.

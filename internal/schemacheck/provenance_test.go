@@ -39,18 +39,35 @@ type provenance struct {
 func (p provenance) local() bool { return p.Source == "" }
 
 type resolvedAttribute struct {
-	Key        string     `json:"key"`
-	Provenance provenance `json:"provenance"`
+	Key              string          `json:"key"`
+	Provenance       provenance      `json:"provenance"`
+	RequirementLevel json.RawMessage `json:"requirement_level"`
+	Deprecated       *struct {
+		RenamedTo string `json:"renamed_to"`
+	} `json:"deprecated"`
+	Annotations struct {
+		OBI struct {
+			UpstreamDeviation string `json:"upstream_deviation"`
+		} `json:"obi"`
+	} `json:"annotations"`
 }
 
 // resolvedSignal is a span, metric or attribute group of the resolved registry,
 // identified by its type, name or id respectively.
 type resolvedSignal struct {
-	Type       string              `json:"type"`
-	Name       json.RawMessage     `json:"name"`
-	ID         string              `json:"id"`
-	Provenance provenance          `json:"provenance"`
-	Attributes []resolvedAttribute `json:"attributes"`
+	Type        string              `json:"type"`
+	Kind        string              `json:"kind"`
+	Name        json.RawMessage     `json:"name"`
+	ID          string              `json:"id"`
+	Provenance  provenance          `json:"provenance"`
+	Attributes  []resolvedAttribute `json:"attributes"`
+	Annotations struct {
+		OBI struct {
+			Upstream       string            `json:"upstream"`
+			UpstreamReason string            `json:"upstream_reason"`
+			UpstreamOmits  map[string]string `json:"upstream_omits"`
+		} `json:"obi"`
+	} `json:"annotations"`
 }
 
 type resolveOutput struct {
@@ -60,6 +77,10 @@ type resolveOutput struct {
 		Metrics         []resolvedSignal    `json:"metrics"`
 		AttributeGroups []resolvedSignal    `json:"attribute_groups"`
 	} `json:"registry"`
+	Refinements struct {
+		Spans   []resolvedSignal `json:"spans"`
+		Metrics []resolvedSignal `json:"metrics"`
+	} `json:"refinements"`
 }
 
 func (s resolvedSignal) metricName(t *testing.T) string {
@@ -152,13 +173,18 @@ func weaverCommand(ctx context.Context, t *testing.T, ociBin string, args ...str
 // image and returns the resolved registry.
 func resolveRegistry(t *testing.T) resolveOutput {
 	t.Helper()
+	return resolveRegistryAt(t, "/obi-registry", "--v2")
+}
+
+func resolveRegistryAt(t *testing.T, registry string, extraArgs ...string) resolveOutput {
+	t.Helper()
 	ociBin := requireWeaverRuntime(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), resolveTimeout)
 	defer cancel()
 
-	cmd := weaverCommand(ctx, t, ociBin,
-		"registry", "resolve", "--registry", "/obi-registry", "--v2", "--format", "json")
+	args := append([]string{"registry", "resolve", "--registry", registry}, extraArgs...)
+	cmd := weaverCommand(ctx, t, ociBin, append(args, "--format", "json")...)
 
 	// weaver can exit non-zero when diagnostics exist (e.g. the expected
 	// definition/2 UnstableFileFormat warnings), yet still writes the resolved
@@ -200,7 +226,7 @@ func runtimeUsable(t *testing.T, bin string) error {
 }
 
 // TestOBIMetricOverridesResolveToLocalNarrowedDefinition verifies that every
-// metric marked with annotations.obi.upstream_override resolves to OBI's own
+// metric OBI declares under an upstream metric's name resolves to OBI's own
 // narrowed definition rather than the broader upstream one. Unreferenced
 // upstream metrics drop from resolution, leaving exactly one metric per shared
 // name: OBI's. This is what makes the coverage denominator reflect OBI's true

@@ -38,6 +38,10 @@ attribute_groups:
 
 spans:
   - type: obi.messaging.kafka.producer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: producer
     name:
       note: Not documented yet.
@@ -55,6 +59,10 @@ spans:
           conditionally_required: if the record carried partition metadata
 
   - type: obi.messaging.kafka.consumer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: consumer
     name:
       note: Not documented yet.
@@ -78,6 +86,10 @@ spans:
           conditionally_required: if OBI attributed the fetch to a single consumer group of the process
 
   - type: obi.messaging.mqtt.producer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: producer
     name:
       note: Not documented yet.
@@ -92,6 +104,10 @@ spans:
         requirement_level: recommended
 
   - type: obi.messaging.mqtt.consumer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: consumer
     name:
       note: Not documented yet.
@@ -106,6 +122,10 @@ spans:
         requirement_level: recommended
 
   - type: obi.messaging.nats.producer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: producer
     name:
       note: Not documented yet.
@@ -122,6 +142,10 @@ spans:
         requirement_level: recommended
 
   - type: obi.messaging.nats.consumer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: consumer
     name:
       note: Not documented yet.
@@ -138,6 +162,10 @@ spans:
         requirement_level: recommended
 
   - type: obi.messaging.amqp.producer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: producer
     name:
       note: Not documented yet.
@@ -148,6 +176,10 @@ spans:
       - ref_group: attributes.obi.messaging.common
 
   - type: obi.messaging.amqp.consumer
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv v1.41 defines messaging attributes but no messaging span; the per-operation messaging spans arrive in v1.44
     kind: consumer
     name:
       note: Not documented yet.

@@ -1,6 +1,10 @@
 file_format: definition/2
 metrics:
   - name: gpu.cuda.kernel.launch.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -16,6 +20,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.graph.launch.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -31,6 +39,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.memory.allocations
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: "By"
     stability: development
@@ -46,6 +58,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.kernel.grid.size
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: histogram
     unit: "1"
     stability: development
@@ -61,6 +77,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.kernel.block.size
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: histogram
     unit: "1"
     stability: development
@@ -77,6 +97,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.memory.copies
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: histogram
     unit: "By"
     stability: development
@@ -95,6 +119,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.memory.free.bytes
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: "By"
     stability: development
@@ -110,6 +138,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.memset.bytes
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: "By"
     stability: development
@@ -125,6 +157,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.stream.create.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -140,6 +176,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.stream.destroy.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -155,6 +195,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.event.record.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -170,6 +214,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.event.synchronize.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -185,6 +233,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.stream.synchronize.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -200,6 +252,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.device.synchronize.calls
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: ""
     stability: development
@@ -215,6 +271,10 @@ metrics:
         requirement_level: recommended
 
   - name: gpu.cuda.host.register.bytes
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: semconv defines no CUDA runtime metrics
     instrument: counter
     unit: "By"
     stability: development

@@ -4,7 +4,8 @@ metrics:
   - name: http.client.request.body.size
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.client.request.body.size
     instrument: histogram
     unit: "By"
@@ -29,13 +30,20 @@ metrics:
         requirement_level:
           conditionally_required: if the port was observed on the connection
       - ref: url.path
+        annotations:
+          obi:
+            upstream_deviation: opt_in and off by default; the raw path for users who accept its cardinality
         requirement_level: opt_in
       - ref: url.scheme
+        annotations:
+          obi:
+            upstream_deviation: upstream makes it opt_in on clients; it has two values, so reporting it adds no cardinality
         requirement_level: recommended
   - name: http.client.request.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.client.request.duration
     instrument: histogram
     unit: "s"
@@ -60,13 +68,20 @@ metrics:
         requirement_level:
           conditionally_required: if the port was observed on the connection
       - ref: url.path
+        annotations:
+          obi:
+            upstream_deviation: opt_in and off by default; the raw path for users who accept its cardinality
         requirement_level: opt_in
       - ref: url.scheme
+        annotations:
+          obi:
+            upstream_deviation: upstream makes it opt_in on clients; it has two values, so reporting it adds no cardinality
         requirement_level: recommended
   - name: http.client.response.body.size
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.client.response.body.size
     instrument: histogram
     unit: "By"
@@ -91,13 +106,20 @@ metrics:
         requirement_level:
           conditionally_required: if the port was observed on the connection
       - ref: url.path
+        annotations:
+          obi:
+            upstream_deviation: opt_in and off by default; the raw path for users who accept its cardinality
         requirement_level: opt_in
       - ref: url.scheme
+        annotations:
+          obi:
+            upstream_deviation: upstream makes it opt_in on clients; it has two values, so reporting it adds no cardinality
         requirement_level: recommended
   - name: http.server.request.body.size
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.server.request.body.size
     instrument: histogram
     unit: "By"
@@ -129,7 +151,8 @@ metrics:
   - name: http.server.request.duration
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.server.request.duration
     instrument: histogram
     unit: "s"
@@ -161,7 +184,8 @@ metrics:
   - name: http.server.response.body.size
     annotations:
       obi:
-        upstream_override: true
+        upstream_omits:
+          network.protocol.name: required only for a protocol other than HTTP, which OBI never reports on this signal
     brief: OBI-emitted http.server.response.body.size
     instrument: histogram
     unit: "By"

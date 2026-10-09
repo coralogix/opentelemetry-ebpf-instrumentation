@@ -89,6 +89,38 @@ Every override in `groups/` follows these rules:
 A metric is identified by its `name`, and a span by its `type`, which carries
 the `obi.` prefix so it cannot collide with an upstream span type.
 
+A span type is named after the upstream span it implements: `obi.<upstream
+type>`, e.g. `obi.http.client` for upstream `http.client` and
+`obi.rpc.grpc.call.server` for `rpc.grpc.call.server`. When no upstream span
+has the same scope, `annotations.obi.upstream` names the upstream type instead
+(`aws.client` for SQS and SNS), or is `none` with an `upstream_reason` when
+upstream defines no such span (DNS, failed connects, the messaging spans until
+semconv v1.44).
+
+A metric declared under an upstream metric's name implements that metric. A
+metric outside the `obi.` namespace that upstream does not define sets
+`annotations.obi.upstream: none` with an `upstream_reason`.
+
+`internal/schemacheck/upstream_parity_test.go` compares each signal with the
+upstream signal it implements. It fails when OBI:
+
+- does not declare an attribute upstream requires or conditionally requires;
+- turns on by default an attribute upstream makes `opt_in`;
+- declares an attribute upstream defines only for the other side of the
+  exchange, such as `http.route` on a client signal;
+- defines its own attribute in a namespace that belongs to upstream.
+
+Attributes upstream does not list for the signal are otherwise allowed, as
+semantic conventions permit. A deliberate difference is recorded where it is
+declared, with its reason:
+
+- `annotations.obi.upstream_omits` on the signal, keyed by the attribute, for
+  an attribute OBI does not declare;
+- `annotations.obi.upstream_deviation` on the attribute reference, or on the
+  attribute's definition for an attribute OBI defines.
+
+The test also fails on an annotation that no longer justifies a difference.
+
 A metric OBI redeclares from upstream keeps the upstream name. The local
 definition stays authoritative because live-check resolves without
 `--include-unreferenced`, so the upstream metric, which nothing in this

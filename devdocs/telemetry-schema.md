@@ -152,6 +152,12 @@ section empty once drained.
   by its `type`, so the span ids in `site/docs/spans.md` lose their `span.` prefix
   (`span.obi.http.server` becomes `obi.http.server`) and a link anchored on an old id no
   longer resolves. The emitted telemetry is unchanged.
+- Span types are named after the upstream span they implement, so five span ids in
+  `site/docs/spans.md` change: `obi.rpc.grpc.client` / `obi.rpc.grpc.server` become
+  `obi.rpc.grpc.call.client` / `obi.rpc.grpc.call.server`, `obi.jsonrpc.client` /
+  `obi.jsonrpc.server` become `obi.rpc.jsonrpc.call.client` / `obi.rpc.jsonrpc.call.server`,
+  and `obi.elasticsearch.client` becomes `obi.db.elasticsearch.client`. The emitted
+  telemetry is unchanged.
 
 ## Hosting notes
 
