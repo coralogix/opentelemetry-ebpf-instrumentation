@@ -368,6 +368,8 @@ generate/all: $(BPF2GO)
 	@echo "### Generating all eBPF files ($(BPF_TARGET_LIST))..."
 	@$(call bpf_generate,./...)
 
+BPF_GENERATE_PREREQ := $(if $(SKIP_BPF_GENERATE),,docker-generate)
+
 # Generate eBPF code in Docker container for reproducible builds
 .PHONY: docker-generate
 docker-generate:
@@ -659,7 +661,7 @@ itest-coverage-data:
 	grep -vE $(EXCLUDE_COVERAGE_FILES) $(TEST_OUTPUT)/itest-covdata.all.txt > $(TEST_OUTPUT)/itest-covdata.txt || true
 
 .PHONY: oats-prereq
-oats-prereq: docker-generate fetch-upstream-semconv
+oats-prereq: $(BPF_GENERATE_PREREQ) fetch-upstream-semconv
 	mkdir -p $(TEST_OUTPUT)/run
 
 .PHONY: oats-test-sql
@@ -850,7 +852,7 @@ TARGET_BPF_FILES := $(patsubst ./%,$(NOTICES_DIR)/%,$(BPF_FILES))
 TARGET_BPF := $(TARGET_C_LICENSES) $(TARGET_BPF_FILES)
 
 .PHONY: notices-update
-notices-update: docker-generate go-notices-update java-notices-update $(TARGET_BPF)
+notices-update: $(BPF_GENERATE_PREREQ) go-notices-update java-notices-update $(TARGET_BPF)
 
 .PHONY: java-notices-update
 java-notices-update:
