@@ -1,13 +1,19 @@
-groups:
+file_format: definition/2
+spans:
   # gRPC and ONC/Sun RPC are separate emitter branches with different attribute
   # sets: only gRPC reports rpc.response.status_code and client.address, and
   # only ONC/Sun RPC reports onc_rpc.*. One group per system
   # rather than a union no span satisfies, which is also how upstream models
   # per-system RPC conventions.
-  - id: span.obi.rpc.grpc.server
-    type: span
-    span_kind: server
+  - type: obi.rpc.grpc.server
+    annotations:
+      obi:
+        upstream: [rpc.grpc.call.server, rpc.call.server]
+    kind: server
+    name:
+      note: Not documented yet.
     stability: release_candidate
+    requirement_level: recommended
     brief: OBI inbound gRPC server span.
     attributes:
       - ref: rpc.system.name
@@ -40,10 +46,15 @@ groups:
         requirement_level:
           conditionally_required: if the operation ended in an error
 
-  - id: span.obi.rpc.grpc.client
-    type: span
-    span_kind: client
+  - type: obi.rpc.grpc.client
+    annotations:
+      obi:
+        upstream: [rpc.grpc.call.client, rpc.call.client]
+    kind: client
+    name:
+      note: Not documented yet.
     stability: release_candidate
+    requirement_level: recommended
     brief: OBI outbound gRPC client span.
     attributes:
       - ref: rpc.system.name
@@ -76,10 +87,15 @@ groups:
         requirement_level:
           conditionally_required: if the operation ended in an error
 
-  - id: span.obi.rpc.onc_rpc.server
-    type: span
-    span_kind: server
+  - type: obi.rpc.onc_rpc.server
+    annotations:
+      obi:
+        upstream: rpc.call.server
+    kind: server
+    name:
+      note: Not documented yet.
     stability: development
+    requirement_level: recommended
     brief: OBI inbound ONC/Sun RPC server span.
     attributes:
       - ref: rpc.system.name
@@ -123,10 +139,15 @@ groups:
         requirement_level:
           conditionally_required: if the operation ended in an error
 
-  - id: span.obi.rpc.onc_rpc.client
-    type: span
-    span_kind: client
+  - type: obi.rpc.onc_rpc.client
+    annotations:
+      obi:
+        upstream: rpc.call.client
+    kind: client
+    name:
+      note: Not documented yet.
     stability: development
+    requirement_level: recommended
     brief: OBI outbound ONC/Sun RPC client span.
     attributes:
       - ref: rpc.system.name

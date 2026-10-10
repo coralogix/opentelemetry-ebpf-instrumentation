@@ -1,8 +1,15 @@
-groups:
-  - id: span.obi.dns
-    type: span
-    span_kind: internal
+file_format: definition/2
+spans:
+  - type: obi.dns
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: upstream defines no DNS lookup span
+    kind: internal
+    name:
+      note: Not documented yet.
     stability: development
+    requirement_level: recommended
     brief: OBI DNS resolution span.
     attributes:
       - ref: dns.question.name
