@@ -129,10 +129,7 @@ signal = "obi.mcp.server"
 [[live-check.matchers]]
 id = "match.span.jsonrpc.server"
 sample_type = "span"
-when = '''
-kind == "server" && "http.request.method" in attributes
-  && "rpc.system.name" in attributes && attributes["rpc.system.name"] == "jsonrpc"
-'''
+when = 'kind == "server" && "rpc.system.name" in attributes && attributes["rpc.system.name"] == "jsonrpc"'
 signal = "obi.jsonrpc.server"
 
 [[live-check.matchers]]
@@ -165,11 +162,15 @@ when = 'kind == "server" && "db.system.name" in attributes'
 signal = "obi.db.server"
 
 # Elasticsearch is recognised from HTTP client traffic and keeps the HTTP
-# request attributes, which no other database span carries.
+# request attributes, which no other database span carries. The parser reports
+# one of these systems (elasticsearchSystemName).
 [[live-check.matchers]]
 id = "match.span.elasticsearch.client"
 sample_type = "span"
-when = 'kind == "client" && "db.system.name" in attributes && "http.request.method" in attributes'
+when = '''
+kind == "client" && "http.request.method" in attributes && "db.system.name" in attributes
+  && attributes["db.system.name"] in ["elasticsearch", "opensearch"]
+'''
 signal = "obi.elasticsearch.client"
 
 # Every other HTTP client subtype sheds the HTTP request attributes
