@@ -12,8 +12,10 @@
 #include <common/lw_thread.h>
 #include <common/python_task.h>
 #include <common/runtime.h>
+#include <common/tokio_task.h>
 #include <common/trace_helpers.h>
 
+#include <pid/pid.h>
 #include <pid/pid_helpers.h>
 
 #include <gotracer/go_common.h>
@@ -29,6 +31,7 @@
 #include <maps/nodejs_fd_map.h>
 #include <maps/puma_tasks.h>
 #include <maps/python_thread_state.h>
+#include <maps/tokio_thread_state.h>
 #include <maps/server_traces.h>
 #include <maps/tp_info_mem.h>
 
@@ -224,6 +227,57 @@ resolve_python_current_task(const trace_key_t *t_key, u64 pid_tgid, python_task_
     return resolution;
 }
 
+// Called only on the egress path (find_parent_trace), so the walks run with egress=1 and
+// log their outcome; the poll-entry refresh in tokio.c walks the same chain silently.
+static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(u64 pid_tgid) {
+    const tokio_thread_state_t *thread_state =
+        (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
+    if (!thread_state) {
+        bpf_dbg_printk("tokio egress NO-CURRENT-TASK tid=%d", (u32)pid_tgid);
+        return NULL;
+    }
+
+    // Resolve the parent only from the task currently running on this thread, by walking
+    // its recorded ancestry. Fail-closed by design (like the generic clone_map, python,
+    // nginx, … paths): if the walk finds no owning inbound request we return NULL rather
+    // than guessing from thread- or process-wide state — a wrong parent is worse than a
+    // missing one, since it propagates downstream via traceparent.
+    //
+    // The id-keyed lineage is AUTHORITATIVE whenever tokio's TLS setter fired within the
+    // current poll (current_id != 0: debug builds only — current_id is reset at every poll
+    // entry and the setter's call sites are inlined in release). There the Harness::poll-
+    // derived current_task is a coarse per-worker root shared by every request on that
+    // worker, so the Header walk must not even be consulted: had such a root been anchored,
+    // it would resolve as the LEAF (no epoch check) to whichever request last anchored it.
+    // The Header walk is the release mechanism, taken only when no id is set.
+    if (thread_state->current_id) {
+        tp_info_pid_t *tp =
+            find_tokio_parent_trace_by_id(thread_state->tgid, thread_state->current_id, 1);
+        if (tp) {
+            bpf_dbg_printk(
+                "found tp by id tid=%d id=%llu", (u32)pid_tgid, thread_state->current_id);
+            bpf_dbg_printk("tokio egress IDWALK-HIT");
+            return tp;
+        }
+        bpf_dbg_printk("tokio egress IDWALK-MISS");
+        return NULL;
+    }
+
+    if (!thread_state->current_task) {
+        bpf_dbg_printk("tokio egress NO-CURRENT-TASK tid=%d", (u32)pid_tgid);
+        return NULL;
+    }
+
+    tp_info_pid_t *tp = find_tokio_parent_trace(thread_state->tgid, thread_state->current_task, 1);
+    if (tp) {
+        bpf_dbg_printk("found tp tid=%d task=%llx", (u32)pid_tgid, thread_state->current_task);
+        bpf_dbg_printk("tokio egress WALK-HIT");
+        return tp;
+    }
+    bpf_dbg_printk("tokio egress WALK-MISS");
+    return NULL;
+}
+
 static __always_inline tp_info_pid_t *
 find_python_parent_trace(const trace_key_t *t_key, u64 pid_tgid, u8 *allow_parent_fallback) {
     if (allow_parent_fallback) {
@@ -342,6 +396,32 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
                                                         trace_key_t *t_key,
                                                         u16 orig_dport,
                                                         const tp_info_t *wire_tp) {
+    // Tokio processes fail closed: the ONLY valid parent resolution is the per-task
+    // ancestry walk (find_tokio_parent_trace_for_thread). EVERY generic resolver below
+    // is either for another runtime (nodejs/go/python/nginx/puma/java) or keyed by the
+    // connecting/handling OS thread — including find_parent_java_trace, whose leading
+    // server_traces[t_key] lookup, find_parent_process_trace, and the cp_support
+    // connect-time t_key are all thread-identity based. On a work-stealing runtime the
+    // thread handling this egress frequently belongs to a DIFFERENT in-flight request,
+    // so any thread-keyed resolver misattributes the egress — and a wrong parent is
+    // worse than a missing one, since it propagates downstream via the injected
+    // traceparent. If the ancestry walk finds no owning request, leave the egress
+    // uncorrelated (orphan) rather than guess. (This was the debug-build cross-request
+    // contamination: the walk misses more often in debug — the egress runs on a shared
+    // runtime task with no per-request lineage — and find_parent_java_trace's
+    // server_traces[t_key] lookup then leaked a thread-derived, wrong-request parent.)
+    // Keyed exactly as the tokio probes key their maps (tokio_thread_state_t.tgid):
+    // valid_pid(), not obi_pid(), because with the pid filter off it returns the host
+    // pid in pod mode and the two must agree.
+    const u32 tgid = valid_pid(pid_tgid);
+    if (bpf_map_lookup_elem(&tokio_process, &tgid)) {
+        tp_info_pid_t *tokio_parent = find_tokio_parent_trace_for_thread(pid_tgid);
+        if (tokio_parent && tokio_parent->valid && parent_trace_matches(tokio_parent, wire_tp)) {
+            return tokio_parent;
+        }
+        return NULL;
+    }
+
     tp_info_pid_t *node_tp = find_nodejs_parent_trace(p_conn, orig_dport, pid_tgid);
 
     if (parent_trace_matches(node_tp, wire_tp)) {

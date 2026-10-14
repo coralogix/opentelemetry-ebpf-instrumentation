@@ -113,6 +113,9 @@ static __always_inline void cleanup_http_server_response_data(pid_connection_inf
     if (!(info->task_tid & JAVA_VT_TID_FLAG)) {
         obi_ctx__del(bpf_get_current_pid_tgid());
     }
+    // The request is answered: close the Tokio anchor's trust window. No-op on
+    // non-Tokio threads; see tokio_untag_inbound_conn().
+    tokio_untag_inbound_conn(bpf_get_current_pid_tgid());
 }
 
 static __always_inline void cleanup_http_server_thread_trace(http_info_t *info,

@@ -8,6 +8,7 @@
 
 #include <common/event_defs.h>
 #include <common/runtime.h>
+#include <common/tokio_task.h>
 #include <common/trace_key.h>
 #include <common/tracing.h>
 
@@ -33,6 +34,11 @@ static __always_inline void delete_server_trace(pid_connection_info_t *pid_conn,
     if (!(t_key->p_key.tid & JAVA_VT_TID_FLAG)) {
         obi_ctx__del(bpf_get_current_pid_tgid());
     }
+    // Close the Tokio anchor's trust window: the request is done, so its anchor must
+    // not be resolvable (or inheritable) by anything that runs after this point — see
+    // tokio_untag_inbound_conn() for the missed-span-save inheritance leak this
+    // prevents. No-op for non-Tokio threads.
+    tokio_untag_inbound_conn(bpf_get_current_pid_tgid());
 }
 
 // A client span ended: point the thread's context back at its parent server span
@@ -162,6 +168,15 @@ static __always_inline void server_or_client_trace(const u8 type,
                        conn_part.port);
 
         bpf_map_update_elem(&server_traces_aux, &conn_part, tp_p, BPF_ANY);
+
+        // Anchor the inbound conn on the Tokio side so descendant spawned tasks
+        // can resolve this server trace via the ancestry walk.  No-op for
+        // non-Tokio processes.  See tokio_tag_inbound_conn() for why this lives
+        // on the generic server-span-save path rather than a Tokio-specific probe.
+        // tp_p is snapshotted into the id-keyed entry (same value written to
+        // server_traces_aux above) so a slow egress resolves the trace as of anchor
+        // time, immune to this conn key being remapped by a later request.
+        tokio_tag_inbound_conn(id, &conn_part, tp_p);
 
         tp_info_pid_t *existing = bpf_map_lookup_elem(&server_traces, &t_key);
         if (existing && existing->req_type == tp_p->req_type &&
