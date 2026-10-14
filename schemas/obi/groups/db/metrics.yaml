@@ -1,9 +1,6 @@
 file_format: definition/2
 metrics:
   - name: db.client.operation.duration
-    annotations:
-      obi:
-        upstream_override: true
     brief: OBI-emitted db.client.operation.duration
     instrument: histogram
     unit: "s"
@@ -11,7 +8,8 @@ metrics:
     requirement_level: recommended
     attributes:
       - ref: db.collection.name
-        requirement_level: opt_in
+        requirement_level:
+          conditionally_required: if the operation targets a single collection
       - ref: db.namespace
         requirement_level:
           conditionally_required: if the exchange named a database
@@ -26,7 +24,8 @@ metrics:
       - ref: server.address
         requirement_level: recommended
       - ref: server.port
-        requirement_level: recommended
+        requirement_level:
+          conditionally_required: if the port was observed on the connection
       - ref: db.response.status_code
         requirement_level:
           conditionally_required: if the operation failed and the status code is available
@@ -37,6 +36,10 @@ metrics:
   # process IS the server), reported here so server-side measurements don't
   # pollute the client metric or double-count against it.
   - name: db.server.operation.duration
+    annotations:
+      obi:
+        upstream: none
+        upstream_reason: upstream defines database metrics for the client side only
     instrument: histogram
     unit: "s"
     stability: development
@@ -56,7 +59,8 @@ metrics:
         requirement_level:
           conditionally_required: if the operation ended in an error
       - ref: db.collection.name
-        requirement_level: opt_in
+        requirement_level:
+          conditionally_required: if the operation targets a single collection
       - ref: server.address
         requirement_level: recommended
       - ref: server.port
