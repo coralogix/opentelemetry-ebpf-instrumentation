@@ -1,0 +1,151 @@
+// backend: downstream service for server (work-stealing test).
+// Echoes the traceparent header so the test can verify propagation from logs.
+use axum::{Router, routing::get, http::HeaderMap, response::IntoResponse};
+
+async fn ping(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping  traceparent={}", traceparent);
+    format!("pong traceparent={}", traceparent)
+}
+
+// /ping-a and /ping-b are the A/B endpoints for the probe-discrimination test.
+// They are distinct url.path values so OBI emits distinct backend server spans;
+// the test uses that as ground truth (a /ping-b span appearing under an
+// /blocking-a server span is a definite cross-service misattribution).
+async fn ping_a(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-a  traceparent={}", traceparent);
+    format!("pong-a traceparent={}", traceparent)
+}
+
+async fn ping_b(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-b  traceparent={}", traceparent);
+    format!("pong-b traceparent={}", traceparent)
+}
+
+// /ping-c and /ping-d are the async A/B discriminator's backends (kept distinct
+// from /ping-a and /ping-b so the async and spawn_blocking subtests never
+// cross-classify each other's traces).
+async fn ping_c(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-c  traceparent={}", traceparent);
+    format!("pong-c traceparent={}", traceparent)
+}
+
+async fn ping_d(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-d  traceparent={}", traceparent);
+    format!("pong-d traceparent={}", traceparent)
+}
+
+// /ping-e and /ping-f are the DIRECT-I/O (Shape B) A/B discriminator's backends,
+// kept distinct from the reqwest paths (/ping-c, /ping-d) so the shapes never
+// cross-classify.
+async fn ping_e(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-e  traceparent={}", traceparent);
+    format!("pong-e traceparent={}", traceparent)
+}
+
+async fn ping_f(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-f  traceparent={}", traceparent);
+    format!("pong-f traceparent={}", traceparent)
+}
+
+// /ping-g and /ping-h are the SHARED-CLIENT (pooled keep-alive reuse) A/B
+// discriminator's backends. Kept distinct from every other pair so pool-reuse
+// misattribution (a request resolving a PREVIOUS request's trace through a reused
+// hyper connection-driver task) is classified on its own.
+async fn ping_g(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-g  traceparent={}", traceparent);
+    format!("pong-g traceparent={}", traceparent)
+}
+
+async fn ping_h(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-h  traceparent={}", traceparent);
+    format!("pong-h traceparent={}", traceparent)
+}
+
+// /ping-i and /ping-j are the CHANNEL-HANDOFF (long-lived worker task) A/B
+// discriminator's backends: one worker task serves BOTH sides, so a stale lineage
+// on it would cross the A/B boundary and surface as contamination.
+async fn ping_i(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-i  traceparent={}", traceparent);
+    format!("pong-i traceparent={}", traceparent)
+}
+
+async fn ping_j(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-j  traceparent={}", traceparent);
+    format!("pong-j traceparent={}", traceparent)
+}
+
+async fn health() -> impl IntoResponse {
+    "ok\n"
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/ping", get(ping))
+        .route("/ping-a", get(ping_a))
+        .route("/ping-b", get(ping_b))
+        .route("/ping-c", get(ping_c))
+        .route("/ping-d", get(ping_d))
+        .route("/ping-e", get(ping_e))
+        .route("/ping-f", get(ping_f))
+        .route("/ping-g", get(ping_g))
+        .route("/ping-h", get(ping_h))
+        .route("/ping-i", get(ping_i))
+        .route("/ping-j", get(ping_j));
+
+    // DIAGNOSTIC: also listen on 8094 so the async A/B discriminator can send B's
+    // egress to a DISTINCT backend port (A->8093, B->8094). That lets the eBPF side
+    // tell an A-egress from a B-egress by orig_dport (they otherwise differ only by
+    // HTTP path, invisible at the transport layer). Revert with the server change.
+    println!("backend listening on http://0.0.0.0:8093 and :8094");
+    let l8093 = tokio::net::TcpListener::bind("0.0.0.0:8093").await.unwrap();
+    let l8094 = tokio::net::TcpListener::bind("0.0.0.0:8094").await.unwrap();
+    let app2 = app.clone();
+    tokio::spawn(async move { axum::serve(l8094, app2).await.unwrap(); });
+    axum::serve(l8093, app).await.unwrap();
+}
