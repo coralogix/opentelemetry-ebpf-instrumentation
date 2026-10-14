@@ -26,6 +26,7 @@ import (
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
 	"go.opentelemetry.io/obi/pkg/appolly/discover/exec"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
@@ -924,7 +925,7 @@ func TestUprobeModulesRespectsVersionedLibraryAnnotations(t *testing.T) {
 		},
 	}
 
-	modules := i.uprobeModules(&tracer, 123, maps, "/proc/123/exe", 42, slog.Default())
+	modules := i.uprobeModules(&tracer, 123, svc.InstrumentableGeneric, maps, "/proc/123/exe", 42, slog.Default())
 
 	require.Len(t, modules, 1)
 	module := modules[42]
@@ -957,7 +958,7 @@ func TestUprobesRecordsFallbackExecutableOnceForMultipleProbeMaps(t *testing.T) 
 	}
 	i := instrumenter{modules: map[uint64]struct{}{}}
 
-	require.NoError(t, i.uprobes(pid, &tracer, makeProcMaps("/irrelevant")))
+	require.NoError(t, i.uprobes(pid, svc.InstrumentableGeneric, &tracer, makeProcMaps("/irrelevant")))
 
 	require.Len(t, tracer.recordedLibs, 1)
 	assert.Contains(t, i.modules, tracer.recordedLibs[0])

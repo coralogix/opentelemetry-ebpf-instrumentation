@@ -135,6 +135,10 @@ var IntegrityModeOverride = false
 
 type TracerCapability uint64
 
+// SelfLibKey is the UProbes() library-map key meaning "instrument the executable
+// itself" rather than a shared library
+const SelfLibKey = "self"
+
 // ProbeDesc holds the information of the instrumentation points of a given
 // function/symbol
 type ProbeDesc struct {
@@ -159,6 +163,16 @@ type ProbeDesc struct {
 	// UsePadStart attaches Start after WriteHeaders has spilled PadLength to
 	// its stack slot and before the value is first consumed.
 	UsePadStart bool
+
+	// SymbolPrefix marks the map key as a demangled Rust symbol prefix: the probe is
+	// resolved against every monomorphized copy whose demangled name starts with it
+	// (see expandRustPrefixProbes) instead of by exact symbol name.
+	SymbolPrefix bool
+
+	// MayBeInlined marks a symbol that is expected to be absent or unprobeable in some
+	// builds of the target (inlined away by the optimizer). Its non-resolution is
+	// expected and is not reported as a partial resolution of the probe set.
+	MayBeInlined bool
 
 	// Skip is set when an optional uprobe symbol was not resolved.
 	Skip bool
