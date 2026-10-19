@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Reuses the pythonasync-uvloop lock file; this app needs a subset of it
 COPY internal/test/integration/components/pythonasync-uvloop/requirements-3.9.txt .
-RUN pip install --require-hashes -r requirements-3.9.txt
+RUN pip install --only-binary=:all: --require-hashes -r requirements-3.9.txt
 
 COPY internal/test/integration/components/pythonasync-common/cancelled_to_thread.py .
 COPY internal/test/integration/components/pythonasync-generic .
