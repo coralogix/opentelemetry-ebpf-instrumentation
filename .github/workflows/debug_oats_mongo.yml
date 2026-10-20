@@ -18,7 +18,7 @@ jobs:
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
         go_tracers: ["on", "off"]
-        attempt: [1, 2]
+        attempt: [1, 2, 3]
     env:
       COMPOSE: docker compose -f internal/test/oats/mongo/docker-compose-go-mongo.yml
     steps:
@@ -31,6 +31,14 @@ jobs:
           echo "ImageVersion=${ImageVersion:-unknown}"
           uname -a
           docker version --format 'docker client {{.Client.Version}} server {{.Server.Version}}'
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: false
+
+      - name: Generate BPF
+        run: make docker-generate
 
       - name: Build images
         run: ${COMPOSE} build testserver autoinstrumenter
