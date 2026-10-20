@@ -4,7 +4,7 @@ EXPOSE 8080
 RUN apt update
 RUN apt install -y libpq-dev
 COPY requirements.txt /requirements.txt
-RUN pip install --require-hashes -r /requirements.txt
+RUN pip install --only-binary=:all: --require-hashes -r /requirements.txt
 COPY main.py /main.py
 COPY main_sync.py /main_sync.py
 COPY server.crt /server.crt
