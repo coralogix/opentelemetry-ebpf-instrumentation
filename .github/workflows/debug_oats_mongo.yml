@@ -1,0 +1,80 @@
+name: Debug OATS mongo
+
+on:
+  push:
+    branches: [nimrodavni78/debug-oats-mongo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mongo:
+    name: "mongo ${{ matrix.runner }} go-tracers=${{ matrix.go_tracers }} #${{ matrix.attempt }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        go_tracers: ["on", "off"]
+        attempt: [1, 2, 3]
+    env:
+      COMPOSE: docker compose -f internal/test/oats/mongo/docker-compose-go-mongo.yml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runner info
+        run: |
+          echo "ImageVersion=${ImageVersion:-unknown}"
+          uname -a
+          docker version --format 'docker client {{.Client.Version}} server {{.Server.Version}}'
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: false
+
+      - name: Generate BPF
+        run: make docker-generate
+
+      - name: Build images
+        run: ${COMPOSE} build testserver autoinstrumenter
+
+      - name: Disable Go-specific tracers
+        if: matrix.go_tracers == 'off'
+        run: |
+          sed -i 's/OTEL_EBPF_OPEN_PORT: "8080"/OTEL_EBPF_OPEN_PORT: "8080"\n      OTEL_EBPF_SKIP_GO_SPECIFIC_TRACERS: "true"/' internal/test/oats/mongo/docker-compose-go-mongo.yml
+          grep -n OTEL_EBPF_ internal/test/oats/mongo/docker-compose-go-mongo.yml
+
+      - name: Call /mongo without OBI
+        run: |
+          ${COMPOSE} up -d mongo testserver
+          sleep 10
+          for _ in 1 2 3; do curl -s -w ' -> HTTP %{http_code}\n' localhost:8080/mongo || echo "curl exit $?"; done
+
+      - name: Call /mongo with OBI
+        run: |
+          ${COMPOSE} up -d autoinstrumenter
+          for _ in $(seq 1 60); do
+            if ${COMPOSE} logs autoinstrumenter 2>&1 | grep -q "instrumenting process"; then break; fi
+            sleep 2
+          done
+          sleep 10
+          for _ in 1 2 3 4 5; do curl -s -w ' -> HTTP %{http_code}\n' localhost:8080/mongo || echo "curl exit $?"; sleep 2; done
+
+      - name: Call /mongo after stopping OBI
+        run: |
+          ${COMPOSE} stop autoinstrumenter
+          sleep 5
+          for _ in 1 2 3; do curl -s -w ' -> HTTP %{http_code}\n' localhost:8080/mongo || echo "curl exit $?"; done
+
+      - name: Container logs
+        if: always()
+        run: |
+          echo "::group::testserver"; ${COMPOSE} logs --no-color testserver | tail -100; echo "::endgroup::"
+          echo "::group::mongo (non-info)"; ${COMPOSE} logs --no-color mongo | grep -v '"s":"I"' | tail -50; echo "::endgroup::"
+          echo "::group::obi (warn/error/mongo)"; ${COMPOSE} logs --no-color autoinstrumenter | grep -E 'level=(WARN|ERROR)|mongo|kernel|uprobe' | grep -v 'bpf_printk\|bpf_trace' | tail -150; echo "::endgroup::"
+          echo "::group::obi bpf debug (last 200)"; ${COMPOSE} logs --no-color autoinstrumenter | grep -E 'bpf_printk|bpf_trace|\[bpf\]' | tail -200; echo "::endgroup::"
