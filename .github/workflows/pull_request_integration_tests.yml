@@ -7,6 +7,10 @@ on:
     branches: [main, release-*]
     paths:
       - ".github/workflows/pull_request_integration_tests.yml"
+      - ".github/actions/base-images/**"
+      - ".github/actions/dockerhub-login/**"
+      - ".github/actions/generate-bpf/**"
+      - ".github/actions/setup-go-env/**"
       - ".github/actions/free-disk/**"
       - "**.go"
       - "go.mod"
@@ -47,8 +51,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/generate-bpf
-        with:
-          cache-key-prefix: go-build-integration-race
 
   test-matrix:
     name: "Build matrix"
@@ -99,31 +101,18 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
 
-      - name: Compute base-image cache key
-        id: cache-key
-        env:
-          ARCH: ${{ runner.arch }}
-          INPUT_REF: ${{ inputs.ref || '' }}
-        run: |
-          if [ -n "${INPUT_REF}" ]; then
-            REF_SCOPE="input-ref-$(printf '%s' "${INPUT_REF}" | sha256sum | cut -d' ' -f1)"
-          else
-            REF_SCOPE="event-ref"
-          fi
+      - id: base-images
+        uses: $/.github/actions/base-images
 
-          IMAGE_SCOPE="$(bash scripts/discover-integration-images.sh --base-images | sha256sum | cut -d' ' -f1)"
-          echo "key=base-images-${ARCH}-${REF_SCOPE}-${IMAGE_SCOPE}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache base images
-        id: base-images-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
+      - name: Upload base images
+        if: steps.base-images.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: /tmp/base-images.tar
-          key: ${{ steps.cache-key.outputs.key }}
-
-      - name: Pull and save base images
-        if: steps.base-images-cache.outputs.cache-hit != 'true'
-        run: bash scripts/pull-base-images.sh /tmp/base-images.tar
+          name: base-images-${{ matrix.platform.arch }}-${{ github.run_id }}
+          path: ${{ steps.base-images.outputs.path }}
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
 
   build-obi-image:
     name: "Build OBI test image (${{ matrix.platform.arch }})"
@@ -185,77 +174,35 @@ jobs:
 
       - uses: $/.github/actions/free-disk
 
-      - name: Check for Docker Hub token
-        id: check-docker-token
-        run: |
-          if [ -n "${DOCKER_TOKEN}" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION }}
-
-      - name: Log in to Docker Hub
-        if: steps.check-docker-token.outputs.has_token == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: $/.github/actions/dockerhub-login
         with:
           username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION }}
+          token: ${{ secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION }}
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      - uses: $/.github/actions/setup-go-env
         with:
-          go-version-file: "go.mod"
-          cache: true
+          cache-profile: integration-race
+          prereqs: 'true'
 
-      - name: Go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
+      - id: base-images
+        uses: $/.github/actions/base-images
         with:
-          path: ~/.cache/go-build
-          key: go-build-integration-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', 'go.sum') }}
-          restore-keys: |
-            go-build-integration-race-${{ runner.os }}-${{ runner.arch }}-
+          pull: 'false'
 
-      - name: Download generated BPF files
+      - name: Download base images
+        if: steps.base-images.outputs.cache-hit != 'true'
+        continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: bpf-generated-${{ github.run_id }}
-
-      - name: Upstream semconv registry cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] pinned upstream semconv tarball, keyed on the version in schemas/obi/manifest.yaml
-        with:
-          path: schemas/obi/.deps
-          key: semconv-deps-${{ hashFiles('schemas/obi/manifest.yaml') }}
-
-      - name: Build test tools
-        run: make prereqs
-
-      - name: Compute base-image cache key
-        id: cache-key
-        env:
-          ARCH: ${{ runner.arch }}
-          INPUT_REF: ${{ inputs.ref || '' }}
-        run: |
-          if [ -n "${INPUT_REF}" ]; then
-            REF_SCOPE="input-ref-$(printf '%s' "${INPUT_REF}" | sha256sum | cut -d' ' -f1)"
-          else
-            REF_SCOPE="event-ref"
-          fi
-
-          IMAGE_SCOPE="$(bash scripts/discover-integration-images.sh --base-images | sha256sum | cut -d' ' -f1)"
-          echo "key=base-images-${ARCH}-${REF_SCOPE}-${IMAGE_SCOPE}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore base images
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
-        with:
-          path: /tmp/base-images.tar
-          key: ${{ steps.cache-key.outputs.key }}
+          name: base-images-${{ matrix.arch }}-${{ github.run_id }}
+          path: /tmp
 
       - name: Load base images
+        env:
+          BASE_IMAGES: ${{ steps.base-images.outputs.path }}
         run: |
-          if [ -f /tmp/base-images.tar ]; then
-            docker load -i /tmp/base-images.tar
+          if [ -f "$BASE_IMAGES" ]; then
+            docker load -i "$BASE_IMAGES"
           else
             echo "::warning::base image cache miss; builds may pull from the upstream registry and risk HTTP 429"
           fi

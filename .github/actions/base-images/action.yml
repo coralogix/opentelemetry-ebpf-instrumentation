@@ -1,0 +1,58 @@
+name: Base images
+description: |
+  Restore the integration-test base images tarball from a cache keyed on the
+  digest-pinned base-image list and the pull script, and optionally pull it on
+  a miss. The cache is only saved on push to main; every other run restores
+  main's entry. Caller must `actions/checkout` first.
+
+inputs:
+  pull:
+    description: 'Pull and save the base images on a cache miss.'
+    required: false
+    default: 'true'
+
+outputs:
+  cache-hit:
+    description: 'Whether the tarball was restored from the cache.'
+    value: ${{ steps.cache.outputs.cache-hit }}
+  path:
+    description: 'Path of the base images tarball.'
+    value: ${{ steps.key.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute base-image cache key
+      id: key
+      shell: bash
+      env:
+        ARCH: ${{ runner.arch }}
+      run: |
+        set -euo pipefail
+        image_scope="$(bash scripts/discover-integration-images.sh --base-images | sha256sum | cut -d' ' -f1)"
+        pull_script_scope="$(sha256sum scripts/pull-base-images.sh | cut -d' ' -f1)"
+        {
+          echo "key=base-images-${ARCH}-${image_scope}-${pull_script_scope}"
+          echo "path=/tmp/base-images.tar"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore base images
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Pull and save base images
+      if: inputs.pull == 'true' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        OUT: ${{ steps.key.outputs.path }}
+      run: bash scripts/pull-base-images.sh "$OUT"
+
+    - name: Save base images
+      if: inputs.pull == 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}

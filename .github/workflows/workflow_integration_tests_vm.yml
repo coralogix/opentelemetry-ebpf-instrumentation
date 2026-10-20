@@ -9,6 +9,10 @@ on:
     branches: [main, release-*]
     paths:
       - ".github/workflows/workflow_integration_tests_vm.yml"
+      - ".github/actions/base-images/**"
+      - ".github/actions/dockerhub-login/**"
+      - ".github/actions/generate-bpf/**"
+      - ".github/actions/setup-go-env/**"
       - ".github/actions/free-disk/**"
       - ".github/actions/setup-lvh-kernel/**"
       - ".dockerignore"
@@ -125,47 +129,20 @@ jobs:
 
       - uses: $/.github/actions/free-disk
 
-      - name: Check for Docker Hub token
-        id: check-docker-token
-        run: |
-          if [ "${ALLOW_DOCKER_TOKEN}" = "true" ] && [ -n "${DOCKER_TOKEN}" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          DOCKER_TOKEN: ${{ (github.event_name != 'workflow_dispatch' || !inputs.ref) && secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION || '' }}
-          ALLOW_DOCKER_TOKEN: ${{ github.event_name != 'workflow_dispatch' || !inputs.ref }}
-
-      - name: Log in to Docker Hub
-        if: steps.check-docker-token.outputs.has_token == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: $/.github/actions/dockerhub-login
         with:
           username: ${{ vars.DOCKER_USERNAME }}
-          password: ${{ (github.event_name != 'workflow_dispatch' || !inputs.ref) && secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION || '' }}
+          token: ${{ (github.event_name != 'workflow_dispatch' || !inputs.ref) && secrets.DOCKER_TOKEN_EBPF_INSTRUMENTATION || '' }}
 
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+      - uses: $/.github/actions/generate-bpf
         with:
-          go-version-file: "go.mod"
-          cache: true
+          upload-artifact: 'false'
 
-      - name: Go build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go build cache is content-addressable and self-verifying
+      - uses: $/.github/actions/setup-go-env
         with:
-          path: ~/.cache/go-build
-          key: go-build-vm-integration-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.go', 'go.sum') }}
-          restore-keys: |
-            go-build-vm-integration-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Upstream semconv registry cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] pinned upstream semconv tarball, keyed on the version in schemas/obi/manifest.yaml
-        with:
-          path: schemas/obi/.deps
-          key: semconv-deps-${{ hashFiles('schemas/obi/manifest.yaml') }}
-
-      - name: Generate BPF + build test tools
-        run: make prereqs docker-generate
+          cache-profile: vm-integration
+          download-bpf: 'false'
+          prereqs: 'true'
 
       - name: Pre-compile Go integration tests and gotestsum
         run: |
@@ -174,46 +151,29 @@ jobs:
           ( CGO_ENABLED=0 go build -C internal/tools -o ../../compiled-tests/gotestsum -ldflags="-s -w" gotest.tools/gotestsum ) &
           wait
 
-      - name: Cache Docker images
+      - name: Compute Docker images cache key
+        id: docker-images-key
+        env:
+          # Hash every discovered build input so source changes cannot reuse stale images.
+          KEY: vm-docker-images-${{ hashFiles('internal/test/integration/**', 'internal/config/**', 'Makefile', '.dockerignore', 'scripts/discover-integration-images.sh', 'bpf/**', 'cmd/**', 'pkg/**', 'go.mod', 'go.sum') }}
+        run: echo "key=${KEY}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker images
         id: docker-images-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of compose+Dockerfile+source inputs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of compose+Dockerfile+source inputs
         with:
           path: compiled-tests/docker-images.tar
-          # Hash every discovered build input so source changes cannot reuse stale images.
-          key: vm-docker-images-${{ hashFiles('internal/test/integration/**', 'internal/config/**', 'Makefile', '.dockerignore', 'scripts/discover-integration-images.sh', 'bpf/**', 'cmd/**', 'pkg/**', 'go.mod', 'go.sum') }}
+          key: ${{ steps.docker-images-key.outputs.key }}
 
-      - name: Compute base-image cache key
-        id: cache-key
+      - id: base-images
         if: steps.docker-images-cache.outputs.cache-hit != 'true'
-        env:
-          ARCH: ${{ runner.arch }}
-          INPUT_REF: ${{ inputs.ref || '' }}
-        run: |
-          if [ -n "${INPUT_REF}" ]; then
-            REF_SCOPE="input-ref-$(printf '%s' "${INPUT_REF}" | sha256sum | cut -d' ' -f1)"
-          else
-            REF_SCOPE="event-ref"
-          fi
-
-          IMAGE_SCOPE="$(bash scripts/discover-integration-images.sh --base-images | sha256sum | cut -d' ' -f1)"
-          PULL_SCRIPT_SCOPE="$(sha256sum scripts/pull-base-images.sh | cut -d' ' -f1)"
-          echo "key=base-images-${ARCH}-${REF_SCOPE}-${IMAGE_SCOPE}-${PULL_SCRIPT_SCOPE}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache base images
-        id: base-images-cache
-        if: steps.docker-images-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] key derives from the digest-pinned base-image list; images are content-addressable
-        with:
-          path: /tmp/base-images.tar
-          key: ${{ steps.cache-key.outputs.key }}
-
-      - name: Pull and save base images
-        if: steps.docker-images-cache.outputs.cache-hit != 'true' && steps.base-images-cache.outputs.cache-hit != 'true'
-        run: bash scripts/pull-base-images.sh /tmp/base-images.tar
+        uses: $/.github/actions/base-images
 
       - name: Load base images
-        if: steps.docker-images-cache.outputs.cache-hit != 'true' && steps.base-images-cache.outputs.cache-hit == 'true'
-        run: docker load -i /tmp/base-images.tar
+        if: steps.docker-images-cache.outputs.cache-hit != 'true' && steps.base-images.outputs.cache-hit == 'true'
+        env:
+          BASE_IMAGES: ${{ steps.base-images.outputs.path }}
+        run: docker load -i "$BASE_IMAGES"
 
       - name: Pre-build Docker images
         if: steps.docker-images-cache.outputs.cache-hit != 'true'
@@ -243,40 +203,64 @@ jobs:
             docker builder prune -af
           fi
 
-      - name: Cache rootfs image
+      - name: Save Docker images
+        if: steps.docker-images-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of compose+Dockerfile+source inputs
+        with:
+          path: compiled-tests/docker-images.tar
+          key: ${{ steps.docker-images-key.outputs.key }}
+
+      - name: Look up rootfs image cache
         id: rootfs-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
         with:
           path: rootfs.qcow2
           key: vm-rootfs-hybrid-${{ hashFiles('internal/test/vm/Dockerfile') }}
+          lookup-only: true
 
-      - name: Cache legacy rootfs image
+      - name: Look up legacy rootfs image cache
         id: rootfs-legacy-cache
-        if: env.NEEDS_LEGACY_ROOTFS == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
+        if: env.NEEDS_LEGACY_ROOTFS == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
         with:
           path: rootfs-legacy.qcow2
           key: vm-rootfs-legacy-${{ hashFiles('internal/test/vm/Dockerfile') }}
+          lookup-only: true
 
       - name: Install qemu-utils
-        if: steps.rootfs-cache.outputs.cache-hit != 'true' || (env.NEEDS_LEGACY_ROOTFS == 'true' && steps.rootfs-legacy-cache.outputs.cache-hit != 'true')
+        if: (steps.rootfs-cache.outcome == 'success' && steps.rootfs-cache.outputs.cache-hit != 'true') || (steps.rootfs-legacy-cache.outcome == 'success' && steps.rootfs-legacy-cache.outputs.cache-hit != 'true')
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-utils
 
       - name: Build rootfs image
-        if: steps.rootfs-cache.outputs.cache-hit != 'true'
+        if: steps.rootfs-cache.outcome == 'success' && steps.rootfs-cache.outputs.cache-hit != 'true'
         run: |
           sudo make -C internal/test/vm WORKDIR="$(pwd)" build-rootfs
           sudo chown "$(id -u):$(id -g)" rootfs.qcow2
           ls -lh rootfs.qcow2
 
+      - name: Save rootfs image
+        if: steps.rootfs-cache.outcome == 'success' && steps.rootfs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
+        with:
+          path: rootfs.qcow2
+          key: vm-rootfs-hybrid-${{ hashFiles('internal/test/vm/Dockerfile') }}
+
       - name: Build legacy rootfs image
-        if: env.NEEDS_LEGACY_ROOTFS == 'true' && steps.rootfs-legacy-cache.outputs.cache-hit != 'true'
+        if: steps.rootfs-legacy-cache.outcome == 'success' && steps.rootfs-legacy-cache.outputs.cache-hit != 'true'
         run: |
           sudo make -C internal/test/vm WORKDIR="$(pwd)" CGROUP_MODE=legacy build-rootfs
           sudo chown "$(id -u):$(id -g)" rootfs-legacy.qcow2
           ls -lh rootfs-legacy.qcow2
+
+      - name: Save legacy rootfs image
+        if: steps.rootfs-legacy-cache.outcome == 'success' && steps.rootfs-legacy-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] keyed on hash of VM Dockerfile
+        with:
+          path: rootfs-legacy.qcow2
+          key: vm-rootfs-legacy-${{ hashFiles('internal/test/vm/Dockerfile') }}
 
       - name: Stage schemas/obi/.deps for weaver
         run: |
