@@ -6,7 +6,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,15 +42,6 @@ func fixtureSignals(t *testing.T) []Signal {
 	return signals
 }
 
-func sortedKeys(set map[string]struct{}) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func TestParseSignals(t *testing.T) {
 	assert.Equal(t, []Signal{
 		{Name: "go.goroutine.count", Kind: kindMetric, Attributes: []DeclaredAttribute{}},
@@ -70,6 +60,68 @@ func TestParseSignals(t *testing.T) {
 			{Key: "service.name", RequirementLevel: levelRequired},
 		}},
 	}, fixtureSignals(t))
+}
+
+func TestEnumMembers(t *testing.T) {
+	typ := []byte(`{"members":[
+		{"id":"post","value":"POST"},
+		{"id":"get","value":"GET"},
+		{"id":"old","value":"OLD","deprecated":{"reason":"obsoleted"}},
+		{"id":"ok","value":0}]}`)
+	assert.Equal(t, []string{"0", "GET", "POST"}, enumMembers(typ), "deprecated members are skipped and numbers keep their JSON form")
+	assert.Nil(t, enumMembers([]byte(`"string"`)))
+}
+
+func TestAggregateMeasuresEnumMembersOfEmittedAttributes(t *testing.T) {
+	method := func() DeclaredAttribute {
+		return DeclaredAttribute{Key: "http.request.method", RequirementLevel: levelRequired, Members: []string{"GET", "POST", "PUT"}}
+	}
+	signals := []Signal{
+		{Name: "http.client.request.duration", Kind: kindMetric, Attributes: []DeclaredAttribute{method()}},
+		{Name: "obi.http.server", Kind: kindSpan, Attributes: []DeclaredAttribute{
+			method(),
+			{Key: "network.transport", RequirementLevel: levelRecommended, Members: []string{"tcp", "udp"}},
+			{Key: "url.path", RequirementLevel: levelRequired},
+		}},
+	}
+	res := Aggregate(signals, []Report{
+		{
+			MatchedSignals: map[string]int{"obi.http.server": 1, "http.client.request.duration": 1},
+			SignalAttributes: map[string][]string{
+				"obi.http.server":              {"http.request.method", "url.path"},
+				"http.client.request.duration": {"http.request.method"},
+			},
+			SignalAttributeValues: map[string]map[string][]string{
+				"obi.http.server":              {"http.request.method": {"GET"}, "url.path": {"/"}},
+				"http.client.request.duration": {"http.request.method": {"GET"}},
+			},
+		},
+		{
+			SignalAttributeValues: map[string]map[string][]string{"obi.http.server": {"http.request.method": {"PUT", "_OTHER"}}},
+		},
+	})
+
+	assert.Equal(t, []EnumValuesResult{
+		{
+			Signal: "http.client.request.duration", Kind: kindMetric, Attribute: "http.request.method",
+			Covered: []string{"GET"}, Gaps: []string{"POST", "PUT"},
+		},
+		{
+			Signal: "obi.http.server", Kind: kindSpan, Attribute: "http.request.method",
+			Covered: []string{"GET", "PUT"}, Gaps: []string{"POST"},
+		},
+	}, res.EnumValues, "values are unioned across reports per signal, and an attribute never emitted is already an attribute gap")
+	assert.Equal(t, []EnumAttributeResult{{
+		Attribute: "http.request.method", Covered: []string{"GET", "PUT"}, Gaps: []string{"POST"},
+	}}, res.EnumAttributes, "a member seen on any signal is covered for the attribute")
+	assert.Zero(t, res.FailingGaps(), "enum member gaps never fail")
+
+	md := res.Markdown()
+	assert.Contains(t, md, "| enum members, any signal | 2 | 3 | 66.7% |")
+	assert.Contains(t, md, "| enum members, per signal | 3 | 6 | 50.0% |")
+	assert.Contains(t, md, "**Enum members never observed on any signal: 1 attribute(s)**\n\n- `http.request.method`: `POST`\n")
+	assert.Contains(t, md, "<details><summary>Enum members never observed, per signal (2 signal attribute(s))</summary>")
+	assert.Contains(t, md, "- metric `http.client.request.duration` `http.request.method`: `POST`, `PUT`\n")
 }
 
 func TestParseSignalsRejectsAnEmptyRegistry(t *testing.T) {
@@ -183,6 +235,7 @@ func TestMarkdownAllCovered(t *testing.T) {
 
 	assert.Contains(t, md, "**Uncovered metrics:** all covered")
 	assert.Contains(t, md, "**Required and conditionally required signal attributes:** all covered")
+	assert.Contains(t, md, "**Enum members on any signal:** all covered")
 	assert.NotContains(t, md, "<details>")
 }
 

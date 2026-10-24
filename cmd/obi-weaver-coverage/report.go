@@ -10,25 +10,48 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 // Report is the part of a `compact` live-check report coverage reads.
 type Report struct {
-	MatchedSignals   map[string]int      `json:"matched_signals"`
-	SignalAttributes map[string][]string `json:"signal_attributes"`
+	MatchedSignals        map[string]int                 `json:"matched_signals"`
+	SignalAttributes      map[string][]string            `json:"signal_attributes"`
+	SignalAttributeValues map[string]map[string][]string `json:"signal_attribute_values"`
 }
 
 type Observed struct {
 	Signals          map[string]struct{}
 	SignalAttributes map[string]map[string]struct{}
+	// SignalAttributeValues holds, per signal and attribute key, the values seen.
+	SignalAttributeValues map[string]map[string]map[string]struct{}
 }
 
 // Observe unions the reports. A matched signal counts only with a positive
 // count.
 func Observe(reports []Report) Observed {
-	o := Observed{Signals: map[string]struct{}{}, SignalAttributes: map[string]map[string]struct{}{}}
+	o := Observed{
+		Signals:               map[string]struct{}{},
+		SignalAttributes:      map[string]map[string]struct{}{},
+		SignalAttributeValues: map[string]map[string]map[string]struct{}{},
+	}
 	for _, r := range reports {
+		for signal, keys := range r.SignalAttributeValues {
+			if o.SignalAttributeValues[signal] == nil {
+				o.SignalAttributeValues[signal] = map[string]map[string]struct{}{}
+			}
+			for key, values := range keys {
+				seen := o.SignalAttributeValues[signal][key]
+				if seen == nil {
+					seen = map[string]struct{}{}
+					o.SignalAttributeValues[signal][key] = seen
+				}
+				for _, v := range values {
+					seen[v] = struct{}{}
+				}
+			}
+		}
 		for name, count := range r.MatchedSignals {
 			if count > 0 {
 				o.Signals[name] = struct{}{}
@@ -60,17 +83,38 @@ type SignalAttributesResult struct {
 	Gaps    []DeclaredAttribute `json:"gaps"`
 }
 
+// EnumValuesResult is the coverage of the members of one enum attribute on one
+// signal.
+type EnumValuesResult struct {
+	Signal    string   `json:"signal"`
+	Kind      string   `json:"kind"`
+	Attribute string   `json:"attribute"`
+	Covered   []string `json:"covered"`
+	Gaps      []string `json:"gaps"`
+}
+
+// EnumAttributeResult is the coverage of the members of one enum attribute
+// across every signal that emitted it: a gap here was seen on no signal.
+type EnumAttributeResult struct {
+	Attribute string   `json:"attribute"`
+	Covered   []string `json:"covered"`
+	Gaps      []string `json:"gaps"`
+}
+
 type Result struct {
 	Reports          int                      `json:"reports"`
 	Metrics          SurfaceResult            `json:"metrics"`
 	Spans            SurfaceResult            `json:"spans"`
 	SignalAttributes []SignalAttributesResult `json:"signal_attributes"`
+	EnumValues       []EnumValuesResult       `json:"enum_values"`
+	EnumAttributes   []EnumAttributeResult    `json:"enum_attributes"`
 }
 
 // Aggregate measures the reports against the declared signals. Attribute
-// coverage is measured only on signals some suite observed: an unobserved
-// signal is already a signal gap, and counting its attributes again would only
-// repeat it.
+// coverage is measured only on signals some suite observed, and enum member
+// coverage only on attributes some suite emitted: an unobserved signal or
+// attribute is already a gap, and counting what it contains would only repeat
+// it.
 func Aggregate(signals []Signal, reports []Report) Result {
 	o := Observe(reports)
 	res := Result{
@@ -78,6 +122,7 @@ func Aggregate(signals []Signal, reports []Report) Result {
 		Metrics:          SurfaceResult{Covered: []string{}, Gaps: []string{}},
 		Spans:            SurfaceResult{Covered: []string{}, Gaps: []string{}},
 		SignalAttributes: []SignalAttributesResult{},
+		EnumValues:       []EnumValuesResult{},
 	}
 
 	for _, s := range signals {
@@ -96,13 +141,73 @@ func Aggregate(signals []Signal, reports []Report) Result {
 
 		sr := SignalAttributesResult{Signal: s.Name, Kind: s.Kind, Covered: []DeclaredAttribute{}, Gaps: []DeclaredAttribute{}}
 		for _, a := range s.Attributes {
-			if a.observedIn(o.SignalAttributes[s.Name]) {
-				sr.Covered = append(sr.Covered, a)
-			} else {
+			if !a.observedIn(o.SignalAttributes[s.Name]) {
 				sr.Gaps = append(sr.Gaps, a)
+				continue
+			}
+			sr.Covered = append(sr.Covered, a)
+			if len(a.Members) > 0 {
+				res.EnumValues = append(res.EnumValues, enumValues(s, a, o.SignalAttributeValues[s.Name][a.Key]))
 			}
 		}
 		res.SignalAttributes = append(res.SignalAttributes, sr)
+	}
+	res.EnumAttributes = enumAttributes(res.EnumValues)
+	return res
+}
+
+// enumAttributes rolls the per-signal enum coverage up per attribute. The
+// registry declares one member list per attribute, so a member a signal can
+// never emit is a per-signal gap; a member no signal emitted is a real one.
+func enumAttributes(values []EnumValuesResult) []EnumAttributeResult {
+	members := map[string]map[string]struct{}{}
+	seen := map[string]map[string]struct{}{}
+	for _, v := range values {
+		if members[v.Attribute] == nil {
+			members[v.Attribute] = map[string]struct{}{}
+			seen[v.Attribute] = map[string]struct{}{}
+		}
+		for _, m := range v.Covered {
+			members[v.Attribute][m] = struct{}{}
+			seen[v.Attribute][m] = struct{}{}
+		}
+		for _, m := range v.Gaps {
+			members[v.Attribute][m] = struct{}{}
+		}
+	}
+
+	out := []EnumAttributeResult{}
+	for _, attr := range sortedKeys(members) {
+		res := EnumAttributeResult{Attribute: attr, Covered: []string{}, Gaps: []string{}}
+		for _, m := range sortedKeys(members[attr]) {
+			if _, ok := seen[attr][m]; ok {
+				res.Covered = append(res.Covered, m)
+			} else {
+				res.Gaps = append(res.Gaps, m)
+			}
+		}
+		out = append(out, res)
+	}
+	return out
+}
+
+func sortedKeys[V any](set map[string]V) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func enumValues(s Signal, a DeclaredAttribute, seen map[string]struct{}) EnumValuesResult {
+	res := EnumValuesResult{Signal: s.Name, Kind: s.Kind, Attribute: a.Key, Covered: []string{}, Gaps: []string{}}
+	for _, m := range a.Members {
+		if _, ok := seen[m]; ok {
+			res.Covered = append(res.Covered, m)
+		} else {
+			res.Gaps = append(res.Gaps, m)
+		}
 	}
 	return res
 }
@@ -114,8 +219,9 @@ func isMandatory(level string) bool {
 }
 
 // FailingGaps counts the gaps --fail-on-gap fails on: signals no suite
-// observed. Attribute gaps are reported but never fail: some conditions, such
-// as error paths, are not reached by every suite.
+// observed. Attribute and enum member gaps are reported but never fail: some
+// conditions, such as error paths, are not reached by every suite, and an enum
+// imported from upstream lists members OBI may never emit.
 func (r Result) FailingGaps() int {
 	return len(r.Metrics.Gaps) + len(r.Spans.Gaps)
 }
@@ -188,6 +294,18 @@ func (r Result) Markdown() string {
 	for _, level := range requirementLevels {
 		row("signal attributes, "+level, covered[level], total[level])
 	}
+	enumCovered, enumTotal := 0, 0
+	for _, e := range r.EnumAttributes {
+		enumCovered += len(e.Covered)
+		enumTotal += len(e.Covered) + len(e.Gaps)
+	}
+	row("enum members, any signal", enumCovered, enumTotal)
+	enumCovered, enumTotal = 0, 0
+	for _, e := range r.EnumValues {
+		enumCovered += len(e.Covered)
+		enumTotal += len(e.Covered) + len(e.Gaps)
+	}
+	row("enum members, per signal", enumCovered, enumTotal)
 	b.WriteString("\n")
 
 	writeGapList(&b, "Uncovered metrics", r.Metrics.Gaps)
@@ -205,7 +323,42 @@ func (r Result) Markdown() string {
 		fmt.Fprintf(&b, "<details><summary>Recommended and opt-in signal attributes never observed (%d signal(s))</summary>\n\n%s\n</details>\n\n",
 			n, informational.String())
 	}
+
+	r.writeEnumGaps(&b)
 	return b.String()
+}
+
+// writeEnumGaps lists the enum members no signal emitted, then, collapsed, the
+// members never seen per signal.
+func (r Result) writeEnumGaps(b *strings.Builder) {
+	var gaps strings.Builder
+	listed := 0
+	for _, e := range r.EnumAttributes {
+		if len(e.Gaps) == 0 {
+			continue
+		}
+		fmt.Fprintf(&gaps, "- `%s`: `%s`\n", e.Attribute, strings.Join(e.Gaps, "`, `"))
+		listed++
+	}
+	if listed == 0 {
+		b.WriteString("**Enum members on any signal:** all covered\n\n")
+	} else {
+		fmt.Fprintf(b, "**Enum members never observed on any signal: %d attribute(s)**\n\n%s\n", listed, gaps.String())
+	}
+
+	var perSignal strings.Builder
+	listed = 0
+	for _, e := range r.EnumValues {
+		if len(e.Gaps) == 0 {
+			continue
+		}
+		fmt.Fprintf(&perSignal, "- %s `%s` `%s`: `%s`\n", e.Kind, e.Signal, e.Attribute, strings.Join(e.Gaps, "`, `"))
+		listed++
+	}
+	if listed > 0 {
+		fmt.Fprintf(b, "<details><summary>Enum members never observed, per signal (%d signal attribute(s))</summary>\n\n%s\n</details>\n\n",
+			listed, perSignal.String())
+	}
 }
 
 // LoadReports reads every weaver-report-*.json under dir. A report that does

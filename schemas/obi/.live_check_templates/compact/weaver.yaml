@@ -6,6 +6,11 @@
 # each signal was checked against, and the attribute keys seen on those samples
 # (span attributes, metric data-point attributes) per signal, which
 # cmd/obi-weaver-coverage compares with each signal's declared attributes.
+# `signal_attribute_values` lists, per signal and attribute key, the distinct
+# values seen, which the same tool compares with the members of enum
+# attributes. The template cannot tell an enum from a free-form key, so the
+# values of every key are listed, capped at `$max_values` per key: well above
+# the members an enum emits, and a bound on the free-form keys.
 #
 # `unexpected_attribute` on a metric for the keys in `ignored_unexpected` is
 # dropped here rather than in `.weaver.toml`: weaver attaches that finding to
@@ -35,6 +40,7 @@ templates:
     filter: >
       ["service.name", "service.namespace", "service.version",
        "deployment.environment.name"] as $ignored_unexpected
+      | 50 as $max_values
       | { statistics: .statistics,
         violations_seen: (
           [ .samples[] | .. | objects | select(has("all_advice")) | .all_advice[]
@@ -95,6 +101,23 @@ templates:
                   else [ $sample.attributes[]?.name ] end) } ]
           | group_by(.signal)
           | map({ key: .[0].signal, value: ([ .[].keys[] ] | unique) })
+          | from_entries
+        ),
+        signal_attribute_values: (
+          [ .samples[] | to_entries[]
+            | .value as $sample
+            | ($sample.live_check_result.match_info.signal? // null) as $signal
+            | select($signal != null)
+            | (if .key == "metric"
+                then $sample.data_points[]?.attributes[]?
+                else $sample.attributes[]? end)
+            | select(.value | type | . == "string" or . == "number" or . == "boolean")
+            | { signal: $signal, key: .name, value: (.value | tostring) } ]
+          | group_by(.signal)
+          | map({ key: .[0].signal,
+                  value: (group_by(.key)
+                    | map({ key: .[0].key, value: ([ .[].value ] | unique | .[0:$max_values]) })
+                    | from_entries) })
           | from_entries
         ) }
     application_mode: single

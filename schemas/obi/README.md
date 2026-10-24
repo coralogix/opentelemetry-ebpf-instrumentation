@@ -196,6 +196,14 @@ against this registry, resolved with `weaver registry resolve --v2`:
   against the keys seen on its matched samples (span attributes, metric
   data-point attributes), which the template lists under `signal_attributes`.
   Gaps are grouped by requirement level and reported, without failing.
+- **Enum members**: for each enum attribute a covered signal emitted, its
+  members that are not deprecated against the values seen on that signal,
+  which the template lists under `signal_attribute_values`, and rolled up per
+  attribute across signals. The registry declares one member list per
+  attribute, so a member a signal can never emit is a per-signal gap; a member
+  no signal emitted is listed first. Gaps are reported, without failing: an
+  enum imported from upstream, such as `db.system.name`, lists members OBI may
+  never emit.
 
 Coverage is measured against the registry only. A metric or span that a suite
 emits but the registry does not declare already fails that suite in live-check.

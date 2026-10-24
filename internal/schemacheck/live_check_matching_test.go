@@ -630,8 +630,9 @@ func TestCompactReportListsAttributesPerSignal(t *testing.T) {
 	})
 
 	var report struct {
-		MatchedSignals   map[string]int      `json:"matched_signals"`
-		SignalAttributes map[string][]string `json:"signal_attributes"`
+		MatchedSignals        map[string]int                 `json:"matched_signals"`
+		SignalAttributes      map[string][]string            `json:"signal_attributes"`
+		SignalAttributeValues map[string]map[string][]string `json:"signal_attribute_values"`
 	}
 	require.NoError(t, json.Unmarshal(out, &report), "compact report: %s", out)
 
@@ -640,4 +641,14 @@ func TestCompactReportListsAttributesPerSignal(t *testing.T) {
 		"obi.http.server":              {"error.type", "http.request.method", "http.response.status_code", "server.port", "url.path"},
 		"http.server.request.duration": {"http.request.method", "url.scheme"},
 	}, report.SignalAttributes)
+	assert.Equal(t, map[string]map[string][]string{
+		"obi.http.server": {
+			"error.type":                {"500"},
+			"http.request.method":       {"GET"},
+			"http.response.status_code": {"200"},
+			"server.port":               {"8080"},
+			"url.path":                  {"/", "/users"},
+		},
+		"http.server.request.duration": {"http.request.method": {"GET"}, "url.scheme": {"http"}},
+	}, report.SignalAttributeValues, "numbers are listed in their JSON form, as enum members are compared")
 }

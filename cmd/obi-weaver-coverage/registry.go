@@ -52,9 +52,42 @@ type resolvedRegistry struct {
 }
 
 type DeclaredAttribute struct {
-	Key              string `json:"key"`
-	RequirementLevel string `json:"requirement_level"`
-	Template         bool   `json:"template,omitempty"`
+	Key              string   `json:"key"`
+	RequirementLevel string   `json:"requirement_level"`
+	Template         bool     `json:"template,omitempty"`
+	Members          []string `json:"members,omitempty"`
+}
+
+// enumType is the resolved type of an enum attribute.
+type enumType struct {
+	Members []struct {
+		Value      json.RawMessage `json:"value"`
+		Deprecated json.RawMessage `json:"deprecated"`
+	} `json:"members"`
+}
+
+// enumMembers returns the values of an enum attribute's members that are not
+// deprecated, as the compact report renders values: a string as itself, a
+// number in its JSON form. It returns nil for any other type.
+func enumMembers(typ json.RawMessage) []string {
+	var enum enumType
+	if json.Unmarshal(typ, &enum) != nil {
+		return nil
+	}
+	var out []string
+	for _, m := range enum.Members {
+		if len(m.Deprecated) > 0 && string(m.Deprecated) != "null" {
+			continue
+		}
+		var s string
+		if json.Unmarshal(m.Value, &s) == nil {
+			out = append(out, s)
+		} else {
+			out = append(out, string(m.Value))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // observedIn reports whether a key of the attribute was seen. A template
@@ -106,6 +139,7 @@ func declaredAttributes(attrs []resolvedAttribute) []DeclaredAttribute {
 			Key:              a.Key,
 			RequirementLevel: requirementLevel(a.RequirementLevel),
 			Template:         strings.HasPrefix(typ, "template["),
+			Members:          enumMembers(a.Type),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
