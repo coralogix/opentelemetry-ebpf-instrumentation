@@ -748,11 +748,15 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			}},
 			// Task destruction — the vtable dealloc slot, sibling of raw::poll. We probe
 			// it (entry uprobe, PARM1 = NonNull<Header>) to delete the task's
-			// tokio_task_state entry so a future task that reuses this Header allocation
-			// cannot inherit the previous occupant's stale conn. This is an ENTRY probe on
-			// an address-taken function, so it fires reliably in release; deleting at
-			// destruction makes a reused Header start clean (fail closed) rather than
-			// resolving a new task's egress to the freed task's request.
+			// tokio_task_state entry so a future task of the SAME process that reuses this
+			// Header allocation (the allocator hands a freed cell straight back for the next
+			// task of that size) cannot inherit the previous occupant's stale conn; other
+			// processes never collide because the key carries the pid. This is an ENTRY
+			// probe on an address-taken function, so it fires reliably in release; deleting
+			// at destruction makes a reused Header start clean (fail closed) rather than
+			// resolving a new task's egress to the freed task's request. Links that
+			// surviving children still hold to the freed address are refused by the
+			// incarnation stamp check in the walk, not by this delete.
 			"tokio::runtime::task::raw::dealloc": {{
 				Required:     false,
 				SymbolPrefix: true,

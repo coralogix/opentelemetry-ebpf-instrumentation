@@ -230,11 +230,13 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
         (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
     const u64 parent_task = thread_state ? thread_state->current_task : k_tokio_task_none;
 
-    // Bump the version counter to detect pointer reuse
+    // A previous occupant of this address may still have an entry (its dealloc was not
+    // observed). It is consulted only to carry the paired task id over, below; the new
+    // entry's version is a fresh incarnation stamp, never derived from it (see
+    // tokio_task_incarnation).
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
-    const u64 next_version = existing ? existing->version + 1 : 1;
 
     // Pair this Header with the task Id generated just before it: task creation calls
     // Id::next then Cell::new back-to-back on the spawning thread, so the pending id
@@ -259,7 +261,7 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
 
     tokio_task_state_t new_state = {
         .parent = parent_task,
-        .version = next_version ? next_version : 1, // never store 0 (sentinel)
+        .version = tokio_task_incarnation(),
         .task_id = paired_task_id,
         .conn_valid = 0,
     };

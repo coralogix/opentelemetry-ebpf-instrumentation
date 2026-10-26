@@ -20,6 +20,20 @@
 SCRATCH_MEM_TYPED(tokio_task_anchor, tokio_task_state_t)
 SCRATCH_MEM_TYPED(tokio_task_id_anchor, tokio_task_id_state_t)
 
+// Incarnation stamp of a Header-keyed task entry: the monotonic creation time
+// (bpf_ktime_get_ns). Two occupants of one Header address can never share it: the second
+// is created only after the first was freed, and that path (raw::dealloc, the allocator,
+// Cell::new, two uprobe traps) is microseconds long against a clock tick of a few tens of
+// nanoseconds at worst. A child records its parent's stamp at spawn (parent_version) and
+// the walk follows the link only while it still matches, so a stale link to a recycled
+// address fails closed even though raw::dealloc deleted the previous occupant's entry (a
+// counter restarting at 1 for the new occupant would have matched the child's stamp of the
+// old one). CLOCK_MONOTONIC never repeats or goes backwards; it is never 0, so
+// parent_version == 0 keeps meaning "parent not registered at spawn".
+static __always_inline u64 tokio_task_incarnation(void) {
+    return bpf_ktime_get_ns();
+}
+
 // Full-key equality for the inbound-connection anchor. Comparing only the port is not
 // enough to detect a task being re-anchored across requests: two different clients can
 // coincidentally use the same ephemeral source port (different addresses, e.g. behind
@@ -135,7 +149,7 @@ find_tokio_parent_trace(u32 tgid, u64 task_id, const u8 egress) {
         }
         if (!task_state->parent_version || parent_state->version != task_state->parent_version) {
             if (egress) {
-                bpf_dbg_printk("tokio walk END stale-parent pv=%d cur=%d",
+                bpf_dbg_printk("tokio walk END stale-parent pv=%llu cur=%llu",
                                task_state->parent_version,
                                parent_state->version);
             }
@@ -343,7 +357,7 @@ tokio_tag_inbound_conn(u64 id, const connection_info_part_t *conn_part, const tp
     if (task_state) {
         *updated = *task_state;
     } else {
-        *updated = (tokio_task_state_t){.version = 1};
+        *updated = (tokio_task_state_t){.version = tokio_task_incarnation()};
     }
 
     // If this task is being anchored to a DIFFERENT request than before, it is a

@@ -250,9 +250,9 @@ Header pointers and task ids are process-local: two Tokio processes on one host 
 
 Poll entry resets `current_id` to 0; only the TLS setter firing **within the current poll** re-establishes it. This makes the id path provably inert in release even under *partial* inlining: if a future toolchain inlines only some of the setter's call sites, a stale id left by a surviving call site is wiped at the next poll entry before any egress could trust it. (Today the setter fires zero times in release, measured, and `Id::next` doesn't resolve there, so the id map is empty; the guard is defense in depth.)
 
-### Task pointer reuse is versioned (Header path only)
+### Task pointer reuse is stamped (Header path only)
 
-Tokio reuses `Header*` addresses. Each Header entry carries a `version` bumped on detected reuse; a child records `parent_version` at spawn and the walk follows the link only when it still matches (an unverifiable `parent_version == 0` link is never trusted). The id path needs none of this: ids are never reused, and the walk's monotonicity check (`parent_id < id`) rejects corrupted links.
+Tokio reuses `Header*` addresses: a freed task cell is handed straight back for the next task of the same size in the same process. `raw::dealloc` deletes the dead task's entry, which protects the newcomer from the old anchor, but not the links that the dead task's surviving children still hold to the address (a fire-and-forget child whose connection task closed). Each Header entry therefore carries a `version` that is an **incarnation stamp**: the monotonic creation time (`bpf_ktime_get_ns`). A child records `parent_version` at spawn and the walk follows the link only when the parent's current stamp still matches; two occupants of one address cannot share a stamp (the second is created microseconds after the first was freed, against a clock tick of tens of nanoseconds), and an unverifiable `parent_version == 0` link is never trusted. A counter restarting at 1 for each occupant (the previous scheme) matched the old child's stamp whenever both occupants were first-time anchors. The id path needs none of this: ids are never reused, and the walk's monotonicity check (`parent_id < id`) rejects corrupted links.
 
 ### Closure symbols are excluded from prefix matching
 

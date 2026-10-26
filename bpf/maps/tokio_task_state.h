@@ -14,11 +14,13 @@
 
 typedef struct tokio_task_state {
     u64 parent;                  // task pointer of the spawning task (0 if root/unknown)
-    u64 parent_version;          // parent's version captured at spawn time; the ancestry walk
-                                 // rejects a parent whose current version no longer matches,
-                                 // catching a reused/evicted parent pointer, 0 = unknown
-                                 // (not captured) -> not validated.
-    u64 version;                 // incremented on task-pointer reuse detection
+    u64 parent_version;          // parent's incarnation stamp captured at spawn time; the
+                                 // ancestry walk follows the link only while the parent's
+                                 // current version still matches, which rejects a recycled
+                                 // or evicted-and-recreated parent pointer. 0 = parent not
+                                 // registered at spawn -> link never followed.
+    u64 version;                 // incarnation stamp of this occupant of the Header address
+                                 // (monotonic creation time, tokio_task_incarnation); never 0
     u64 task_id;                 // this task's tokio Id (paired from Id::next at creation;
                                  // 0 = unknown). Used at dealloc to delete the id-keyed
                                  // twin entry in tokio_task_id_state, so a completed task's
