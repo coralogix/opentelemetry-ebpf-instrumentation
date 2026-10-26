@@ -378,10 +378,53 @@ func TestRustPrefix_SelectsPollNotRawTaskPoll(t *testing.T) {
 	rawPoll := rustDemangle("_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE")
 	rawTaskPoll := rustDemangle("_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE")
 
-	assert.Equal(t, "tokio::runtime::task::raw::poll", rawPoll)
+	assert.Equal(t, prefix, rawPoll, "raw::poll (vtable target) must match the probe path")
 	assert.Equal(t, "tokio::runtime::task::raw::RawTask::poll", rawTaskPoll)
-	assert.True(t, strings.HasPrefix(rawPoll, prefix), "raw::poll (vtable target) must match the probe prefix")
-	assert.False(t, strings.HasPrefix(rawTaskPoll, prefix), "RawTask::poll (thunk) must NOT match the probe prefix")
+	assert.NotEqual(t, prefix, rawTaskPoll, "RawTask::poll (thunk) must NOT match the probe path")
+}
+
+// TestRustPrefix_NestedItemsAreNotCopies: a probe path matches a symbol only when the
+// whole demangled path is equal. The nested helpers of Cell::new (new_header, check) and
+// of Harness::poll (poll_inner) start with the parent's path but are different functions;
+// they are inlined in release and out-of-line in debug builds, where a prefix match used
+// to attach the parent's uretprobe to them (one bogus Header entry per spawn in debug).
+// Real symbols from the debug test server (v0, rust 1.96 / tokio 1.52) and legacy-mangled
+// equivalents.
+func TestRustPrefix_NestedItemsAreNotCopies(t *testing.T) {
+	const cellNew = "tokio::runtime::task::core::Cell::new"
+	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
+
+	copies := map[string]string{
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new17h0123456789abcdefE": cellNew,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB5_4CellINtNtCsjemqvGMJH9i_4core3pin3PinINtNtCsbSVVNPxiylx_5alloc5boxed3BoxNCNCNvCs388xbHJbcbW_6server11ws_direct_b00EEINtNtB1z_4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE3newB29_": cellNew,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessNCNCNvCs388xbHJbcbW_6server7chan_tx00INtNtCsbSVVNPxiylx_5alloc4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE4pollB1a_":                                                    harnessPoll,
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$4poll17h0123456789abcdefE": harnessPoll,
+	}
+	for mangled, want := range copies {
+		got := rustDemangle(mangled)
+		if got == "" {
+			got = rustDemangleV0(mangled)
+		}
+		assert.Equal(t, want, got, "monomorphized copy must demangle to the probe path: %s", mangled)
+	}
+
+	nested := map[string]string{
+		"_RNvNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB7_4CellppE3new10new_header":                                                                                                                   cellNew,
+		"_RINvNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB8_4CellppE3new5checkNtNtNtBc_8blocking8schedule16BlockingScheduleEBe_":                                                                       cellNew,
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new10new_header17h0123456789abcdefE":                                                                                                                     cellNew,
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new5check17h0123456789abcdefE":                                                                                                                           cellNew,
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$10poll_inner17h0123456789abcdefE":                                                                                                                   harnessPoll,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessINtNtNtB9_8blocking4task12BlockingTaskNCNCNvCs388xbHJbcbW_6server8blocking00ENtNtB19_8schedule16BlockingScheduleE10poll_innerB1M_": harnessPoll,
+	}
+	for mangled, parent := range nested {
+		got := rustDemangle(mangled)
+		if got == "" {
+			got = rustDemangleV0(mangled)
+		}
+		require.NotEmpty(t, got, "must demangle: %s", mangled)
+		assert.True(t, strings.HasPrefix(got, parent), "nested item starts with the parent path: %s", got)
+		assert.NotEqual(t, parent, got, "nested item must NOT be taken as a copy of the parent: %s", got)
+	}
 }
 
 // TestFindExeSymbolsByPrefix_NoFalseMatchOnNonRust confirms a Rust prefix matches

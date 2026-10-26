@@ -247,12 +247,13 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
         paired_task_id = thread_state->pending_new_id;
         thread_state->pending_new_id = 0;
     } else if (existing) {
-        // A repeated Cell::new return for a Header that already carries an id (observed:
-        // several Cell::new fires per spawn) must not drop the pairing: with task_id=0 the
-        // id twin would never be deleted at dealloc and a stale id lineage would outlive
-        // its task. Carrying the id over is harmless if this is instead a genuine reuse
-        // without an observed dealloc: the previous occupant is dead, so deleting its id
-        // entry at this Header's dealloc is what should have happened anyway.
+        // A repeated Cell::new return for a Header that already carries an id must not
+        // drop the pairing: with task_id=0 the id twin would never be deleted at dealloc
+        // and a stale id lineage would outlive its task. Carrying the id over is harmless
+        // when this is a genuine reuse without an observed dealloc: the previous occupant
+        // is dead, so deleting its id entry at this Header's dealloc is what should have
+        // happened anyway. (Several returns per spawn were once observed; they came from
+        // the nested Cell::new helpers matched by prefix in debug builds, no longer probed.)
         paired_task_id = existing->task_id;
     }
 

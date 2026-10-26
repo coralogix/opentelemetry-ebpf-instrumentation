@@ -746,9 +746,14 @@ func isRustClosureSymbol(name string) bool {
 	return strings.HasPrefix(rest, "NC")
 }
 
-// FindExeSymbolsByPrefix resolves demangled Rust symbol prefixes to all matching
-// ELF symbols in the binary.  Each prefix key in the result maps to one Sym per
-// monomorphized copy of that function (e.g. all ~23 copies of raw::poll).
+// FindExeSymbolsByPrefix resolves demangled Rust function paths to all matching ELF
+// symbols in the binary. Each key in the result maps to one Sym per monomorphized copy
+// of that function (e.g. all ~23 copies of raw::poll). Both demanglers drop generic
+// arguments, so every copy of a generic function demangles to the same path; a symbol
+// matches only when its whole demangled path equals the key. Nested items such as
+// `Cell::new::new_header` or `Harness::poll_inner` are different paths and never match,
+// even though they start with the key (they are inlined in release and out-of-line in
+// debug builds, where a prefix match attached the parent's probes to them).
 func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, error) {
 	out := map[string][]Sym{}
 	// Shared across both symbol tables: a function can appear in .symtab and .dynsym,
@@ -770,9 +775,9 @@ func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, e
 	return out, nil
 }
 
-// collectSymbolsByPrefix fills `out` (prefix -> []Sym) for every ELF symbol whose
-// demangled Rust name starts with one of the requested prefixes.  Symbols that
-// do not demangle are silently skipped (they would be caught by collectSymbols).
+// collectSymbolsByPrefix fills `out` (path -> []Sym) for every ELF symbol whose
+// demangled Rust path equals one of the requested paths. Symbols that do not demangle
+// are silently skipped (they would be caught by collectSymbols).
 func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym, prefixes []string, seen map[uint64]struct{}) {
 	for _, s := range syms {
 		// Only STT_FUNC. Rust monomorphized generics (the Tokio copies) are always
@@ -800,7 +805,7 @@ func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym
 			continue
 		}
 		for _, prefix := range prefixes {
-			if strings.HasPrefix(demangled, prefix) {
+			if demangled == prefix {
 				sym := resolveSymbol(f, s)
 				// Skip a file offset already recorded (e.g. the same function present
 				// in both .symtab and .dynsym) so it is not probed twice.

@@ -708,7 +708,10 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// body is only the tail branch), and Harness is a transparent NonNull whose
 			// pointee's first field is Header, so PARM1 is the same Header pointer the
 			// handlers already expect — the BPF programs are unchanged. Generic over
-			// <T,S> -> many monomorphized copies, attached via demangled-prefix matching.
+			// <T,S> -> many monomorphized copies, one attachment per copy whose demangled
+			// path equals this key. Harness::poll_inner and its nested helpers start with
+			// the same path but are different functions (out-of-line in debug builds) and
+			// are not matched.
 			//
 			// Fragility: unlike raw::poll (address-taken for the vtable, so never
 			// inlinable), Harness::poll is out-of-line only by the optimiser's current
@@ -739,8 +742,11 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// away, but Cell::new does the heap allocation and stays out-of-line).
 			//
 			// Generic over <T,S> -> many monomorphized copies; the instrumenter attaches
-			// to every one via demangled-prefix matching. The nested new_header fn is
-			// inlined (no symbol), so this prefix does not over-match.
+			// to every one whose demangled path equals this key. The nested helpers
+			// Cell::new::new_header and Cell::new::check are inlined in release and
+			// out-of-line in debug; they are different paths and are not matched (a prefix
+			// match attached this uretprobe to them too: one return per spawn with a
+			// pointer into the cell, and one returning unit, RC=0).
 			"tokio::runtime::task::core::Cell::new": {{
 				Required:     false,
 				SymbolPrefix: true,
