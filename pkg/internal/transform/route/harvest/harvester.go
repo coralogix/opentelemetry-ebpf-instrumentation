@@ -266,6 +266,7 @@ func isDir(path string) bool {
 var isDirFunc = isDir
 
 func FindScriptDirectory(root, firstArg, cwd string) string {
+	firstArg = resolveEntryOutsideCwd(firstArg, cwd)
 	if strings.HasPrefix(firstArg, "/") {
 		if dir := resolveProcessDirectory(root, firstArg); dir != "" {
 			return dir
@@ -280,6 +281,18 @@ func FindScriptDirectory(root, firstArg, cwd string) string {
 	}
 
 	return resolveProcessDirectory(root, cwd)
+}
+
+func resolveEntryOutsideCwd(entry, cwd string) string {
+	if entry == "" || filepath.IsAbs(entry) {
+		return entry
+	}
+
+	path := langtools.AbsoluteProcessPath(cwd, entry)
+	if langtools.PathWithinBoundary(cwd, path) {
+		return entry
+	}
+	return path
 }
 
 func resolveProcessDirectory(root, path string) string {

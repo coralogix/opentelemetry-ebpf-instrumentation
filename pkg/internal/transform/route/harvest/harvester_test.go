@@ -510,6 +510,41 @@ func TestFindScriptDirectory(t *testing.T) {
 			cwd:      "/",
 			expected: tempDir + "/",
 		},
+		{
+			name:     "relative path outside cwd resolves to script directory",
+			root:     tempDir,
+			firstArg: "../app/server.js",
+			cwd:      "/workdir",
+			expected: filepath.Join(tempDir, "app") + "/",
+		},
+		{
+			name:     "relative path to directory outside cwd",
+			root:     tempDir,
+			firstArg: "../src",
+			cwd:      "/workdir",
+			expected: filepath.Join(tempDir, "src") + "/",
+		},
+		{
+			name:     "relative parent traversal stays inside process root",
+			root:     tempDir,
+			firstArg: "../../../outside/server.js",
+			cwd:      "/workdir",
+			expected: filepath.Join(tempDir, "outside") + "/",
+		},
+		{
+			name:     "relative path inside cwd keeps cwd",
+			root:     tempDir,
+			firstArg: "nested/deep/file.js",
+			cwd:      "/app",
+			expected: filepath.Join(tempDir, "app") + "/",
+		},
+		{
+			name:     "relative path outside cwd to missing file falls back to cwd",
+			root:     tempDir,
+			firstArg: "../missing/server.js",
+			cwd:      "/workdir",
+			expected: filepath.Join(tempDir, "workdir") + "/",
+		},
 	}
 
 	for _, tt := range tests {
