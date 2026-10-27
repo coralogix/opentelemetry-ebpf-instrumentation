@@ -22,14 +22,20 @@
 #include <pid/pid.h>
 
 // ABI assumptions shared by every probe in this file. The Rust calling convention is
-// unstable, but for a single scalar argument or return value rustc uses the platform C
-// convention on x86-64 and aarch64, which is what PT_REGS_PARM1 / PT_REGS_RC read:
+// unstable, but for scalar arguments and return values (a two-scalar struct is passed as
+// two scalars) rustc uses the platform C convention on x86-64 and aarch64, which is what
+// PT_REGS_PARMn / PT_REGS_RC read:
 //
-//   Harness::poll(self: NonNull<Header>)     PARM1 = Header pointer
-//   raw::dealloc(ptr: NonNull<Header>)       PARM1 = Header pointer
-//   set_current_task_id(id: Option<Id>)      PARM1 = Id (NonZeroU64 niche: None == 0)
-//   Cell::new(..) -> Box<Cell<T,S>>          RC    = Header pointer (#[repr(C)], header first)
-//   Id::next() -> Id                         RC    = the new Id
+//   Harness::poll(self: NonNull<Header>)             PARM1 = Header pointer
+//   raw::dealloc(ptr: NonNull<Header>)               PARM1 = Header pointer
+//   set_current_task_id(id: Option<Id>)              PARM1 = Id (NonZeroU64 niche: None == 0)
+//   OwnedTasks::bind_inner(&self, task: Task<S>, ..) PARM2 = Header pointer
+//   Spawner::spawn_task(&self, task: Task, ..)       PARM2 = Header pointer (Task is the
+//                                                            {UnownedTask, Mandatory} pair)
+//   Shared::schedule(&self, task: Notified<..>)      PARM2 = Header pointer
+//   Cell::new(..) -> Box<Cell<T,S>>                  RC    = Header pointer (#[repr(C)],
+//                                                            header first)
+//   Id::next() -> Id                                 RC    = the new Id
 //
 // A toolchain that changes any of these breaks attribution silently (fail-closed at best),
 // which is why the symbol baseline in the devdoc is re-checked on toolchain bumps.
@@ -135,40 +141,34 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Task creation: uretprobe on Cell::<T,S>::new, the constructor every task-creation path
-// goes through (tokio::spawn, spawn_local, spawn_blocking, all schedulers). RC is the task
-// Header (Cell is #[repr(C)] with header first). Runs on the spawning thread inside the
-// parent's poll, so current_task is the parent. Records lineage only: the child takes the
-// parent's incarnation stamp and anchor epoch, never its connection, so an egress must
-// climb to the anchor (an inherited copy on a long-lived descendant would outlive its
-// request).
-SEC("uretprobe/self:tokio_cell_new")
-int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
+// Which spawn-time probe registered a task, for the debug line only.
+enum tokio_task_origin {
+    k_tokio_origin_cell_new = 0,
+    k_tokio_origin_bind = 1,
+    k_tokio_origin_schedule = 2,
+};
 
-    const u64 id = bpf_get_current_pid_tgid();
-
-    const u32 tgid = valid_pid(id);
-    if (!tgid) {
-        return 0;
-    }
-
-    const u64 new_task_ptr = (u64)PT_REGS_RC(ctx);
-    if (new_task_ptr == k_tokio_task_none) {
-        return 0;
-    }
-
+// Registers new_task_ptr as a child of the task the spawning thread is polling now. Every
+// caller runs on the spawning thread inside the parent's poll, so current_task is the
+// parent. Lineage only: the child takes the parent's incarnation stamp and anchor epoch,
+// never its connection, so an egress must climb to the anchor (an inherited copy on a
+// long-lived descendant would outlive its request). Overwrites: a previous occupant of the
+// Header address may still have an entry (its dealloc was not observed), and only its
+// paired task id is carried over, the version is a fresh stamp. A second registration of
+// the same spawn (Cell::new, then bind_inner) rewrites the same lineage before the task
+// can have children or an anchor.
+static __always_inline void
+tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
         (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
     const u64 parent_task = thread_state ? thread_state->current_task : k_tokio_task_none;
 
-    // A previous occupant may still have an entry (its dealloc was not observed): only its
-    // paired task id is carried over, the version is a fresh stamp.
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
 
-    // Id::next runs right before Cell::new on the spawning thread, so the pending id belongs
-    // to this cell. Consumed once.
+    // Id::next runs right before the task's constructor on the spawning thread, so the
+    // pending id belongs to this task. Consumed once.
     u64 paired_task_id = 0;
     if (thread_state && thread_state->pending_new_id) {
         paired_task_id = thread_state->pending_new_id;
@@ -180,7 +180,7 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
     }
 
     bpf_dbg_printk(
-        "tokio task_new: tid=%d new=%llx parent=%llx", (u32)id, new_task_ptr, parent_task);
+        "tokio task_new: new=%llx parent=%llx origin=%d", new_task_ptr, parent_task, (u32)origin);
 
     tokio_task_state_t new_state = {
         .parent = parent_task,
@@ -201,6 +201,84 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
     }
 
     bpf_map_update_elem(&tokio_task_state, &new_task_key, &new_state, BPF_ANY);
+}
+
+// Task creation: uretprobe on Cell::<T,S>::new, the constructor every task-creation path
+// goes through (tokio::spawn, spawn_local, spawn_blocking, all schedulers). RC is the task
+// Header (Cell is #[repr(C)] with header first). One copy per spawned future type, and the
+// optimiser inlines the copies of small futures away (a spawn_local block, spawn_blocking's
+// BlockingTask wrapper), which is what the two spawn hooks below cover.
+SEC("uretprobe/self:tokio_cell_new")
+int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
+    const u64 id = bpf_get_current_pid_tgid();
+
+    const u32 tgid = valid_pid(id);
+    if (!tgid) {
+        return 0;
+    }
+
+    const u64 new_task_ptr = (u64)PT_REGS_RC(ctx);
+    if (new_task_ptr == k_tokio_task_none) {
+        return 0;
+    }
+
+    tokio_register_task(id, tgid, new_task_ptr, k_tokio_origin_cell_new);
+
+    return 0;
+}
+
+// Spawn-time registration independent of the future type: entry uprobe on the functions
+// every spawn passes through after its constructor that are generic over the scheduler
+// only, so they keep one out-of-line copy per scheduler however small the future.
+// OwnedTasks::<S>::bind_inner takes every tokio::spawn on both runtimes, Spawner::spawn_task
+// every spawn_blocking. PARM2 is the new task's Header. Spawn-only functions, so this
+// registers unconditionally, like Cell::new.
+SEC("uprobe/self:tokio_bind")
+int GUARDED_PROG(obi_uprobe_tokio_bind, struct pt_regs *, ctx) {
+    const u64 id = bpf_get_current_pid_tgid();
+
+    const u32 tgid = valid_pid(id);
+    if (!tgid) {
+        return 0;
+    }
+
+    const u64 new_task_ptr = (u64)PT_REGS_PARM2(ctx);
+    if (new_task_ptr == k_tokio_task_none) {
+        return 0;
+    }
+
+    tokio_register_task(id, tgid, new_task_ptr, k_tokio_origin_bind);
+
+    return 0;
+}
+
+// spawn_local's counterpart. LocalOwnedTasks::bind is generic over the future and inlined
+// with Cell::new; the spawn ends in local::Shared::schedule, which also runs on every wake
+// of a local task, so a task is registered here only when it has no entry. A task is
+// always scheduled before its first poll, so a missing entry at schedule time means spawn.
+// A task asleep across OBI's attach whose first event is a wake by another task is adopted
+// as that task's child (the attach-window limitation in the devdoc). PARM2 is the Notified
+// task, i.e. the Header.
+SEC("uprobe/self:tokio_schedule")
+int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
+    const u64 id = bpf_get_current_pid_tgid();
+
+    const u32 tgid = valid_pid(id);
+    if (!tgid) {
+        return 0;
+    }
+
+    const u64 task_ptr = (u64)PT_REGS_PARM2(ctx);
+    if (task_ptr == k_tokio_task_none) {
+        return 0;
+    }
+
+    const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
+    if (bpf_map_lookup_elem(&tokio_task_state, &task_key)) {
+        return 0;
+    }
+
+    tokio_register_task(id, tgid, task_ptr, k_tokio_origin_schedule);
 
     return 0;
 }

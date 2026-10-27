@@ -697,15 +697,43 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				End:           p.bpfObjects.ObiUretprobeTokioPoll,
 			}},
 			// Task creation. Cell::<T,S>::new is the one constructor every task-creation path
-			// uses (both runtimes, spawn_local, the blocking pool) and stays out of line in
-			// release; RC is Box<Cell>, whose first field is the Header. The bind functions
-			// are not probed: LocalOwnedTasks::bind receives the raw future, not the Header.
-			// The nested helpers Cell::new::new_header and ::check are different paths and
-			// are not matched.
+			// uses (both runtimes, spawn_local, the blocking pool); RC is Box<Cell>, whose
+			// first field is the Header. One copy per spawned future type, and release
+			// inlines the copies of small futures away, hence the spawn hooks below. The
+			// nested helpers Cell::new::new_header and ::check are different paths and are
+			// not matched.
 			"tokio::runtime::task::core::Cell::new": {{
 				Required:      false,
 				DemangledPath: true,
 				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
+			}},
+			// Spawn-time registration that does not depend on the future type: the step
+			// after the constructor that is generic over the scheduler only, so it keeps an
+			// out-of-line copy per scheduler. bind_inner takes every tokio::spawn on both
+			// runtimes (tokio factored it out of bind<T> as "the part that's the same for
+			// every type of future"), spawn_task every spawn_blocking. PARM2 is the Header.
+			// spawn_task is absent from a binary that never links the blocking pool.
+			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioBind,
+			}},
+			"tokio::runtime::blocking::pool::Spawner::spawn_task": {{
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				Start:         p.bpfObjects.ObiUprobeTokioBind,
+			}},
+			// spawn_local's counterpart: LocalOwnedTasks::bind is generic over the future
+			// and inlined with Cell::new, so the spawn is caught at local::Shared::schedule,
+			// which also runs on every wake of a local task (the program registers only a
+			// task with no entry). PARM2 is the Notified task, i.e. the Header. Absent from
+			// a binary without a LocalSet.
+			"tokio::task::local::Shared::schedule": {{
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				Start:         p.bpfObjects.ObiUprobeTokioSchedule,
 			}},
 			// Task destruction: the vtable dealloc slot, an entry probe on an address-taken
 			// function, so it fires in release. Deletes the task's entries so a reused Header

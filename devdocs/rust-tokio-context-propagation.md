@@ -75,10 +75,11 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
    remapped by keep-alive reuse before a late egress could read it.
 7. **State that could go stale is reset or destroyed, not reused.** `current_id` is zeroed
    at every poll entry and trusted only if the runtime's own TLS setter re-set it within
-   that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new`
-   re-initializes a reused Header entry; anchor writes are copy-modify-publish (a single
-   `bpf_map_update_elem`), so concurrent readers see a complete old or new value, never a
-   torn one; every entry is deleted when the process exits.
+   that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new` and
+   the spawn-only hooks re-initialize a reused Header entry; anchor writes are
+   copy-modify-publish (a single `bpf_map_update_elem`), so concurrent readers see a
+   complete old or new value, never a torn one; every entry is deleted when the process
+   exits.
 8. **There are no fallback tiers.** Earlier revisions had thread-level and process-level
    last-write-wins fallbacks; each was measured misattributing under concurrency (up to
    ~35% in adversarial tests) and all were removed. The id walk is NOT a fallback: it is
@@ -125,8 +126,9 @@ The implementation tracks task identity two ways, because no single signal survi
 build profiles:
 
 1. **Header-keyed lineage (the release mechanism).** `Harness::poll` entry/exit maintains
-   the currently-polled task's `Header*` per thread; `Cell::new` records each task's
-   parent Header at creation. In release builds the optimizer inlines the async machinery
+   the currently-polled task's `Header*` per thread; `Cell::new` and the two spawn hooks
+   (`bind_inner` / `spawn_task`, `Shared::schedule`) record each task's parent Header at
+   creation. In release builds the optimizer inlines the async machinery
    into the per-request task's poll frame, so the `Header*` current at the egress is the
    request task, or a child of it (hyper's connection-driver task for a fresh client), and
    the ancestry walk resolves it. In debug builds this signal collapses: the egress
@@ -157,7 +159,7 @@ the task anchored to an inbound request, inside its trust window, or return noth
 The design depends on these Tokio behaviors (all verified by disassembly, source reading of the pinned version, or measurement):
 
 1. Every task poll runs through `tokio::runtime::task::harness::Harness::<T,S>::poll`, reached on every poll for every scheduler (multi-thread workers, current-thread, and the blocking pool) in both debug and release. The vtable-stored `raw::poll::<T,S>` is a one-instruction thunk that tail-calls it, so `Harness::poll` is the universal poll point; unlike `raw::poll`, it retains a `RET` in release, so a uretprobe on it fires reliably.
-2. Every async task-creation path allocates the task's cell through `tokio::runtime::task::core::Cell::<T,S>::new`. It runs synchronously on the spawning thread while the spawning task is still "current". `Cell` is `#[repr(C)]` with `header` first and `Cell::new` returns `Box<Cell>`, so the returned pointer is the task `Header`.
+2. Every async task-creation path allocates the task's cell through `tokio::runtime::task::core::Cell::<T,S>::new`. It runs synchronously on the spawning thread while the spawning task is still "current". `Cell` is `#[repr(C)]` with `header` first and `Cell::new` returns `Box<Cell>`, so the returned pointer is the task `Header`. `Cell::new` has one copy per spawned future type, and in release the optimizer inlines the copies of small futures (a `spawn_local` block, `spawn_blocking`'s `BlockingTask` wrapper) into their spawn site, so some tasks are never seen there. Every spawn then continues through a step that is generic over the scheduler only, one out-of-line copy per scheduler however small the future, with the new `Header` as its second argument: `OwnedTasks::<S>::bind_inner` for `tokio::spawn` on both runtimes (tokio factored it out of `bind<T>` as "the part that's the same for every type of future"), `blocking::pool::Spawner::spawn_task` for `spawn_blocking`, and `local::Shared::schedule` for `spawn_local` (`LocalOwnedTasks::bind` is generic over the future and inlined with `Cell::new`). Measured on the actix-web (`LocalSet`) release server: 36 task types polled, 22 with a `Cell::new` copy, the `spawn_local` ones among the missing.
 3. Task creation calls `tokio::runtime::task::id::Id::next` (a monotone `u64` counter; **ids are never reused**) immediately before the task's `Cell::new` on the spawning thread. This adjacency is what pairs a task's Id with its Header.
 4. The runtime maintains the TLS current-task id via `tokio::runtime::context::set_current_task_id`, called on poll enter (set) and exit (restore), including around **blocking-pool** task polls, which is why the id walk can correlate `spawn_blocking` in debug.
 5. Tokio is **statically linked** into the application binary, so all probes target the executable itself (`SEC("uprobe/self:...")`).
@@ -199,7 +201,15 @@ Why `Harness::poll` and not `raw::poll` or `RawTask::poll`: `RawTask::poll` is i
 
 ### `Cell::new` (task creation) — `tokio_cell_new`
 
-Uretprobe; `PT_REGS_RC` is the new task's `Header*` (`Cell` is `#[repr(C)]`, header first). Records the Header-keyed lineage entry: parent = the thread's `current_task`, the parent's current `version` (pointer-reuse guard) and `anchor_epoch` (re-anchor guard), and a `version` of its own. No connection is copied from the parent: the walk climbs to the anchor. Additionally **consumes `pending_new_id`**, the Id generated by the immediately-preceding `Id::next` on this thread, storing it as `tokio_task_state.task_id`, which pairs the task's Id with its Header for lifecycle cleanup. Consume-once: should a creation path ever produce a second return, the extra entry gets `task_id = 0`, which can only degrade to a missing id lineage (orphan), never a wrong one.
+Uretprobe; `PT_REGS_RC` is the new task's `Header*` (`Cell` is `#[repr(C)]`, header first). Records the Header-keyed lineage entry (`tokio_register_task`): parent = the thread's `current_task`, the parent's current `version` (pointer-reuse guard) and `anchor_epoch` (re-anchor guard), and a `version` of its own. No connection is copied from the parent: the walk climbs to the anchor. Additionally **consumes `pending_new_id`**, the Id generated by the immediately-preceding `Id::next` on this thread, storing it as `tokio_task_state.task_id`, which pairs the task's Id with its Header for lifecycle cleanup. Consume-once: should a creation path ever produce a second return, the extra entry gets `task_id = 0`, which can only degrade to a missing id lineage (orphan), never a wrong one.
+
+### `OwnedTasks::bind_inner`, `Spawner::spawn_task` (spawn-time registration) — `tokio_bind`
+
+Entry uprobe on the two spawn-only functions that follow the constructor and are generic over the scheduler, not the future (Runtime Model, item 2): `tokio::runtime::task::list::OwnedTasks::<S>::bind_inner(&self, task, notified)` for every `tokio::spawn`, `tokio::runtime::blocking::pool::Spawner::spawn_task(&self, task, rt)` for every `spawn_blocking`. `PT_REGS_PARM2` is the new task's `Header*` in both (`Task<S>` is the Header pointer; the blocking `Task` is a `{UnownedTask, Mandatory}` pair passed as two scalars, Header first). Same registration as `Cell::new`, unconditional: after an out-of-line `Cell::new` it rewrites the same lineage before the task can have children or an anchor; after an inlined one it is the registration. `spawn_task` is flagged `MayBeInlined`: a binary that never links the blocking pool has no such symbol.
+
+### `Shared::schedule` (spawn_local registration) — `tokio_schedule`
+
+Entry uprobe on `tokio::task::local::Shared::schedule(&self, task)`; `PT_REGS_PARM2` is the `Notified` task, i.e. the `Header*`. The spawn of every `spawn_local` ends here, but so does every wake of a local task, so the program registers only a task that has **no entry**: a task is always scheduled before its first poll, so a missing entry at schedule time means spawn. A task asleep across OBI's attach whose first event is a wake by another task is adopted as that task's child (see the attach window in Known Limitations). Flagged `MayBeInlined`: a binary without a `LocalSet` has no such symbol.
 
 ### `Id::next` (task-id allocation) — `tokio_id_next`
 
@@ -282,13 +292,19 @@ Symbols are resolved from the executable's `.symtab` by **demangled path**: Toki
   direct-I/O egress via the Header walk. Debug correlates all of those **plus
   `spawn_blocking`** via the id walk. Misattribution is zero in both.
 
-- **Release correlation of pooled-client egress depends on compiler inlining.** A pooled
-  client's socket write is done by a connection-driver task; release correlates it because
-  that task is spawned under the request task and the inlined poll frames keep the request
-  task current. That is compiler behavior, not an ABI guarantee: re-verify the symbol
-  baseline above on toolchain bumps. The instrumenter's return-offset warning and the
-  4-build integration matrix are the tripwires; the debug id layer is the structural
-  backstop.
+- **Release correlation depends on which Tokio internals the compiler keeps out of
+  line.** `Harness::poll` survives because it is address-taken (the task vtable);
+  `Cell::new` loses its copies for small futures; the three spawn hooks survive because
+  each has one copy per scheduler with many callers, and the pooled-client correlation
+  relies on the inlined poll frames keeping the request task current. All of that is
+  compiler behavior, not an ABI guarantee: re-verify the symbol baseline above on
+  toolchain bumps. The instrumenter's partial-resolution and return-offset warnings and
+  the 4-build integration matrix are the tripwires; the debug id layer is the structural
+  backstop. A `LocalSet` task whose `Cell::new` was inlined and whose Header address
+  still carries a previous occupant's entry (its dealloc unobserved) keeps that stale
+  lineage until the version or epoch guard refuses it, as every reused Header did before
+  the hooks; `bind_inner` and `spawn_task` re-initialize it, `Shared::schedule` cannot
+  tell a spawn from a wake and does not.
 
 - **Shared tasks: the in-flight window.** A long-lived task spawned under request N (a
   channel worker in an actor pattern, a pooled client's connection driver) records N's
@@ -322,7 +338,11 @@ Symbols are resolved from the executable's `.symtab` by **demangled path**: Toki
   (observed once: the backend's first request, 4 ms before its setter attached). The
   anchor is cleared at that request's response and the id path owns every anchor once
   the setter is attached, so the effect is bounded to requests in flight during the
-  attach. Tasks spawned during the window record no parent state and orphan.
+  attach. Tasks spawned during the window record no parent state and orphan. A `LocalSet`
+  task asleep across the attach whose first event is a wake by another task is registered
+  at that wake as the waker's child (`Shared::schedule` cannot tell a wake from a spawn):
+  a one-off lineage under the epoch and version guards, same class as the shared-task
+  in-flight window.
 
 - **HTTP/2.** Inbound HTTP/2 anchors are epoch-guarded per request but the untag hooks the
   HTTP/1 response path only, so their trust window does not close at the response. HTTP/2

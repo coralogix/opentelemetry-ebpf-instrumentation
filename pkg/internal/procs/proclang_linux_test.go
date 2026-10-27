@@ -202,6 +202,17 @@ func TestRustDemangle_Legacy(t *testing.T) {
 			"_ZN5tokio7runtime4task4list19OwnedTasks$LT$S$GT$10bind_inner17h69552d27e517e78cE",
 			"tokio::runtime::task::list::OwnedTasks::bind_inner",
 		},
+		// The two non-generic spawn hooks (release build samples).
+		{
+			"local::Shared::schedule",
+			"_ZN5tokio4task5local6Shared8schedule17hc1df551b6d75b431E",
+			"tokio::task::local::Shared::schedule",
+		},
+		{
+			"pool::Spawner::spawn_task",
+			"_ZN5tokio7runtime8blocking4pool7Spawner10spawn_task17hd7c1f6286fd92f4cE",
+			"tokio::runtime::blocking::pool::Spawner::spawn_task",
+		},
 		// Non-generic methods (no $LT$): RawTask::poll and the spawn_blocking free fn.
 		{
 			"RawTask::poll",
@@ -265,6 +276,17 @@ func TestRustDemangleV0_Tokio(t *testing.T) {
 			"OwnedTasks::bind_inner",
 			"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
 			"tokio::runtime::task::list::OwnedTasks::bind_inner",
+		},
+		// The two non-generic spawn hooks: inherent impls with a disambiguator (Ms9_, Ms4_).
+		{
+			"local::Shared::schedule",
+			"_RNvMs9_NtNtCscMapNUXOuou_5tokio4task5localNtB5_6Shared8schedule",
+			"tokio::task::local::Shared::schedule",
+		},
+		{
+			"pool::Spawner::spawn_task",
+			"_RNvMs4_NtNtNtCscMapNUXOuou_5tokio7runtime8blocking4poolNtB5_7Spawner10spawn_task",
+			"tokio::runtime::blocking::pool::Spawner::spawn_task",
 		},
 		// pool::spawn_blocking — Real v0 sample (free fn, instantiated with the multi-thread worker Launch closure).
 		// Generic args (I…E) and the trailing instantiation are dropped by the parser.
