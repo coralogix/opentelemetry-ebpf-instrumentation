@@ -14,9 +14,10 @@
 // a new one (its slot is empty); a parent recorded at that wake would be the waker's, not
 // the spawner's. A count, not a bit, so the dealloc of a task sharing a slot with a live one
 // cannot erase the live one's trace. Counted once per task, at its registration or at the
-// first poll of a task never registered, and decremented at raw::dealloc when the task
-// still had an entry: a count left behind by an evicted task only withholds parents at its
-// slot, while a decrement for a task never counted could erase a neighbour's. A slot shared
+// first poll of a task never registered, and decremented at raw::dealloc only when the
+// task's entry says it took the count (tokio_task_state_t.counted): a count left behind by
+// an evicted task only withholds parents at its slot, while a decrement for a task that
+// never took one could erase a neighbour's. A slot shared
 // with another live task reads as live and only withholds a parent; the count saturates and
 // never wraps. Bytes rather than words, so a change is one read-modify-write without
 // atomics, which the 5.8 floor lacks; two tasks of one slot changing at the same instant can

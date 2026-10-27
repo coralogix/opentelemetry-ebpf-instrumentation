@@ -33,7 +33,11 @@ typedef struct tokio_task_state {
     u8 tp_valid;                 // 1 if tp holds a snapshot
     u8 conn_valid;               // 1 if conn was set by an inbound request
     u8 conn_shared;              // 1 if anchored to more than one connection: never trusted
-    u8 _pad[5];
+    u8 counted;                  // 1 if this task holds one count in its tokio_task_slots
+                                 // slot, released at its dealloc; 0 for an entry the anchor
+                                 // created on the spot or a wake re-registration, whose
+                                 // dealloc must not touch a count that may be a neighbour's
+    u8 _pad[4];
 } tokio_task_state_t;
 
 struct {

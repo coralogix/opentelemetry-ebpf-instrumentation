@@ -174,7 +174,9 @@ enum tokio_task_origin {
 // and only its paired task id is carried over, the version is a fresh stamp. A second
 // registration of the same spawn (Cell::new, then bind_inner) rewrites the same lineage
 // before the task can have children or an anchor. The slot count takes one per task: a
-// registration that finds no entry, except the wake of a task counted when first seen.
+// registration that finds no entry, except the wake of a task whose live slot may be a
+// neighbour's; the entry remembers whether it holds a count, so only that dealloc releases
+// one.
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
@@ -187,7 +189,8 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
-    if (!existing && origin != k_tokio_origin_schedule_known) {
+    const u8 counted = !existing && origin != k_tokio_origin_schedule_known;
+    if (counted) {
         tokio_slot_inc(tgid, new_task_ptr);
     }
 
@@ -211,6 +214,9 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
         .version = tokio_task_incarnation(),
         .task_id = paired_task_id,
         .conn_valid = 0,
+        // A second registration of the same spawn, or a new occupant over a stale entry,
+        // carries the count the entry already holds.
+        .counted = existing ? existing->counted : counted,
     };
 
     // Pointer-reuse guard (parent_version) and re-anchor guard (parent_epoch) for the walk.
@@ -339,9 +345,11 @@ int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
         const tokio_task_key_t id_key = tokio_task_key(tgid, dying->task_id);
         bpf_map_delete_elem(&tokio_task_id_state, &id_key);
     }
-    // The slot count is released only with the entry: a task without one may never have
-    // been counted, and its decrement could erase a live neighbour's.
-    if (dying) {
+    // Only the task that took a count releases one: an entry the anchor created on the
+    // spot, or a wake re-registration, may share its slot with the task the count belongs
+    // to, and a task without an entry may have lost its count to eviction, so neither
+    // decrements. A count that is never released only withholds parents at its slot.
+    if (dying && dying->counted) {
         tokio_slot_dec(tgid, task_ptr);
     }
     bpf_map_delete_elem(&tokio_task_state, &task_key);
