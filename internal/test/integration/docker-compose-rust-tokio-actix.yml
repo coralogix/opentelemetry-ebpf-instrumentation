@@ -1,0 +1,87 @@
+services:
+  # Current-thread stack for TestRustTokioCurrentThread: docker-compose-rust-tokio.yml
+  # with the actix-web server (one current-thread Tokio runtime per worker) in place of
+  # the axum one. Both Rust processes run in this container; OBI shares its network +
+  # pid namespace.
+  tokioserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/rusttokiotest/Dockerfile
+      args:
+        CARGO_PROFILE: ${CARGO_PROFILE:-release}
+        RUSTFLAGS: ${RUSTFLAGS:-}
+        SERVER_BIN: server-actix
+    image: hatest-rust-tokio-actix
+    ports:
+      - "8092:8092" # server (the backend on 8093 stays internal)
+    depends_on:
+      otelcol:
+        condition: service_started
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    command:
+      - --config=/configs/obi-config-rust-tokio.yml
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security:/sys/kernel/security
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-rust-tokio-actix:/var/run/obi
+    image: hatest-obi
+    privileged: true # in some environments you can drop this and use cap_add: [ SYS_ADMIN ]
+    network_mode: "service:tokioserver"
+    pid: "service:tokioserver"
+    # eBPF settings (open_port, context_propagation, track_request_headers, bpf_debug,
+    # trace_printer) live in obi-config-rust-tokio.yml — mirroring the hand-validated
+    # config — so there is a single authoritative source. Only operational knobs here.
+    environment:
+      GOCOVERDIR: "/coverage"
+      OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms
+      OTEL_EBPF_SERVICE_NAMESPACE: "integration-test"
+      OTEL_EBPF_OTLP_TRACES_BATCH_TIMEOUT: "1ms"
+      OTEL_EBPF_BPF_BATCH_TIMEOUT: "10ms"
+      OTEL_EBPF_HOSTNAME: "obi"
+    depends_on:
+      tokioserver:
+        condition: service_started
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
+    container_name: otel-col
+    deploy:
+      resources:
+        limits:
+          memory: 125M
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-config/otelcol-config-weaver.yml"]
+    volumes:
+      - ./configs/:/etc/otelcol-config
+    ports:
+      - "4317"
+      - "4318"
+      - "9464"
+      - "8888"
+    depends_on:
+      jaeger:
+        condition: service_started
+      weaver:
+        condition: service_healthy
+
+  weaver:
+    extends:
+      file: components/weaver/service.yml
+      service: weaver
+    volumes:
+      - ../../../schemas/obi:/obi-registry:ro
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60@sha256:4fd2d70fa347d6a47e79fcb06b1c177e6079f92cba88b083153d56263082135e
+    ports:
+      - "16686:16686" # query frontend (the test reads traces from here)
+      - "4317"        # OTLP gRPC
+      - "4318"        # OTLP HTTP (OBI exports here)
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug

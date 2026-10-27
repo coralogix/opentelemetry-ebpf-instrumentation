@@ -1,0 +1,82 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package integration // import "go.opentelemetry.io/obi/internal/test/integration"
+
+import (
+	"net/http"
+	"path"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/obi/internal/test/integration/components/docker"
+)
+
+// TestRustTokioCurrentThread drives the actix-web server: one current-thread Tokio runtime
+// per worker, so no task ever migrates. OBI still resolves a Tokio process only through the
+// task walks, so this suite proves they carry the shapes a current-thread app uses, with
+// the same floor and zero-misattribution contract as the work-stealing suite.
+func TestRustTokioCurrentThread(t *testing.T) {
+	compose, err := docker.ComposeSuite("docker-compose-rust-tokio-actix.yml",
+		path.Join(pathOutput, "test-suite-rust-tokio-actix.log"))
+	require.NoError(t, err)
+	require.NoError(t, compose.Up())
+	t.Cleanup(func() { _ = compose.Close() })
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := http.Get(tokioServerURL + "/health")
+		require.NoError(ct, err)
+		defer resp.Body.Close()
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+	}, testTimeout, time.Second)
+
+	t.Logf("rust app built with CARGO_PROFILE debug=%v", tokioDebugBuild())
+
+	t.Run("direct", func(t *testing.T) {
+		// The handler future is polled inside the per-connection dispatcher task the inbound
+		// request was anchored on: the egress resolves at depth 0.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/direct-a", serverB: "/direct-b",
+			backendA: "/ping-a", backendB: "/ping-b",
+			minClean: 20,
+		})
+	})
+	t.Run("spawn", func(t *testing.T) {
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/spawn-a", serverB: "/spawn-b",
+			backendA: "/ping-c", backendB: "/ping-d",
+			minClean: 20,
+		})
+	})
+	t.Run("spawn_local", func(t *testing.T) {
+		// LocalSet tasks: the egress is a raw write on the child task itself.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/local-a", serverB: "/local-b",
+			backendA: "/ping-e", backendB: "/ping-f",
+			minClean: 20,
+		})
+	})
+	t.Run("nested", func(t *testing.T) {
+		// spawn_local, then tokio::spawn inside it: a depth-2 lineage mixing both kinds.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/nested-a", serverB: "/nested-b",
+			backendA: "/ping-g", backendB: "/ping-h",
+			minClean: 20,
+		})
+	})
+	t.Run("pooled_reuse", func(t *testing.T) {
+		// One reqwest client across the worker runtimes: a driver task opened on one worker
+		// serves later requests from the others, and its lineage points at the request that
+		// opened it. Only the safety half is asserted; coverage is logged.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/pool-a", serverB: "/pool-b",
+			backendA: "/ping-i", backendB: "/ping-j",
+			failClosed:           true,
+			tolerateSameSidePile: true,
+		})
+	})
+	runWeaverValidation(t)
+}
