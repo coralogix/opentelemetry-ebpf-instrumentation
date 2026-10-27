@@ -49,13 +49,13 @@ func rustCopy(off uint64, code []byte) procs.Sym {
 	}
 }
 
-func TestExpandRustPrefixCopiesWarnsOnCopyWithoutReturnOffsets(t *testing.T) {
+func TestExpandRustPathCopiesWarnsOnCopyWithoutReturnOffsets(t *testing.T) {
 	withRet, withoutRet := rustTestCode(t)
 	logs := captureLogs(t)
 	templates := []*ebpfcommon.ProbeDesc{{Start: &ebpf.Program{}, End: &ebpf.Program{}}}
 	matched := []procs.Sym{rustCopy(0x1000, withRet), rustCopy(0x2000, withoutRet)}
 
-	expanded, required, inlined := expandRustPrefixCopies("tokio::poll", templates, matched, "/proc/1/exe", slog.Default())
+	expanded, required, inlined := expandRustPathCopies("tokio::poll", templates, matched, "/proc/1/exe", slog.Default())
 
 	require.Len(t, expanded, 2)
 	assert.False(t, required)
@@ -69,24 +69,24 @@ func TestExpandRustPrefixCopiesWarnsOnCopyWithoutReturnOffsets(t *testing.T) {
 	assert.Contains(t, logs.String(), "copies=2")
 }
 
-func TestExpandRustPrefixCopiesStaysSilentWhenAllCopiesReturn(t *testing.T) {
+func TestExpandRustPathCopiesStaysSilentWhenAllCopiesReturn(t *testing.T) {
 	withRet, _ := rustTestCode(t)
 	logs := captureLogs(t)
 	templates := []*ebpfcommon.ProbeDesc{{Start: &ebpf.Program{}, End: &ebpf.Program{}}}
 
-	expanded, _, _ := expandRustPrefixCopies("tokio::poll", templates, []procs.Sym{rustCopy(0x1000, withRet)}, "/proc/1/exe", slog.Default())
+	expanded, _, _ := expandRustPathCopies("tokio::poll", templates, []procs.Sym{rustCopy(0x1000, withRet)}, "/proc/1/exe", slog.Default())
 
 	require.Len(t, expanded, 1)
 	assert.NotNil(t, expanded[0].End)
 	assert.NotContains(t, logs.String(), "without return offsets")
 }
 
-func TestExpandRustPrefixCopiesMayBeInlinedStaysSilent(t *testing.T) {
+func TestExpandRustPathCopiesMayBeInlinedStaysSilent(t *testing.T) {
 	_, withoutRet := rustTestCode(t)
 	logs := captureLogs(t)
 	templates := []*ebpfcommon.ProbeDesc{{End: &ebpf.Program{}, MayBeInlined: true}}
 
-	expanded, _, inlined := expandRustPrefixCopies("tokio::Id::next", templates, []procs.Sym{rustCopy(0x1000, withoutRet)}, "/proc/1/exe", slog.Default())
+	expanded, _, inlined := expandRustPathCopies("tokio::Id::next", templates, []procs.Sym{rustCopy(0x1000, withoutRet)}, "/proc/1/exe", slog.Default())
 
 	assert.Empty(t, expanded, "a uretprobe-only copy without return offsets attaches nothing")
 	assert.True(t, inlined)
@@ -97,11 +97,11 @@ func TestUprobeModulesSkipSelfProbesForNonRust(t *testing.T) {
 	i := &instrumenter{}
 	tracer := &stubTracer{uprobes: map[string]map[string][]*ebpfcommon.ProbeDesc{
 		ebpfcommon.SelfLibKey: {
-			"tokio::runtime::task::harness::Harness::poll": {{SymbolPrefix: true, Start: &ebpf.Program{}}},
+			"tokio::runtime::task::harness::Harness::poll": {{DemangledPath: true, Start: &ebpf.Program{}}},
 		},
 	}}
 
 	modules := i.uprobeModules(tracer, 1, svc.InstrumentableGolang, nil, "/proc/1/exe", 0, slog.Default())
 
-	assert.Empty(t, modules, "the self-binary prefix scan runs only for Rust executables")
+	assert.Empty(t, modules, "the self-binary symbol scan runs only for Rust executables")
 }

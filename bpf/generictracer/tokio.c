@@ -71,7 +71,7 @@ static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u32 tgid, u64 ta
 // SEC target is "self" because Tokio is statically linked into the application
 // binary — there is no separate shared library to target.
 //
-// This handler is attached (via demangled-prefix matching in generictracer.go) to
+// This handler is attached (by demangled path, see generictracer.go) to
 // every monomorphized copy of the poll function:
 //
 //   tokio::runtime::task::harness::Harness::<T,S>::poll(self: NonNull<Header>)

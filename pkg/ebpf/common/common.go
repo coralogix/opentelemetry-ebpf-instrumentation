@@ -164,10 +164,10 @@ type ProbeDesc struct {
 	// its stack slot and before the value is first consumed.
 	UsePadStart bool
 
-	// SymbolPrefix marks the map key as a demangled Rust symbol prefix: the probe is
-	// resolved against every monomorphized copy whose demangled name starts with it
-	// (see expandRustPrefixProbes) instead of by exact symbol name.
-	SymbolPrefix bool
+	// DemangledPath marks the map key as a demangled Rust path (generic arguments and
+	// build hash dropped): the probe is resolved against every monomorphized copy whose
+	// demangled path equals it (see expandRustPathProbes) instead of by mangled name.
+	DemangledPath bool
 
 	// MayBeInlined marks a symbol that is expected to be absent or unprobeable in some
 	// builds of the target (inlined away by the optimizer). Its non-resolution is

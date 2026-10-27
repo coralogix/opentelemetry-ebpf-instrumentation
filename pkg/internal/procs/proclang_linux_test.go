@@ -189,7 +189,7 @@ func TestRustDemangle_Legacy(t *testing.T) {
 	cases := []struct {
 		name string
 		raw  string
-		want string // exact expected demangled prefix path
+		want string // exact expected demangled path
 	}{
 		// Real samples (debug build) with $LT$S$GT$ generics + 17h<hash> build hash.
 		{
@@ -296,7 +296,7 @@ func TestRustDemangleV0_Tokio(t *testing.T) {
 // (IntoFuture, Executor, Incoming). Before the fix, skipUntilE stopped short and
 // the enclosing N mis-read the trailing method, dropping "::poll" (the whole v0
 // under-resolution: ~20/27 copies attached instead of 27). All must now resolve
-// to the full prefix so every monomorphization is instrumented.
+// to the full path so every monomorphization is instrumented.
 func TestRustDemangleV0_ComplexGenericArgs(t *testing.T) {
 	const wantPrefix = "tokio::runtime::task::harness::Harness::poll"
 	cases := []struct{ name, raw string }{
@@ -368,29 +368,28 @@ func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
 	assert.Equal(t, len(sym), p.pos, "must consume the whole run and the trailing '_'")
 }
 
-// TestRustPrefix_SelectsPollNotRawTaskPoll validates the v0.2.0 probe re-target: the
-// prefix must match the monomorphized vtable free fn raw::poll but NOT the
-// RawTask::poll thunk (whose demangled name has "RawTask::" between "raw::" and
-// "poll"). Matching RawTask::poll would probe the inlinable thunk (the original bug)
-// or double-fire.
-func TestRustPrefix_SelectsPollNotRawTaskPoll(t *testing.T) {
-	const prefix = "tokio::runtime::task::raw::poll"
+// TestRustPath_SelectsPollNotRawTaskPoll: the probe path raw::poll must equal the
+// demangled vtable free fn raw::poll and NOT the RawTask::poll thunk (whose path has
+// "RawTask::" between "raw::" and "poll"). Matching the thunk would probe an inlinable
+// function or double-fire.
+func TestRustPath_SelectsPollNotRawTaskPoll(t *testing.T) {
+	const path = "tokio::runtime::task::raw::poll"
 	rawPoll := rustDemangle("_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE")
 	rawTaskPoll := rustDemangle("_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE")
 
-	assert.Equal(t, prefix, rawPoll, "raw::poll (vtable target) must match the probe path")
+	assert.Equal(t, path, rawPoll, "raw::poll (vtable target) must match the probe path")
 	assert.Equal(t, "tokio::runtime::task::raw::RawTask::poll", rawTaskPoll)
-	assert.NotEqual(t, prefix, rawTaskPoll, "RawTask::poll (thunk) must NOT match the probe path")
+	assert.NotEqual(t, path, rawTaskPoll, "RawTask::poll (thunk) must NOT match the probe path")
 }
 
-// TestRustPrefix_NestedItemsAreNotCopies: a probe path matches a symbol only when the
+// TestRustPath_NestedItemsAreNotCopies: a probe path matches a symbol only when the
 // whole demangled path is equal. The nested helpers of Cell::new (new_header, check) and
 // of Harness::poll (poll_inner) start with the parent's path but are different functions;
 // they are inlined in release and out-of-line in debug builds, where a prefix match used
 // to attach the parent's uretprobe to them (one bogus Header entry per spawn in debug).
 // Real symbols from the debug test server (v0, rust 1.96 / tokio 1.52) and legacy-mangled
 // equivalents.
-func TestRustPrefix_NestedItemsAreNotCopies(t *testing.T) {
+func TestRustPath_NestedItemsAreNotCopies(t *testing.T) {
 	const cellNew = "tokio::runtime::task::core::Cell::new"
 	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
 
@@ -427,14 +426,14 @@ func TestRustPrefix_NestedItemsAreNotCopies(t *testing.T) {
 	}
 }
 
-// TestFindExeSymbolsByPrefix_NoFalseMatchOnNonRust confirms a Rust prefix matches
+// TestFindRustSymbols_NoFalseMatchOnNonRust confirms a Rust path matches
 // nothing in a non-Rust (Go) binary — symbols that don't demangle as Rust are
-// skipped, so the prefix machinery never produces spurious attachments.
-func TestFindExeSymbolsByPrefix_NoFalseMatchOnNonRust(t *testing.T) {
+// skipped, so the path machinery never produces spurious attachments.
+func TestFindRustSymbols_NoFalseMatchOnNonRust(t *testing.T) {
 	f := openSymbolFixtureELF(t)
 	defer f.Close()
 
-	out, err := FindExeSymbolsByPrefix(f, []string{"tokio::runtime::task::raw::poll"})
+	out, err := FindRustSymbols(f, []string{"tokio::runtime::task::raw::poll"})
 	require.NoError(t, err)
 	assert.Empty(t, out["tokio::runtime::task::raw::poll"])
 }

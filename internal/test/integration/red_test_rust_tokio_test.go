@@ -197,8 +197,8 @@ func assertTokioAttachedBeforeFirstRequest(t *testing.T, compose *docker.Compose
 	resolved, bothResolved, firstSave := 0, -1, -1
 	for i, line := range strings.Split(obiLog, "\n") {
 		switch {
-		case strings.Contains(line, `msg="rust prefix resolved"`) &&
-			strings.Contains(line, "prefix=tokio::runtime::task::harness::Harness::poll"):
+		case strings.Contains(line, `msg="rust path resolved"`) &&
+			strings.Contains(line, "path=tokio::runtime::task::harness::Harness::poll"):
 			resolved++
 			if resolved == tokioProcesses {
 				bothResolved = i
@@ -208,7 +208,7 @@ func assertTokioAttachedBeforeFirstRequest(t *testing.T, compose *docker.Compose
 		}
 	}
 
-	require.GreaterOrEqual(t, resolved, tokioProcesses, "the poll prefix was not resolved for both tokio processes")
+	require.GreaterOrEqual(t, resolved, tokioProcesses, "the poll path was not resolved for both tokio processes")
 	require.NotEqual(t, -1, firstSave, "no server span was saved")
 	assert.Less(t, bothResolved, firstSave,
 		"a server span was saved before both processes had their tokio probes attached (OBI-first order not achieved)")

@@ -684,7 +684,7 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 		},
 		// Tokio async runtime — statically linked into the Rust binary, so the probes
 		// target the executable itself and not a shared library.
-		// Symbol keys use the demangled prefix form (without the per-build hash
+		// Symbol keys are demangled paths (without the per-build hash
 		// suffix and without generic type parameters).
 		ebpfcommon.SelfLibKey: {
 			// Poll tracking (entry + exit). We probe
@@ -720,10 +720,10 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// it, which is why the 4-build (debug/release x legacy/v0) symbol gate must
 			// be re-checked on toolchain bumps.
 			"tokio::runtime::task::harness::Harness::poll": {{
-				Required:     false,
-				SymbolPrefix: true,
-				Start:        p.bpfObjects.ObiUprobeTokioPoll,
-				End:          p.bpfObjects.ObiUretprobeTokioPoll,
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioPoll,
+				End:           p.bpfObjects.ObiUretprobeTokioPoll,
 			}},
 			// Task creation — universal. Every task-creation path funnels through
 			// tokio::runtime::task::core::Cell::<T,S>::new, which allocates the task
@@ -748,9 +748,9 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// match attached this uretprobe to them too: one return per spawn with a
 			// pointer into the cell, and one returning unit, RC=0).
 			"tokio::runtime::task::core::Cell::new": {{
-				Required:     false,
-				SymbolPrefix: true,
-				End:          p.bpfObjects.ObiUretprobeTokioCellNew,
+				Required:      false,
+				DemangledPath: true,
+				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
 			}},
 			// Task destruction — the vtable dealloc slot, sibling of raw::poll. We probe
 			// it (entry uprobe, PARM1 = NonNull<Header>) to delete the task's
@@ -764,9 +764,9 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// surviving children still hold to the freed address are refused by the
 			// incarnation stamp check in the walk, not by this delete.
 			"tokio::runtime::task::raw::dealloc": {{
-				Required:     false,
-				SymbolPrefix: true,
-				Start:        p.bpfObjects.ObiUprobeTokioDealloc,
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioDealloc,
 			}},
 			// Debug-build task identity: the TLS setter behind tokio::task::id().
 			// tokio::runtime::context::set_current_task_id(Option<Id>) is called by the
@@ -777,13 +777,13 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// fires, so the id path is structurally inert there (the Header walk is the
 			// release mechanism; the two cover each other's failure mode). PARM1 =
 			// Option<NonZeroU64> task id (None == 0 on clear). Closure copies of the
-			// symbol are excluded at match time (isRustClosureSymbol) — in debug the
-			// fn's internal {{closure}} also matches the prefix and its PARM1 is
+			// symbol are excluded at match time (isRustClosureSymbol): in v0 the
+			// fn's internal closure demangles to the same path and its PARM1 is
 			// &Context, which would poison the per-thread id.
 			"tokio::runtime::context::set_current_task_id": {{
-				Required:     false,
-				SymbolPrefix: true,
-				Start:        p.bpfObjects.ObiUprobeTokioSetTaskId,
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioSetTaskId,
 			}},
 			// Debug-build id lineage: tokio::runtime::task::id::Id::next is the monotone
 			// task-Id allocator, called once per task creation immediately before the
@@ -793,10 +793,10 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// id entry when the task dies. Resolves no usable copy in release (inlined) —
 			// the id map stays empty there by construction.
 			"tokio::runtime::task::id::Id::next": {{
-				Required:     false,
-				SymbolPrefix: true,
-				MayBeInlined: true,
-				End:          p.bpfObjects.ObiUretprobeTokioIdNext,
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				End:           p.bpfObjects.ObiUretprobeTokioIdNext,
 			}},
 		},
 	}

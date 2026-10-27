@@ -22,6 +22,6 @@ func FindExeSymbolsMatching(_ *elf.File, _ func(string) bool, _ ...elf.SymType) 
 	return nil, nil
 }
 
-func FindExeSymbolsByPrefix(_ *elf.File, _ []string) (map[string][]Sym, error) {
+func FindRustSymbols(_ *elf.File, _ []string) (map[string][]Sym, error) {
 	return nil, nil
 }

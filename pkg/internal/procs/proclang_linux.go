@@ -111,7 +111,7 @@ func stripDollarBrackets(s string) string {
 }
 
 // rustDemangleV0 converts a Rust v0-mangled _R… symbol to a simplified
-// demangled path sufficient for prefix matching.
+// demangled path sufficient for path matching.
 //
 // Generic arguments are dropped; back-references are resolved by caching
 // parsed results at their byte positions in the input.  Impl paths produce
@@ -174,7 +174,7 @@ func (p *v0Parser) path(depth int) string {
 			return ""
 		}
 		// Skip the single namespace-kind byte (v=value, t=type, i=impl, C=closure…);
-		// we don't need it for prefix matching.
+		// we do not need it for path matching.
 		p.pos++
 		parent := p.path(depth + 1)
 		p.skipDisambiguator()
@@ -195,7 +195,7 @@ func (p *v0Parser) path(depth int) string {
 		selfType := p.path(depth + 1)
 		result = "<" + selfType + ">"
 
-	// Note: X/Y are not hit by the current probe prefixes: those are all N/M/C forms,
+	// Note: X/Y are not hit by the current probe paths: those are all N/M/C forms,
 	// These arms are retained for demangler completeness and future trait-impl
 	// targets, e.g. <T as Future>::poll.
 	case 'X': // trait impl: X <disambiguator> <self-type> <trait>
@@ -346,7 +346,7 @@ func (p *v0Parser) skipGenericArgs(depth int) {
 		// Forward-progress guard: path() returns WITHOUT advancing pos once its own
 		// recursion cap (64) is hit, so on a pathologically deep symbol this loop
 		// could otherwise spin forever (hanging instrumentation). Advancing one byte
-		// keeps it bounded — a mis-skipped deep symbol simply fails to prefix-match
+		// keeps it bounded — a mis-skipped deep symbol simply fails to match
 		// (fail closed), which is acceptable; the alternative is a hang.
 		if p.pos <= before {
 			p.pos++
@@ -733,7 +733,7 @@ func isRustClosureSymbol(name string) bool {
 	// nested closures (e.g. a monomorphization of one) contain "NC" mid-symbol, but a
 	// bare substring check would false-positive on identifier bytes (e.g. "…3NCa…"), so
 	// only the unambiguous root forms are filtered here — the root form is what the
-	// probe prefixes actually collide with.
+	// probe paths actually collide with.
 	rest := name
 	switch {
 	case strings.HasPrefix(rest, "__R"):
@@ -746,15 +746,15 @@ func isRustClosureSymbol(name string) bool {
 	return strings.HasPrefix(rest, "NC")
 }
 
-// FindExeSymbolsByPrefix resolves demangled Rust function paths to all matching ELF
+// FindRustSymbols resolves demangled Rust function paths to all matching ELF
 // symbols in the binary. Each key in the result maps to one Sym per monomorphized copy
-// of that function (e.g. all ~23 copies of raw::poll). Both demanglers drop generic
+// of that function (e.g. every copy of Harness::poll). Both demanglers drop generic
 // arguments, so every copy of a generic function demangles to the same path; a symbol
 // matches only when its whole demangled path equals the key. Nested items such as
 // `Cell::new::new_header` or `Harness::poll_inner` are different paths and never match,
 // even though they start with the key (they are inlined in release and out-of-line in
 // debug builds, where a prefix match attached the parent's probes to them).
-func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, error) {
+func FindRustSymbols(f *elf.File, paths []string) (map[string][]Sym, error) {
 	out := map[string][]Sym{}
 	// Shared across both symbol tables: a function can appear in .symtab and .dynsym,
 	// and attaching a uprobe twice at one file offset would double-fire.
@@ -764,34 +764,33 @@ func FindExeSymbolsByPrefix(f *elf.File, prefixes []string) (map[string][]Sym, e
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
-	collectSymbolsByPrefix(f, syms, out, prefixes, seen)
+	collectRustSymbols(f, syms, out, paths, seen)
 
 	dynsyms, err := f.DynamicSymbols()
 	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
 		return nil, err
 	}
-	collectSymbolsByPrefix(f, dynsyms, out, prefixes, seen)
+	collectRustSymbols(f, dynsyms, out, paths, seen)
 
 	return out, nil
 }
 
-// collectSymbolsByPrefix fills `out` (path -> []Sym) for every ELF symbol whose
+// collectRustSymbols fills `out` (path -> []Sym) for every ELF symbol whose
 // demangled Rust path equals one of the requested paths. Symbols that do not demangle
 // are silently skipped (they would be caught by collectSymbols).
-func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym, prefixes []string, seen map[uint64]struct{}) {
+func collectRustSymbols(f *elf.File, syms []elf.Symbol, out map[string][]Sym, paths []string, seen map[uint64]struct{}) {
 	for _, s := range syms {
 		// Only STT_FUNC. Rust monomorphized generics (the Tokio copies) are always
 		// STT_FUNC; STT_NOTYPE function symbols only arise from ICF/LTO folding or
 		// hand-written asm (not Rust defaults), so matching them is not worth the risk
-		// of attaching a uprobe to a non-entry symbol that merely demangles to the prefix.
+		// of attaching a uprobe to a non-entry symbol that merely demangles to the path.
 		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
 			continue
 		}
-		// Closures are never the intended probe target: a prefix like
-		// "…::set_current_task_id" also prefix-matches the fn's internal
-		// "…::set_current_task_id::{{closure}}" (legacy) — and in v0 the closure
-		// demangles to the SAME name as its parent fn (our parser drops the NC closure
-		// namespace), so it is indistinguishable post-demangle. Probing a closure fires
+		// Closures are never the intended probe target. In v0 a closure demangles to
+		// the SAME path as its parent fn (our parser drops the NC closure namespace), so
+		// it would match the path; legacy closures demangle to a longer path
+		// ("…::{{closure}}") and are filtered too, for symmetry. Probing a closure fires
 		// the handler with the closure's ABI (e.g. PARM1 = &Context instead of the task
 		// Id), which poisons per-thread state. Filter on the RAW mangled form instead.
 		if isRustClosureSymbol(s.Name) {
@@ -804,8 +803,8 @@ func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym
 		if demangled == "" {
 			continue
 		}
-		for _, prefix := range prefixes {
-			if demangled == prefix {
+		for _, path := range paths {
+			if demangled == path {
 				sym := resolveSymbol(f, s)
 				// Skip a file offset already recorded (e.g. the same function present
 				// in both .symtab and .dynsym) so it is not probed twice.
@@ -816,9 +815,9 @@ func collectSymbolsByPrefix(f *elf.File, syms []elf.Symbol, out map[string][]Sym
 				slog.Debug("rust symbol matched",
 					"mangled", s.Name,
 					"demangled", demangled,
-					"prefix", prefix,
+					"path", path,
 					"offset", fmt.Sprintf("0x%x", sym.Off))
-				out[prefix] = append(out[prefix], sym)
+				out[path] = append(out[path], sym)
 				break
 			}
 		}
