@@ -78,5 +78,25 @@ func TestRustTokioCurrentThread(t *testing.T) {
 			tolerateSameSidePile: true,
 		})
 	})
+	t.Run("mailbox_evicted", func(t *testing.T) {
+		// A long-lived LocalSet mailbox task whose map entry the fill evicts: its next wake
+		// comes from inside a request's handler, and the schedule hook must not record that
+		// request as its parent, or every job it then runs resolves that request. The
+		// polled-Header mark makes the wake re-register the mailbox with no parent, so its
+		// jobs orphan (release) or miss the evicted id entry (debug): fail closed both ways.
+		fill := func(t *testing.T) {
+			resp, err := http.Get(tokioServerURL + "/evict-fill")
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		}
+		fill(t)
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/mbox-a", serverB: "/mbox-b",
+			backendA: "/ping-k", backendB: "/ping-l",
+			failClosed:  true,
+			beforeBurst: fill, // the warm-up woke the mailbox: evict it again before the burst
+		})
+	})
 	runWeaverValidation(t)
 }

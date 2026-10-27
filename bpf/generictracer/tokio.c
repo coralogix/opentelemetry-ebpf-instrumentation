@@ -17,6 +17,7 @@
 
 #include <common/connection_info.h>
 #include <common/preempt_guard.h>
+#include <common/tokio_polled.h>
 #include <common/tokio_task.h>
 
 #include <pid/pid.h>
@@ -93,6 +94,9 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     }
     bpf_map_update_elem(&tokio_thread_state, &id, &new_state, BPF_ANY);
 
+    // Survives the eviction of this task's entry: see tokio_polled_headers.h.
+    tokio_mark_polled(tgid, task_ptr);
+
     // Marks the process as Tokio: find_parent_trace then resolves only through the task
     // walks, never through the thread-keyed resolvers.
     const u8 is_tokio = 1;
@@ -141,27 +145,32 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Which spawn-time probe registered a task, for the debug line only.
+// Which spawn-time probe registered a task, and whether it saw a spawn at all.
 enum tokio_task_origin {
     k_tokio_origin_cell_new = 0,
     k_tokio_origin_bind = 1,
     k_tokio_origin_schedule = 2,
+    // Shared::schedule for a task polled before: a wake, not a spawn, so no spawner is known.
+    k_tokio_origin_schedule_polled = 3,
 };
 
 // Registers new_task_ptr as a child of the task the spawning thread is polling now. Every
 // caller runs on the spawning thread inside the parent's poll, so current_task is the
-// parent. Lineage only: the child takes the parent's incarnation stamp and anchor epoch,
-// never its connection, so an egress must climb to the anchor (an inherited copy on a
-// long-lived descendant would outlive its request). Overwrites: a previous occupant of the
-// Header address may still have an entry (its dealloc was not observed), and only its
-// paired task id is carried over, the version is a fresh stamp. A second registration of
-// the same spawn (Cell::new, then bind_inner) rewrites the same lineage before the task
-// can have children or an anchor.
+// parent, except the wake re-registration of an evicted task, which records no parent
+// because the current task is its waker. Lineage only: the child takes the parent's
+// incarnation stamp and anchor epoch, never its connection, so an egress must climb to the
+// anchor (an inherited copy on a long-lived descendant would outlive its request).
+// Overwrites: a previous occupant of the Header address may still have an entry (its
+// dealloc was not observed), and only its paired task id is carried over, the version is a
+// fresh stamp. A second registration of the same spawn (Cell::new, then bind_inner)
+// rewrites the same lineage before the task can have children or an anchor.
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
         (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
-    const u64 parent_task = thread_state ? thread_state->current_task : k_tokio_task_none;
+    const u8 spawner_known = origin != k_tokio_origin_schedule_polled;
+    const u64 parent_task =
+        (spawner_known && thread_state) ? thread_state->current_task : k_tokio_task_none;
 
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
@@ -255,10 +264,12 @@ int GUARDED_PROG(obi_uprobe_tokio_bind, struct pt_regs *, ctx) {
 // spawn_local's counterpart. LocalOwnedTasks::bind is generic over the future and inlined
 // with Cell::new; the spawn ends in local::Shared::schedule, which also runs on every wake
 // of a local task, so a task is registered here only when it has no entry. A task is
-// always scheduled before its first poll, so a missing entry at schedule time means spawn.
-// A task asleep across OBI's attach whose first event is a wake by another task is adopted
-// as that task's child (the attach-window limitation in the devdoc). PARM2 is the Notified
-// task, i.e. the Header.
+// always scheduled before its first poll, so a missing entry belongs to a spawn, or to a
+// task polled before whose entry the LRU evicted: the polled mark tells them apart, and the
+// evicted one is re-registered with no parent, since the current task is its waker. A task
+// asleep across OBI's attach whose first event is a wake by another task carries no mark
+// and is adopted as that task's child (the attach-window limitation in the devdoc). PARM2
+// is the Notified task, i.e. the Header.
 SEC("uprobe/self:tokio_schedule")
 int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -278,7 +289,9 @@ int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
         return 0;
     }
 
-    tokio_register_task(id, tgid, task_ptr, k_tokio_origin_schedule);
+    const enum tokio_task_origin origin =
+        tokio_was_polled(tgid, task_ptr) ? k_tokio_origin_schedule_polled : k_tokio_origin_schedule;
+    tokio_register_task(id, tgid, task_ptr, origin);
 
     return 0;
 }
@@ -312,6 +325,7 @@ int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
         bpf_map_delete_elem(&tokio_task_id_state, &id_key);
     }
     bpf_map_delete_elem(&tokio_task_state, &task_key);
+    tokio_clear_polled(tgid, task_ptr);
 
     return 0;
 }

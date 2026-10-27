@@ -324,6 +324,9 @@ type tokioABCase struct {
 	// went idle keeps that request's anchor epoch and resolves it for later requests of the
 	// same endpoint. See the devdoc Known Limitations.
 	tolerateSameSidePile bool
+	// beforeBurst runs between the warm-up and the concurrent burst, for a case that must
+	// disturb the server first (the evicted-mailbox case refills the task map).
+	beforeBurst func(t *testing.T)
 }
 
 // TestRustTokioProbeDiscrimination drives concurrent A/B load across distinct backends and
@@ -415,6 +418,10 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 400)), 10,
 			"no server traces yet (OBI not attached?)")
 	}, testTimeout, time.Second)
+
+	if c.beforeBurst != nil {
+		c.beforeBurst(t)
+	}
 
 	// Phase 2: sustained concurrent A/B burst.
 	driveTokioABConcurrent(t, c.serverA, c.serverB, 150, 20)

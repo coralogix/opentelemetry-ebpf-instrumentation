@@ -78,7 +78,9 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
 7. **State that could go stale is reset or destroyed, not reused.** `current_id` is zeroed
    at every poll entry and trusted only if the runtime's own TLS setter re-set it within
    that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new` and
-   the spawn-only hooks re-initialize a reused Header entry; anchor writes are
+   the spawn-only hooks re-initialize a reused Header entry; `Shared::schedule` records no
+   parent for a task whose polled mark says its entry was evicted (the task current at a
+   wake is the waker, not the spawner); anchor writes are
    copy-modify-publish (a single `bpf_map_update_elem`), so concurrent readers see a
    complete old or new value, never a torn one; every entry is deleted when the process
    exits.
@@ -211,7 +213,7 @@ Entry uprobe on the two spawn-only functions that follow the constructor and are
 
 ### `Shared::schedule` (spawn_local registration) — `tokio_schedule`
 
-Entry uprobe on `tokio::task::local::Shared::schedule(&self, task)`; `PT_REGS_PARM2` is the `Notified` task, i.e. the `Header*`. The spawn of every `spawn_local` ends here, but so does every wake of a local task, so the program registers only a task that has **no entry**: a task is always scheduled before its first poll, so a missing entry at schedule time means spawn. A task asleep across OBI's attach whose first event is a wake by another task is adopted as that task's child (see the attach window in Known Limitations). Flagged `MayBeInlined`: a binary without a `LocalSet` has no such symbol.
+Entry uprobe on `tokio::task::local::Shared::schedule(&self, task)`; `PT_REGS_PARM2` is the `Notified` task, i.e. the `Header*`. The spawn of every `spawn_local` ends here, but so does every wake of a local task, so the program registers only a task that has **no entry**. A task is always scheduled before its first poll, so a missing entry belongs to a spawn, or to a task polled before whose entry the LRU evicted. The polled-Header mark (`tokio_polled_headers`, see [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake)) tells them apart: a marked task is re-registered with **no parent**, since the task current at a wake is the waker, not the spawner. A task asleep across OBI's attach whose first event is a wake by another task carries no mark and is adopted as that task's child (see the attach window in Known Limitations). Flagged `MayBeInlined`: a binary without a `LocalSet` has no such symbol.
 
 ### `Id::next` (task-id allocation) — `tokio_id_next`
 
@@ -270,6 +272,24 @@ Poll entry resets `current_id` to 0; only the TLS setter firing **within the cur
 ### Task pointer reuse is stamped (Header path only)
 
 Tokio reuses `Header*` addresses: a freed task cell is handed straight back for the next task of the same size in the same process. `raw::dealloc` deletes the dead task's entry, which protects the newcomer from the old anchor, but not the links that the dead task's surviving children still hold to the address (a fire-and-forget child whose connection task closed). Each Header entry therefore carries a `version` that is an **incarnation stamp**: the monotonic creation time (`bpf_ktime_get_ns`). A child records `parent_version` at spawn and the walk follows the link only when the parent's current stamp still matches; two occupants of one address cannot share a stamp (the second is created microseconds after the first was freed, against a clock tick of tens of nanoseconds), and an unverifiable `parent_version == 0` link is never trusted. A counter restarting at 1 for each occupant (the previous scheme) matched the old child's stamp whenever both occupants were first-time anchors. The id path needs none of this: ids are never reused, and the walk's monotonicity check (`parent_id < id`) rejects corrupted links.
+
+### Evicted tasks are not adopted at their wake
+
+The task maps are LRU hashes shared by every traced Tokio process, and an idle task's entry
+is the first to go under capacity, since only a poll or a wake touches an entry. Without a
+guard, the next wake of an evicted `LocalSet` task would reach `Shared::schedule` with no
+entry and be registered as a child of the task current on the waking thread, the waker: a
+mailbox task woken by request A's handler would then resolve A for every job it runs until
+A's response, cross-endpoint. `tokio_polled_headers` is a 2 MiB array of one-byte slots
+hashed from `(tgid, Header)`, set at every poll entry and cleared at `raw::dealloc`; being
+an array, it survives the eviction of the task maps. The schedule hook consults it when the
+entry is missing: a marked task is a wake and is re-registered with no parent (its egresses
+orphan), an unmarked one is a spawn. A slot collision (one in 2 million per marked task,
+about 1.4% of spawns at 30,000 live tasks) reads as "polled" and only withholds a parent.
+The marks are bytes, not bits, so a mark is one store and needs no atomic on the 5.8 floor;
+they are hashed, not keyed by pid, so a process exit does not purge them: a stale slot costs
+a reused pid one parentless task at that address, cleared again at its dealloc.
+`TestRustTokioCurrentThread/mailbox_evicted` drives the sequence.
 
 ### Closure symbols are excluded from path matching
 
@@ -340,9 +360,9 @@ path.
   the setter is attached, so the effect is bounded to requests in flight during the
   attach. Tasks spawned during the window record no parent state and orphan. A `LocalSet`
   task asleep across the attach whose first event is a wake by another task is registered
-  at that wake as the waker's child (`Shared::schedule` cannot tell a wake from a spawn):
-  a one-off lineage under the epoch and version guards, same class as the shared-task
-  in-flight window.
+  at that wake as the waker's child (it carries no polled mark, so `Shared::schedule` reads
+  the wake as a spawn): a one-off lineage under the epoch and version guards, same class
+  as the shared-task in-flight window.
 
 - **HTTP/2.** Inbound HTTP/2 anchors are epoch-guarded per request but the untag hooks the
   HTTP/1 response path only, so their trust window does not close at the response. HTTP/2
@@ -352,8 +372,11 @@ path.
 - **`traces_ctx_v1` (`obi_ctx`) is not maintained for Tokio tasks in debug builds**, see
   [Context is refreshed at poll entry](#context-is-refreshed-at-poll-entry-not-poll-exit).
 
-- **Map capacity.** The task maps are LRU hashes; under task churn above their capacity,
-  entries of live tasks can be evicted, which orphans their egresses (never misattributes).
+- **Map capacity.** The task maps are LRU hashes shared by every traced Tokio process, one
+  30,000-entry cap for all of them, so one large process can evict another's entries. An
+  evicted live task orphans its egresses, never misattributes: an evicted `LocalSet` task
+  re-registers at its next wake with no parent, see
+  [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake).
 
 - **Validated on arm64 only** until the x86 integration matrix runs.
 
@@ -392,9 +415,11 @@ rustc emits tokio; a change is green only on all four.
   record OBI exported twice is not mistaken for a pile.
 - `TestRustTokioCurrentThread` runs the same A/B discrimination against an actix-web server
   (`server-actix`): one current-thread runtime per worker with a `LocalSet`, the handler
-  polled inside the per-connection dispatcher task, so tasks never migrate. Five shapes:
+  polled inside the per-connection dispatcher task, so tasks never migrate. Six shapes:
   direct egress, `tokio::spawn`, `spawn_local`, `spawn_local` → `tokio::spawn`, pooled
-  client. It is what caught the inlined `Cell::new` copies.
+  client, and an evicted mailbox (`/evict-fill` parks 50,000 tasks so the task map evicts
+  a long-lived `spawn_local` mailbox; its wake from inside a request's handler must not
+  adopt that request). It is what caught the inlined `Cell::new` copies.
 - `TestRustTokioRuntimeDisabled` runs the app with `capture.runtimes.rust.enabled: false`
   (Config v2) and checks that no Tokio path is resolved and no poll probe fires while the
   generic tracer still exports the server spans.

@@ -118,6 +118,31 @@ async fn ping_j(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-j traceparent={}", traceparent)
 }
 
+// /ping-k and /ping-l are the EVICTED-MAILBOX A/B discriminator's backends: a lineage the
+// mailbox's wake adopted from one request would cross the A/B boundary. The response is
+// held for MAILBOX_HOLD so one request's window spans several of the mailbox's jobs.
+const MAILBOX_HOLD: std::time::Duration = std::time::Duration::from_millis(20);
+
+async fn ping_k(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-k  traceparent={}", traceparent);
+    tokio::time::sleep(MAILBOX_HOLD).await;
+    format!("pong-k traceparent={}", traceparent)
+}
+
+async fn ping_l(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-l  traceparent={}", traceparent);
+    tokio::time::sleep(MAILBOX_HOLD).await;
+    format!("pong-l traceparent={}", traceparent)
+}
+
 async fn health() -> impl IntoResponse {
     "ok\n"
 }
@@ -136,7 +161,9 @@ async fn main() {
         .route("/ping-g", get(ping_g))
         .route("/ping-h", get(ping_h))
         .route("/ping-i", get(ping_i))
-        .route("/ping-j", get(ping_j));
+        .route("/ping-j", get(ping_j))
+        .route("/ping-k", get(ping_k))
+        .route("/ping-l", get(ping_l));
 
     // 8094 is a second listener for the A/B discriminators: every B side targets it, so
     // the sides differ by port (orig_dport) as well as by HTTP path.

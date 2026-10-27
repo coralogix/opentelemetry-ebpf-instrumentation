@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 use actix_web::{web, App, HttpResponse, HttpServer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{mpsc, oneshot};
 
 const WORKERS: usize = 4;
 
@@ -158,6 +159,76 @@ async fn pool_b() -> HttpResponse {
     respond(call_backend_pooled("pool-b", "http://127.0.0.1:8094/ping-j").await)
 }
 
+// One mailbox task for the whole process, a long-lived LocalSet task: /evict-fill spawns it
+// under its own request (whose window closes with that response, so nothing resolves
+// through it afterwards), then spawns FILL_TASKS parked tasks so OBI's task map evicts the
+// mailbox's entry. /mbox-a and /mbox-b hand their backend call to the mailbox over a
+// channel from any worker; it runs each job on a spawn_local child. A wake that
+// re-registered the evicted mailbox under the waking request would make every job it then
+// runs resolve that request, cross-side.
+const FILL_TASKS: usize = 50_000;
+
+struct MailboxJob {
+    label: &'static str,
+    addr: &'static str,
+    path: &'static str,
+    reply: oneshot::Sender<Result<String, String>>,
+}
+
+static MAILBOX: OnceLock<mpsc::UnboundedSender<MailboxJob>> = OnceLock::new();
+
+fn start_mailbox() -> mpsc::UnboundedSender<MailboxJob> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<MailboxJob>();
+    tokio::task::spawn_local(async move {
+        while let Some(job) = rx.recv().await {
+            tokio::task::spawn_local(async move {
+                let result = call_backend_direct(job.label, job.addr, job.path).await;
+                let _ = job.reply.send(result);
+            });
+        }
+    });
+    tx
+}
+
+async fn evict_fill() -> HttpResponse {
+    MAILBOX.get_or_init(start_mailbox);
+    for _ in 0..FILL_TASKS {
+        tokio::task::spawn_local(std::future::pending::<()>());
+    }
+    HttpResponse::Ok().body(format!("spawned {} parked tasks", FILL_TASKS))
+}
+
+async fn call_backend_mailbox(
+    label: &'static str,
+    addr: &'static str,
+    path: &'static str,
+) -> Result<String, String> {
+    let Some(tx) = MAILBOX.get() else {
+        return Err(format!(
+            "[{}] mailbox not started: call /evict-fill first",
+            label
+        ));
+    };
+    let (reply, rx) = oneshot::channel();
+    tx.send(MailboxJob {
+        label,
+        addr,
+        path,
+        reply,
+    })
+    .map_err(|_| format!("[{}] mailbox gone", label))?;
+    rx.await
+        .unwrap_or_else(|_| Err(format!("[{}] mailbox dropped the job", label)))
+}
+
+async fn mbox_a() -> HttpResponse {
+    respond(call_backend_mailbox("mbox-a", "127.0.0.1:8093", "/ping-k").await)
+}
+
+async fn mbox_b() -> HttpResponse {
+    respond(call_backend_mailbox("mbox-b", "127.0.0.1:8094", "/ping-l").await)
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!(
@@ -177,6 +248,9 @@ async fn main() -> std::io::Result<()> {
             .route("/nested-b", web::get().to(nested_b))
             .route("/pool-a", web::get().to(pool_a))
             .route("/pool-b", web::get().to(pool_b))
+            .route("/evict-fill", web::get().to(evict_fill))
+            .route("/mbox-a", web::get().to(mbox_a))
+            .route("/mbox-b", web::get().to(mbox_b))
     })
     .workers(WORKERS)
     .bind(("0.0.0.0", 8092))?

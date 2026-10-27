@@ -207,6 +207,7 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 // purgeTokioState drops every Tokio map entry of a process that is gone. The maps are keyed
 // by the OBI-view pid, the pid BlockPID receives, and are otherwise only LRU-evicted: a
 // later process reusing the pid would inherit the tokio_process mark and stale lineage.
+// The polled-Header marks are hashed, not keyed, and stay (see tokio_polled_headers.h).
 func (p *Tracer) purgeTokioState(tgid uint32) {
 	if p.bpfObjects.TokioProcess == nil {
 		return
@@ -727,8 +728,9 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			// spawn_local's counterpart: LocalOwnedTasks::bind is generic over the future
 			// and inlined with Cell::new, so the spawn is caught at local::Shared::schedule,
 			// which also runs on every wake of a local task (the program registers only a
-			// task with no entry). PARM2 is the Notified task, i.e. the Header. Absent from
-			// a binary without a LocalSet.
+			// task with no entry, and records no parent for one the polled-Header mark says
+			// was evicted). PARM2 is the Notified task, i.e. the Header. Absent from a
+			// binary without a LocalSet.
 			"tokio::task::local::Shared::schedule": {{
 				Required:      false,
 				DemangledPath: true,
