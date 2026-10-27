@@ -161,6 +161,7 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 	t.Run("trust window: anchors close at the response", func(t *testing.T) {
 		assertTokioTrustWindow(t, compose)
 	})
+	runWeaverValidation(t)
 }
 
 // assertTokioAttachedBeforeFirstRequest checks, from OBI's log, that the tokio probes of
@@ -403,6 +404,7 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 			tolerateSameSidePile: true, // shared-client residual; cross-side stays strict
 		})
 	})
+	runWeaverValidation(t)
 }
 
 // tokioABDiscrimination drives case c and asserts ≥ c.minClean cleanly-attributed
