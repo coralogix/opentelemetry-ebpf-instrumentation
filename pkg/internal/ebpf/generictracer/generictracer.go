@@ -208,6 +208,8 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 // by the OBI-view pid, the pid BlockPID receives, and are otherwise only LRU-evicted: a
 // later process reusing the pid would inherit the tokio_process mark and stale lineage.
 // The polled-Header marks are hashed, not keyed, and stay (see tokio_polled_headers.h).
+// With the BPF pid filter off the maps are keyed by the host pid and this purge misses:
+// those entries live until LRU eviction.
 func (p *Tracer) purgeTokioState(tgid uint32) {
 	if p.bpfObjects.TokioProcess == nil {
 		return
