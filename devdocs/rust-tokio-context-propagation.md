@@ -387,6 +387,15 @@ path.
   egress has no per-request task identity at the connection level and fails closed by
   design. Both untested.
 
+- **Threads of a Tokio process that never poll a task keep the thread-keyed resolution
+  main uses.** The `block_on` driver of a multi-thread runtime (the workers run every task,
+  the driving thread none) and the executor threads of a second async runtime in the same
+  process resolve their own `server_traces[t_key]` entry, with its conflict rule: a second
+  unanswered request on one such thread invalidates the first, so connections interleaved
+  inside one thread orphan rather than mis-parent, while a request answered before the
+  next arrives keeps the thread-keyed parent main would give it. No clone ancestry is
+  followed for them.
+
 - **`traces_ctx_v1` (`obi_ctx`) is not maintained for Tokio tasks in debug builds**, see
   [Context is refreshed at poll entry](#context-is-refreshed-at-poll-entry-not-poll-exit).
 
