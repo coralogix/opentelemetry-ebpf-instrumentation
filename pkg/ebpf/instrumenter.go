@@ -1519,9 +1519,8 @@ func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.Pro
 }
 
 // expandRustPathCopies expands every ProbeDesc registered under a path against every
-// monomorphized copy of the symbol. A path key may carry several ProbeDescs (e.g. the
-// real tokio probe plus a diagnostic duplicate on the same symbols), so EVERY desc is
-// expanded, not just the first.
+// monomorphized copy of the symbol. A path key may carry several ProbeDescs, so every
+// desc is expanded, not just the first.
 //
 // Copies that wanted a uretprobe but have no return offsets are reported once per path
 // at Warn: for Harness::poll the exit probe is what clears the thread's current task, so

@@ -98,8 +98,8 @@ The contract holds everywhere except the following, all documented in
    is still open. The lineage lookup is exact but its premise (lineage = ownership) is
    false for handed-off work, and the runtime carries no signal for whose job it is. Same
    endpoint, same side only: a shared task serving two inbound connections fails closed on
-   the epoch guard. Measured in the 2026-10-26 matrix: one same-side pile in one of four
-   runs (pooled client), zero cross-side everywhere.
+   the epoch guard. Measured across the 2026-10 runs: a few same-side piles per run at
+   most (pooled client), zero cross-side everywhere.
 2. **Fully-stripped binaries** (the one true contract violation): no symbols → no probes
    → the process gate is never set → the process degrades to the GENERIC thread-keyed
    resolvers, which can misattribute under work-stealing. Undetectable at runtime (the
@@ -319,7 +319,7 @@ path.
   runtime carries no signal distinguishing WHOSE job the task is serving: that information
   exists only inside the channel message or the pooled request. Jobs from other concurrent
   requests processed in that window inherit N's trace: same endpoint, same side, never
-  cross-side. Measured in the 2026-10-26 matrix: one same-side pile in one of four runs
+  cross-side. Measured across the 2026-10 runs: a few same-side piles per run at most
   (pooled client), none for the channel worker. Irreducible for lineage-based resolution;
   the designed fix is a channel send/recv bridge (pairing the sender's task identity with
   the received message), tracked as follow-up work. `TestRustTokioProbeDiscrimination`'s
@@ -390,6 +390,17 @@ rustc emits tokio; a change is green only on all four.
   backend spans than server spans in one trace). The classifier identifies a span by its
   kernel span id (recovered from the "processing" child when OBI exported sub-spans), so a
   record OBI exported twice is not mistaken for a pile.
+- `TestRustTokioCurrentThread` runs the same A/B discrimination against an actix-web server
+  (`server-actix`): one current-thread runtime per worker with a `LocalSet`, the handler
+  polled inside the per-connection dispatcher task, so tasks never migrate. Five shapes:
+  direct egress, `tokio::spawn`, `spawn_local`, `spawn_local` → `tokio::spawn`, pooled
+  client. It is what caught the inlined `Cell::new` copies.
+- `TestRustTokioRuntimeDisabled` runs the app with `capture.runtimes.rust.enabled: false`
+  (Config v2) and checks that no Tokio path is resolved and no poll probe fires while the
+  generic tracer still exports the server spans.
+
+Every suite but the knob-off one also runs weaver's registry `live-check` on the exported
+telemetry against OBI's schema registry and fails on a violation-level advisory.
 
 Note on running the integration tests under a VM: after attach/detach cycles in a
 long-lived Linux VM, the kernel's uprobe state can wedge; probes attach without error but
