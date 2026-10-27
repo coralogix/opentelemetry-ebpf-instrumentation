@@ -195,9 +195,10 @@ func (p *v0Parser) path(depth int) string {
 		selfType := p.path(depth + 1)
 		result = "<" + selfType + ">"
 
-	// Note: X/Y are not hit by the current probe paths: those are all N/M/C forms,
-	// These arms are retained for demangler completeness and future trait-impl
-	// targets, e.g. <T as Future>::poll.
+	// No probe path starts with X or Y (all are N/M/C forms), but both occur inside
+	// generic arguments, e.g. a closure defined in a trait-impl method
+	// (…NvXs5_…hyper_util…dns…). skipType hands them to path(); without these arms the
+	// scan would stop short and the enclosing Harness::poll copy would never match.
 	case 'X': // trait impl: X <disambiguator> <self-type> <trait>
 		p.pos++
 		p.skipDisambiguator()
