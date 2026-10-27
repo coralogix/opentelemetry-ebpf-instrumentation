@@ -189,7 +189,11 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
-    const u8 counted = !existing && origin != k_tokio_origin_schedule_known;
+    // A second registration of the same spawn, or a new occupant over a stale entry, keeps
+    // a count the entry already holds; an uncounted stale entry (one the anchor created on
+    // the spot) does not keep a spawn from taking its own.
+    const u8 inherited = existing && existing->counted;
+    const u8 counted = !inherited && origin != k_tokio_origin_schedule_known;
     if (counted) {
         tokio_slot_inc(tgid, new_task_ptr);
     }
@@ -214,9 +218,7 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
         .version = tokio_task_incarnation(),
         .task_id = paired_task_id,
         .conn_valid = 0,
-        // A second registration of the same spawn, or a new occupant over a stale entry,
-        // carries the count the entry already holds.
-        .counted = existing ? existing->counted : counted,
+        .counted = inherited || counted,
     };
 
     // Pointer-reuse guard (parent_version) and re-anchor guard (parent_epoch) for the walk.
