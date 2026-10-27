@@ -593,3 +593,44 @@ func tokioUniqueSpans(tr jaeger.Trace) (jaeger.Trace, int) {
 	out.Spans = unique
 	return out, dropped
 }
+
+// TestRustTokioRuntimeDisabled runs the same app with capture.runtimes.rust.enabled: false
+// (Config v2, the only place the knob exists): no Tokio path is resolved, no poll fires, and
+// the generic tracing still exports the server spans.
+func TestRustTokioRuntimeDisabled(t *testing.T) {
+	compose, err := docker.ComposeSuite("docker-compose-rust-tokio-off.yml", path.Join(pathOutput, "test-suite-rust-tokio-off.log"))
+	require.NoError(t, err)
+	require.NoError(t, compose.Up())
+	t.Cleanup(func() { _ = compose.Close() })
+
+	// Wait until the server is accepting requests.
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := http.Get(tokioServerURL + "/health")
+		require.NoError(ct, err)
+		defer resp.Body.Close()
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+	}, testTimeout, time.Second)
+
+	// One request per poll until a server span is exported: the generic tracer still
+	// instruments the process.
+	const urlPath = "/ws-spawn"
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := http.Get(tokioServerURL + urlPath)
+		require.NoError(ct, err)
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+		_ = resp.Body.Close()
+
+		traces := tokioQueryServerTraces(ct, 50)
+		var servers []jaeger.Span
+		for i := range traces {
+			servers = append(servers, tokioFindSpans(traces[i], "server", urlPath)...)
+		}
+		require.NotEmpty(ct, servers, "no server span for %s yet", urlPath)
+	}, testTimeout, time.Second)
+
+	obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+	require.NoError(t, err)
+	assert.Contains(t, obiLog, "Saving connection server span", "the generic tracer did not see the requests")
+	assert.NotContains(t, obiLog, `msg="rust path resolved"`, "a Tokio path was resolved with the Rust runtime off")
+	assert.NotContains(t, obiLog, "tokio poll_future entry", "a Tokio probe fired with the Rust runtime off")
+}

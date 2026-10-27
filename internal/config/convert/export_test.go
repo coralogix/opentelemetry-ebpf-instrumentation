@@ -108,6 +108,7 @@ func TestRuntimeToV2DefaultConfig(t *testing.T) {
 	require.Equal(t, true, value(t, ext.Capture.Runtimes, "go", "enabled"))
 	require.Equal(t, true, value(t, ext.Capture.Runtimes, "nodejs", "enabled"))
 	require.Equal(t, true, value(t, ext.Capture.Runtimes, "java", "enabled"))
+	require.Equal(t, true, value(t, ext.Capture.Runtimes, "rust", "enabled"))
 
 	require.Equal(t, 256, value(t, ext.Capture.Telemetry, "traces", "reporters_cache_len"))
 	require.Equal(t, 256, value(t, ext.Capture.Telemetry, "metrics", "reporters_cache_len"))
@@ -229,6 +230,7 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 	cfg.Java.Debug = true
 	cfg.Java.DebugInstrumentation = true
 	cfg.Java.Timeout = 7 * time.Second
+	cfg.Rust.Enabled = false
 
 	cfg.EBPF.BpfDebug = true
 	cfg.EBPF.ProtocolDebug = true
@@ -400,6 +402,7 @@ func TestRuntimeToV2CustomConfig(t *testing.T) {
 	require.Equal(t, false, value(t, ext.Capture.Runtimes, "go", "enabled"))
 	require.Equal(t, false, value(t, ext.Capture.Runtimes, "nodejs", "enabled"))
 	require.Equal(t, false, value(t, ext.Capture.Runtimes, "java", "enabled"))
+	require.Equal(t, false, value(t, ext.Capture.Runtimes, "rust", "enabled"))
 	require.Equal(t, true, value(t, ext.Capture.Runtimes, "java", "debug", "bytecode_instrumentation"))
 	require.Equal(t, schema.Duration(7*time.Second), value(t, ext.Capture.Runtimes, "java", "attach_timeout"))
 	require.Equal(t, 913, value(t, ext.Capture.Telemetry, "traces", "reporters_cache_len"))

@@ -765,6 +765,11 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 			}},
 		},
 	}
+	// The one runtime switch among the passive uprobes (capture.runtimes.rust.enabled,
+	// Config v2): off, a Rust process is traced like any other native binary.
+	if !p.cfg.Rust.Enabled {
+		delete(m, ebpfcommon.SelfLibKey)
+	}
 	return m
 }
 

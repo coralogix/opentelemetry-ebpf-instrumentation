@@ -12,6 +12,7 @@ It extends the existing context propagation mechanisms documented in [context-pr
 - [Probe Points](#probe-points)
 - [Parent Lookup](#parent-lookup)
 - [Implementation Details](#implementation-details)
+- [Configuration](#configuration)
 - [Known Limitations](#known-limitations)
 - [Tests](#tests)
 
@@ -285,6 +286,14 @@ The server-span-save path writes the Tokio maps only when `tokio_thread_state` i
 ### Probe attachment is mangling-aware
 
 Symbols are resolved from the executable's `.symtab` by **demangled path**: Tokio's functions are generic (many monomorphized copies, all probed) and emitted under two mangling schemes, legacy (`_ZN…E`, `rustDemangle`) and v0 (`_R…`, `rustDemangleV0`; macOS adds `__R`). Both demanglers drop the generic arguments, so every copy demangles to the same path and a symbol matches only when its whole path equals the probe's. Nested helper functions (`Cell::new::new_header`, `Cell::new::check`, `Harness::poll_inner`) start with the parent's path but are different functions, inlined in release and out-of-line in debug builds; a prefix match attached the parent's probes to them in debug, which is why the match is exact. The scan runs only for executables detected as Rust. Two warnings guard the attachment: a path that resolves on some copies but not others ("partially resolved": a demangler gap or a stripped symbol), and copies that wanted a uretprobe but have no decodable return offsets (a toolchain change in the function epilogue or an instruction the decoder cannot read: the entry probe still attaches, the exit probe does not). Paths flagged `MayBeInlined` (`Id::next`) are exempt from both, since losing their copies in release is expected.
+
+## Configuration
+
+`capture.runtimes.rust.enabled` is the one knob, Config v2 only (Config v1 is frozen), default
+`true`. Off, `UProbes()` carries no `self` key: no Tokio path is resolved, the process never gets
+the `tokio_process` mark, and parents resolve through the generic thread-keyed path as before
+this feature, with its work-stealing misattribution. `TestRustTokioRuntimeDisabled` pins that
+path.
 
 ## Known Limitations
 
