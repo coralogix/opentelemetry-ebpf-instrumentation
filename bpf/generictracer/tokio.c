@@ -94,12 +94,13 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     }
     bpf_map_update_elem(&tokio_thread_state, &id, &new_state, BPF_ANY);
 
-    // A task polled with no entry and an empty slot was never registered (older than OBI's
-    // attach, or every spawn hook inlined away): it gets a root entry and its slot count,
-    // so its eviction cannot turn its next wake into an adoption. An evicted task keeps its
-    // count and is not counted again.
+    // A task polled with no entry was never registered (older than OBI's attach, or every
+    // spawn hook inlined away) or lost its entry to eviction: it gets a root entry and a
+    // slot count of its own, so a later eviction cannot turn its next wake into an
+    // adoption. An evicted task counted again leaks its first count at its slot, which
+    // only withholds parents there.
     const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
-    if (!bpf_map_lookup_elem(&tokio_task_state, &task_key) && !tokio_slot_live(tgid, task_ptr)) {
+    if (!bpf_map_lookup_elem(&tokio_task_state, &task_key)) {
         tokio_register_task(id, tgid, task_ptr, k_tokio_origin_poll);
     }
 
@@ -157,9 +158,10 @@ enum tokio_task_origin {
     k_tokio_origin_cell_new = 0,
     k_tokio_origin_bind = 1,
     k_tokio_origin_schedule = 2,
-    // Shared::schedule for a task whose slot is live: a wake, not a spawn, no spawner known.
+    // Shared::schedule for a task whose slot is live: a wake, or a spawn sharing the slot
+    // with a live task; no spawner is known, so no parent.
     k_tokio_origin_schedule_known = 3,
-    // First poll of a task never registered (older than OBI's attach): a root.
+    // First poll of a task with no entry: older than OBI's attach, or evicted. A root.
     k_tokio_origin_poll = 4,
 };
 
@@ -173,10 +175,10 @@ enum tokio_task_origin {
 // occupant of the Header address may still have an entry (its dealloc was not observed),
 // and only its paired task id is carried over, the version is a fresh stamp. A second
 // registration of the same spawn (Cell::new, then bind_inner) rewrites the same lineage
-// before the task can have children or an anchor. The slot count takes one per task: a
-// registration that finds no entry, except the wake of a task whose live slot may be a
-// neighbour's; the entry remembers whether it holds a count, so only that dealloc releases
-// one.
+// before the task can have children or an anchor. Every registration that finds no counted
+// entry takes a slot count, a wake re-registration included, since a live slot may be a
+// neighbour's and the task must not depend on it; the entry remembers that it holds one,
+// so only that task's dealloc releases it.
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
@@ -191,9 +193,10 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
     // A second registration of the same spawn, or a new occupant over a stale entry, keeps
     // a count the entry already holds; an uncounted stale entry (one the anchor created on
-    // the spot) does not keep a spawn from taking its own.
+    // the spot) does not keep a task from taking its own. An evicted task counted again
+    // leaks its first count at its slot, which only withholds parents there.
     const u8 inherited = existing && existing->counted;
-    const u8 counted = !inherited && origin != k_tokio_origin_schedule_known;
+    const u8 counted = !inherited;
     if (counted) {
         tokio_slot_inc(tgid, new_task_ptr);
     }
@@ -289,10 +292,12 @@ int GUARDED_PROG(obi_uprobe_tokio_bind, struct pt_regs *, ctx) {
 // of a local task, so a task is registered here only when it has no entry. A task is
 // always scheduled before its first poll, so a missing entry belongs to a spawn, or to a
 // task seen before whose entry the LRU evicted: the slot count tells them apart, and the
-// evicted one is re-registered with no parent, since the current task is its waker. A task
-// asleep across OBI's attach whose first event is a wake by another task has an empty slot
-// and is adopted as that task's child (the attach-window limitation in the devdoc). PARM2
-// is the Notified task, i.e. the Header.
+// evicted one is re-registered with no parent, since the current task is its waker. A
+// spawn sharing its slot with a live task reads the same way and loses its parent, and
+// nothing else: it takes its own count. A task asleep across OBI's attach whose first
+// event is a wake by another task has an empty slot and is adopted as that task's child
+// (the attach-window limitation in the devdoc). PARM2 is the Notified task, i.e. the
+// Header.
 SEC("uprobe/self:tokio_schedule")
 int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();

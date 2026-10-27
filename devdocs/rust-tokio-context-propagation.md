@@ -291,19 +291,20 @@ entry and be registered as a child of the task current on the waking thread, the
 mailbox task woken by request A's handler would then resolve A for every job it runs until
 A's response, cross-endpoint. `tokio_task_slots` is a 2 MiB array of one-byte counts of the
 live known tasks per slot, hashed from `(tgid, Header)`; being an array, it survives the
-eviction of the task maps. A task is counted once, at its registration (`Cell::new`, the
-spawn hooks, a spawn seen at `Shared::schedule`) or at the first poll of a task never
-registered (older than OBI's attach) whose slot is empty, which also gives it a root entry;
-the entry records that the task took a count (`counted`), and `raw::dealloc` releases one
-only for such a task: an entry the anchor created on the spot, or a wake re-registration,
-may share its slot with the task the count belongs to, and a task without an entry may
-have lost its count to eviction, so neither decrements. The schedule
-hook consults the slot when the entry is missing: a live slot is a wake and the task is
-re-registered with no parent (its egresses orphan), an empty one is a spawn. A count, not a
-bit, so the dealloc of a task sharing a slot with a sleeping one cannot erase the sleeper's.
-A slot shared with another live task (one in 2 million per live task, about 1.4% of spawns
-at 30,000 live tasks) reads as live and only withholds a parent; a count an evicted task
-leaves behind does the same at its slot, and the count saturates rather than wraps. The
+eviction of the task maps. Every registration that finds no counted entry takes a count:
+`Cell::new`, the spawn hooks, either outcome of `Shared::schedule`, and the first poll of
+a task with no entry (older than OBI's attach, or evicted), which also gives it a root
+entry. The entry records that the task took a count (`counted`), and `raw::dealloc`
+releases one only for such a task: an entry the anchor created on the spot may share its
+slot with the task the count belongs to, and a task without an entry may have lost its
+count to eviction, so neither decrements. The schedule hook consults the slot when the
+entry is missing: a live slot is a wake and the task is re-registered with no parent (its
+egresses orphan), an empty one is a spawn. A count, not a bit, so the dealloc of a task
+sharing a slot with a sleeping one cannot erase the sleeper's. A spawn sharing its slot
+with a live task (one in 2 million per live task, about 1.4% of spawns at 30,000 live
+tasks) loses its parent and nothing else, since it still takes its own count; a task
+counted again after an eviction leaks its first count at its slot, which only withholds
+parents there, and the count saturates rather than wraps. The
 counts are bytes, so a change is one read-modify-write without the atomics the 5.8 floor
 lacks; they are hashed, not keyed by pid, so a process exit does not purge them: a dead
 process's unobserved deallocs leave a reused pid's tasks at those slots parentless until
@@ -381,9 +382,8 @@ path.
   task asleep across the attach whose first event is a wake by another task is registered
   at that wake as the waker's child (its slot is empty, so `Shared::schedule` reads the
   wake as a spawn): a one-off lineage under the epoch and version guards, same class as
-  the shared-task in-flight window. A task polled at least once after the attach while its
-  slot is empty is counted at that poll and is not adopted later; one whose slot is live
-  with a neighbour's count stays protected only as long as that count does.
+  the shared-task in-flight window. A task polled at least once after the attach is
+  counted at that poll and is not adopted later.
 
 - **HTTP/2.** Inbound HTTP/2 anchors are epoch-guarded per request but the untag hooks the
   HTTP/1 response path only, so their trust window does not close at the response. HTTP/2
