@@ -79,7 +79,11 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
 6. **Resolution reads a frozen snapshot and nothing else.** The anchor stores the owning
    trace at anchor time; the walks resolve from that snapshot or not at all. There is no
    lookup into the connection-keyed `server_traces_aux` map, which is last-write-wins and
-   remapped by keep-alive reuse before a late egress could read it.
+   remapped by keep-alive reuse before a late egress could read it. The walks hand the
+   consumer a per-CPU copy of the snapshot, re-checking the anchor epoch (and the
+   incarnation stamp on the Header path) after the copy: a preallocated LRU element freed
+   by a concurrent re-anchor returns to the free list with no grace period, so a pointer
+   into it could be rewritten under the reader.
 7. **State that could go stale is reset or destroyed, not reused.** `current_id` is zeroed
    at every poll entry and trusted only if the runtime's own TLS setter re-set it within
    that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new` and
@@ -264,7 +268,7 @@ If an anchored task is re-anchored to a **different** connection key, it is a sh
 
 ### Anchored entries snapshot the trace at anchor time (both paths)
 
-`server_traces_aux[conn]` is last-write-wins per connection key. A slightly-late egress could resolve the key AFTER a later request remapped it: two requests on a keep-alive inbound connection share the key (measured ~1/300 per endpoint before the snapshot), a blocking-pool call can outlive the key's owner, and a new connection can reuse a just-closed connection's client ephemeral port. The anchored entry therefore stores a **snapshot** of the owning trace, taken at anchor time, and the walks resolve from the snapshot only. Every anchor carries one: the tag sets `tp_valid` together with `conn_valid`, and the only writes that clear `tp_valid` also set `conn_shared` or clear `conn_valid`. A Header-keyed snapshot is safe because `Cell::new` re-initializes a reused entry, `raw::dealloc` deletes freed entries, anchor writes are copy-modify-publish and a `conn_shared` flip invalidates it; task Ids are never reused, so the id-side snapshot has no reuse surface at all.
+`server_traces_aux[conn]` is last-write-wins per connection key. A slightly-late egress could resolve the key AFTER a later request remapped it: two requests on a keep-alive inbound connection share the key (measured ~1/300 per endpoint before the snapshot), a blocking-pool call can outlive the key's owner, and a new connection can reuse a just-closed connection's client ephemeral port. The anchored entry therefore stores a **snapshot** of the owning trace, taken at anchor time, and the walks resolve from the snapshot only. Every anchor carries one: the tag sets `tp_valid` together with `conn_valid`, and the only writes that clear `tp_valid` also set `conn_shared` or clear `conn_valid`. A Header-keyed snapshot is safe because `Cell::new` re-initializes a reused entry, `raw::dealloc` deletes freed entries, anchor writes are copy-modify-publish and a `conn_shared` flip invalidates it; task Ids are never reused, so the id-side snapshot has no reuse surface at all. The walks return a per-CPU copy of the snapshot, not a pointer into the map: a preallocated LRU element that a concurrent re-anchor replaces goes back to the free list with no grace period and can be rewritten under a reader still holding it, so the copy is discarded when the anchor epoch, or the incarnation stamp on the Header path, changed across it. The consumer's in-place staleness write lands on the copy.
 
 ### Keys are (OBI-view pid, identity) and state dies with the process
 

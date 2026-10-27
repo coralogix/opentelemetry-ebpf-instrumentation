@@ -18,6 +18,8 @@
 // structs are ~250 of the 512 stack bytes.
 SCRATCH_MEM_TYPED(tokio_task_anchor, tokio_task_state_t)
 SCRATCH_MEM_TYPED(tokio_task_id_anchor, tokio_task_id_state_t)
+// The resolved snapshot, copied out of the map entry for the caller.
+SCRATCH_MEM_TYPED(tokio_parent_snapshot, tp_info_pid_t)
 
 // Incarnation stamp of a Header-keyed entry: the monotonic creation time. Two occupants of
 // one Header address cannot share it (the second is created microseconds after the first
@@ -42,6 +44,25 @@ static __always_inline u8 tokio_conn_part_equal(const connection_info_part_t *a,
         }
     }
     return 1;
+}
+
+// Copies an anchor's snapshot into per-CPU scratch before it is returned. A preallocated LRU
+// element freed by a concurrent re-anchor goes back to the free list with no grace period
+// (htab_lru_map_update_elem), so a pointer into it could be rewritten under the reader: the
+// anchor epoch is re-read after the copy, and a change discards it (a re-anchor bumps it, a
+// reused element carries another task's). The consumer's in-place writes land on the copy.
+static __always_inline tp_info_pid_t *tokio_snapshot_out(const tp_info_pid_t *tp,
+                                                         const u64 *anchor_epoch) {
+    const u64 epoch_before = *(volatile const u64 *)anchor_epoch;
+    tp_info_pid_t *snapshot = (tp_info_pid_t *)tokio_parent_snapshot_mem();
+    if (!snapshot) {
+        return NULL;
+    }
+    *snapshot = *tp;
+    if (*(volatile const u64 *)anchor_epoch != epoch_before) {
+        return NULL;
+    }
+    return snapshot;
 }
 
 // Walks the Header-keyed parent chain from task_id to the task anchored to an inbound
@@ -91,9 +112,15 @@ find_tokio_parent_trace(u32 tgid, u64 task_id, const u8 egress) {
             if (egress) {
                 bpf_dbg_printk("tokio walk RESOLVE-SNAP task=%llx", task_id);
             }
-            // Pointer into the map entry: the egress consumer clears tp.valid in place when
-            // it judges the parent stale, a single-byte write that fails this anchor closed.
-            return &task_state->tp;
+            // The incarnation stamp is re-read too: a reused element could carry another
+            // task's epoch at the same value.
+            const u64 version = *(volatile const u64 *)&task_state->version;
+            tp_info_pid_t *snapshot =
+                tokio_snapshot_out(&task_state->tp, &task_state->anchor_epoch);
+            if (*(volatile const u64 *)&task_state->version != version) {
+                return NULL;
+            }
+            return snapshot;
         }
 
         // No parent, or a self link left by pointer reuse.
@@ -170,8 +197,7 @@ find_tokio_parent_trace_by_id(u32 tgid, u64 task_id, const u8 egress) {
             if (egress) {
                 bpf_dbg_printk("tokio idwalk RESOLVE-SNAP id=%llu", task_id);
             }
-            // Pointer into the map entry, see find_tokio_parent_trace.
-            return &state->tp;
+            return tokio_snapshot_out(&state->tp, &state->anchor_epoch);
         }
 
         // A parent is always created before its child: anything else is root or corruption.
@@ -208,7 +234,9 @@ find_tokio_parent_trace_by_id(u32 tgid, u64 task_id, const u8 egress) {
 //
 // Writes are copy-modify-publish: another CPU may be walking the entry, and an in-place
 // multi-word write of the ~100-byte snapshot could be read torn under tp_valid = 1.
-// bpf_map_update_elem replaces the element atomically for RCU readers.
+// bpf_map_update_elem gives later lookups a complete element; a reader that already holds
+// the old one copies the snapshot out and re-checks the epoch (tokio_snapshot_out), since a
+// preallocated element returns to the free list with no grace period.
 static __always_inline void
 tokio_tag_inbound_conn(u64 id, const connection_info_part_t *conn_part, const tp_info_pid_t *tp) {
     const tokio_thread_state_t *ts =
