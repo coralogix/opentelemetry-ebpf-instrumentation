@@ -25,14 +25,15 @@ It extends the existing context propagation mechanisms documented in [context-pr
 | Direct I/O egress (`TcpStream` written by the spawned task itself) | No connection-driver task in between | Correlated | Correlated |
 | Async client (reqwest/hyper), **fresh client per call** | hyper spawns a connection-driver task per new connection, under the request's task | Correlated (the driver task is a child of the request task) | Correlated |
 | Async client, **shared client / connection reuse** | One long-lived driver task serves MANY requests over a reused keep-alive connection | **First request per connection correlates; reuse fails closed** (orphan), with the in-flight residual described below | Same |
-| `tokio::task::spawn_blocking` | The closure runs on a dedicated **blocking-pool OS thread** | **Not correlated (fails closed)**: the blocking thread carries no Header-walk signal | **Correlated** via the id walk |
+| `tokio::task::spawn_blocking` | The closure runs on a dedicated **blocking-pool OS thread** | Correlated (the blocking task is registered at `Spawner::spawn_task` under the request task; the Header walk climbs through it) | Correlated via the id walk |
+| `tokio::task::spawn_local` on a `LocalSet` (actix-web: one current-thread runtime per worker) | The task never migrates; the handler future is polled inside the per-connection dispatcher task, which anchors | Correlated (registered at `Shared::schedule`, since the spawn's `Cell::new` copy is inlined) | Correlated (id walk) |
 | Channel handoff to a long-lived worker task (actor/queue pattern) | A worker task that outlives every request performs the egress | **Fails closed** (orphan) once the spawning request has completed; the job handed off by the request still in flight resolves | Same |
 | HTTP/2 inbound or egress | One connection task multiplexes many requests | Not supported; egress fails closed by design (untested) | Same |
 
 **Misattribution is zero in every build and both mangling schemes (legacy `_ZN` and v0
 `_R`) across the validation matrix**, including adversarial pool-reuse and channel-handoff
-suites designed to force cross-request leakage. Correlation *coverage* differs by build as
-shown above; correctness does not.
+suites designed to force cross-request leakage. Correlation coverage is the same in both
+builds; only the mechanism differs (Header walk in release, id walk in debug).
 
 ## The Correctness Contract
 
@@ -287,11 +288,6 @@ Symbols are resolved from the executable's `.symtab` by **demangled path**: Toki
 
 ## Known Limitations
 
-- **Correlation coverage depends on the build profile (correctness does not).** Release
-  correlates spawn / nested spawn / work-stealing, fresh-client pooled egress and
-  direct-I/O egress via the Header walk. Debug correlates all of those **plus
-  `spawn_blocking`** via the id walk. Misattribution is zero in both.
-
 - **Release correlation depends on which Tokio internals the compiler keeps out of
   line.** `Harness::poll` survives because it is address-taken (the task vtable);
   `Cell::new` loses its copies for small futures; the three spawn hooks survive because
@@ -326,11 +322,6 @@ Symbols are resolved from the executable's `.symtab` by **demangled path**: Toki
   trust window closed at the response. This is the price of closing the window; the
   alternative (a window that never closes) is the keep-alive misattribution class the
   untag was added to remove.
-
-- **`spawn_blocking` egress: correlated in debug, fails closed in release.** The blocking
-  task is polled through `Harness::poll` on its blocking-pool thread and the TLS setter
-  fires around that poll in debug, so the id walk resolves it. In release neither identity
-  signal exists on the blocking thread, so the egress is an orphan (never a guess).
 
 - **The attach window.** Probes attach per process in no fixed order, over a few
   milliseconds. A request served after `Harness::poll` attached but before

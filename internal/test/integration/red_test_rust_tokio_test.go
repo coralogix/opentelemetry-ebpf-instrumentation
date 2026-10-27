@@ -145,13 +145,14 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 	t.Run("async nested spawn (depth 2)", func(t *testing.T) {
 		assertTokioCrossServiceTrace(t, "/ws-nested")
 	})
-	// spawn_blocking egress fails closed (documented limitation); the discrimination suite
-	// asserts the safety half for it.
+	// The blocking-pool thread never ran the handler: the chain holds only through the
+	// task lineage (release registers the blocking task at Spawner::spawn_task, debug
+	// walks the ids).
 	t.Run("spawn_blocking", func(t *testing.T) {
-		t.Skip("spawn_blocking egress is uncorrelated (fails closed) — known limitation")
+		assertTokioCrossServiceTrace(t, "/blocking")
 	})
 	t.Run("spawn + spawn_blocking", func(t *testing.T) {
-		t.Skip("egress crosses the spawn_blocking boundary — uncorrelated (fails closed)")
+		assertTokioCrossServiceTrace(t, "/blocking-nested")
 	})
 	if obiFirst {
 		t.Run("OBI attached before the first request", func(t *testing.T) {
@@ -348,19 +349,15 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 	t.Logf("rust app built with CARGO_PROFILE debug=%v", tokioDebugBuild())
 
 	t.Run("spawn_blocking", func(t *testing.T) {
-		// Release: the blocking-pool egress has no task identity, fails closed, safety half
-		// only. Debug: the id walk correlates it (the TLS setter fires around the blocking
-		// poll), so a floor is asserted too, or a silent id-layer death would stay green.
-		c := tokioABCase{
+		// The egress runs on a blocking-pool thread that never handled the request, so a
+		// floor here proves the lineage: in release the blocking task is registered at
+		// Spawner::spawn_task under the request task (its Cell::new copy is inlined), in
+		// debug the id walk resolves it.
+		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/blocking-a", serverB: "/blocking-b",
 			backendA: "/ping-a", backendB: "/ping-b",
-			failClosed: true,
-		}
-		if tokioDebugBuild() {
-			c.failClosed = false
-			c.minClean = 20
-		}
-		tokioABDiscrimination(t, c)
+			minClean: 20,
+		})
 	})
 	t.Run("direct_egress", func(t *testing.T) {
 		// The spawned task writes its own TcpStream: the egress runs while the per-request

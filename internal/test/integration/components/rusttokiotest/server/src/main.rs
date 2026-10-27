@@ -342,7 +342,8 @@ const BACKEND_B: &str = "http://127.0.0.1:8093/ping-b";
 // /blocking-a and /blocking-b: each dispatches a spawn_blocking closure that calls a
 // distinct backend path. The closure runs on a blocking-pool thread that never handled
 // the inbound request, so a thread-based lookup cannot attribute it. The suite asserts
-// zero misattribution on both builds, plus a clean-chain floor in debug (the id walk).
+// a clean-chain floor and zero misattribution on both builds (release registers the
+// blocking task at Spawner::spawn_task, debug walks the ids).
 async fn blocking_a() -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(|| call_backend_blocking_url(BACKEND_A))
         .await
