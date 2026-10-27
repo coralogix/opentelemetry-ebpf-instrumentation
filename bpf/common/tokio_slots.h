@@ -27,11 +27,15 @@ static __always_inline u8 *tokio_slot_lane(u32 tgid, u64 header) {
     return &w->live[slot & (k_tokio_slot_lanes - 1)];
 }
 
-static __always_inline void tokio_slot_inc(u32 tgid, u64 header) {
+// Returns whether a count was taken: a saturated slot takes none, so the caller must not
+// release one later either.
+static __always_inline u8 tokio_slot_inc(u32 tgid, u64 header) {
     u8 *lane = tokio_slot_lane(tgid, header);
-    if (lane && *lane < k_tokio_slot_max) {
-        (*lane)++;
+    if (!lane || *lane >= k_tokio_slot_max) {
+        return 0;
     }
+    (*lane)++;
+    return 1;
 }
 
 static __always_inline void tokio_slot_dec(u32 tgid, u64 header) {

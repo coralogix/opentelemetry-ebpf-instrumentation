@@ -178,7 +178,7 @@ enum tokio_task_origin {
 // before the task can have children or an anchor. Every registration that finds no counted
 // entry takes a slot count, a wake re-registration included, since a live slot may be a
 // neighbour's and the task must not depend on it; the entry remembers that it holds one,
-// so only that task's dealloc releases it.
+// so only the dealloc of the task holding the entry releases it.
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
@@ -196,10 +196,7 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     // the spot) does not keep a task from taking its own. An evicted task counted again
     // leaks its first count at its slot, which only withholds parents there.
     const u8 inherited = existing && existing->counted;
-    const u8 counted = !inherited;
-    if (counted) {
-        tokio_slot_inc(tgid, new_task_ptr);
-    }
+    const u8 counted = inherited || tokio_slot_inc(tgid, new_task_ptr);
 
     // Id::next runs right before the task's constructor on the spawning thread, so the
     // pending id belongs to this task. Consumed once.
@@ -221,7 +218,7 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
         .version = tokio_task_incarnation(),
         .task_id = paired_task_id,
         .conn_valid = 0,
-        .counted = inherited || counted,
+        .counted = counted,
     };
 
     // Pointer-reuse guard (parent_version) and re-anchor guard (parent_epoch) for the walk.
@@ -352,10 +349,10 @@ int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
         const tokio_task_key_t id_key = tokio_task_key(tgid, dying->task_id);
         bpf_map_delete_elem(&tokio_task_id_state, &id_key);
     }
-    // Only the task that took a count releases one: an entry the anchor created on the
-    // spot, or a wake re-registration, may share its slot with the task the count belongs
-    // to, and a task without an entry may have lost its count to eviction, so neither
-    // decrements. A count that is never released only withholds parents at its slot.
+    // Only an entry holding a count releases one: an entry the anchor created on the spot
+    // may share its slot with the task the count belongs to, and a task without an entry
+    // may have lost its count to eviction, so neither decrements. A count that is never
+    // released only withholds parents at its slot.
     if (dying && dying->counted) {
         tokio_slot_dec(tgid, task_ptr);
     }

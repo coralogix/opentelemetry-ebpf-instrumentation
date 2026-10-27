@@ -304,7 +304,13 @@ sharing a slot with a sleeping one cannot erase the sleeper's. A spawn sharing i
 with a live task (one in 2 million per live task, about 1.4% of spawns at 30,000 live
 tasks) loses its parent and nothing else, since it still takes its own count; a task
 counted again after an eviction leaks its first count at its slot, which only withholds
-parents there, and the count saturates rather than wraps. The
+parents there, and a saturated slot takes no count and releases none. The array is never
+reset, so a host that stays above the task maps' capacity accumulates leaked counts over
+OBI's uptime and withholds `spawn_local` parents at a growing share of slots: orphans,
+never a wrong parent. One race undercounts instead: two tasks of one process sharing a
+slot and changing its count at the same instant can lose one, after which the task left
+uncounted can be adopted once evicted; it needs the collision and the coincidence
+together. The
 counts are bytes, so a change is one read-modify-write without the atomics the 5.8 floor
 lacks; they are hashed, not keyed by pid, so a process exit does not purge them: a dead
 process's unobserved deallocs leave a reused pid's tasks at those slots parentless until

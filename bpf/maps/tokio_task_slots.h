@@ -19,8 +19,8 @@
 // task counted again after an eviction leaks its first count, which only withholds parents
 // at its slot, while a decrement for a task that never took one could erase a neighbour's.
 // A spawn sharing its slot with a live task loses its parent and nothing else, since it
-// still takes its own count; the count saturates and never wraps. Bytes rather than words,
-// so a change is one read-modify-write without
+// still takes its own count; a saturated slot takes no count and releases none. Bytes
+// rather than words, so a change is one read-modify-write without
 // atomics, which the 5.8 floor lacks; two tasks of one slot changing at the same instant can
 // lose a count. Hashed, not keyed by pid, so not purged with a process: the unobserved
 // deallocs of a dead process leave a reused pid's tasks at those slots parentless until
