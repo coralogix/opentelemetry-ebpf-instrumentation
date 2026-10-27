@@ -1,10 +1,8 @@
 services:
   # Probe-discrimination stack for TestRustTokioProbeDiscrimination. Identical to
   # docker-compose-rust-tokio.yml except the Rust server/backend build profile is
-  # selectable. Default is RELEASE — the shipping target — which requires the
-  # raw::poll probe to fire on multi-thread workers and the blocking pool (the
-  # v0.2.0 re-target). To exercise the debug path instead, set CARGO_PROFILE=debug
-  # in the environment before `go test`.
+  # selectable: release (default, what users ship) or debug, with CARGO_PROFILE=debug
+  # set in the environment before `go test`.
   tokioserver:
     build:
       context: ../../..

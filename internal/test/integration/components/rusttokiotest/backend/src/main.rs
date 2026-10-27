@@ -138,10 +138,8 @@ async fn main() {
         .route("/ping-i", get(ping_i))
         .route("/ping-j", get(ping_j));
 
-    // DIAGNOSTIC: also listen on 8094 so the async A/B discriminator can send B's
-    // egress to a DISTINCT backend port (A->8093, B->8094). That lets the eBPF side
-    // tell an A-egress from a B-egress by orig_dport (they otherwise differ only by
-    // HTTP path, invisible at the transport layer). Revert with the server change.
+    // 8094 is a second listener for the A/B discriminators: every B side targets it, so
+    // the sides differ by port (orig_dport) as well as by HTTP path.
     println!("backend listening on http://0.0.0.0:8093 and :8094");
     let l8093 = tokio::net::TcpListener::bind("0.0.0.0:8093").await.unwrap();
     let l8094 = tokio::net::TcpListener::bind("0.0.0.0:8094").await.unwrap();

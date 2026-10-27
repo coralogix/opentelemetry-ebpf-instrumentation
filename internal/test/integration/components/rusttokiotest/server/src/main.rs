@@ -1,13 +1,8 @@
-// server: work-stealing scheduler test (Axum + multi-thread Tokio runtime).
-//
-// actix-web (#[actix_web::main]) gives each worker its own current-thread
-// Tokio runtime, so tokio::spawn never crosses thread boundaries — OBI's TID
-// fallback coincidentally works there.
-//
-// Axum with #[tokio::main] uses a SINGLE multi-thread work-stealing runtime.
-// tokio::spawn enqueues tasks in the global scheduler; any worker thread can
-// dequeue and run them. OBI MUST use the tokio_task_state ancestry walk to
-// propagate context; TID-based lookup alone will fail.
+// server: Axum on a single multi-thread work-stealing Tokio runtime (#[tokio::main]).
+// tokio::spawn enqueues the task on the shared scheduler and any worker may run it, so
+// an egress can run on a thread that never handled the inbound request; OBI attributes
+// it by task lineage, not by thread. (actix-web is the other common shape: one
+// current-thread runtime per worker, where tasks never migrate.)
 //
 // Start backend first:  cargo run -p backend
 // Then:                  cargo run -p server
@@ -87,27 +82,22 @@ async fn ws_spawn() -> impl IntoResponse {
 // spawn_blocking A/B paths (/ping-a, /ping-b) so the two discrimination subtests
 // never cross-classify each other's traces.
 const BACKEND_C: &str = "http://127.0.0.1:8093/ping-c";
-// DIAGNOSTIC: B's async egress goes to a DISTINCT backend port (8094) so the eBPF
-// side can distinguish an A-egress (orig_dport=8093) from a B-egress (8094).
+// Every B side also targets port 8094, so the sides differ at the transport level
+// (orig_dport) as well as by HTTP path.
 const BACKEND_D: &str = "http://127.0.0.1:8094/ping-d";
 
-// /ws-spawn-a and /ws-spawn-b — the ASYNC work-stealing discriminator. Same shape
-// as /ws-spawn (tokio::spawn + yield_now to force the child onto the run queue so
-// an idle worker can steal it under concurrent load), but each calls a DISTINCT
-// backend path. Under migration the spawned task egresses on a worker that never
-// handled the inbound request; only the tokio_task_state ancestry walk can attribute
-// it. Non-migrated requests still resolve via the generic thread=request path, so —
-// unlike spawn_blocking — the probes-off baseline is not ~0; the two subtests are
-// calibrated from measured on/off numbers rather than a shared fixed threshold.
+// /ws-spawn-a and /ws-spawn-b: the async work-stealing discriminator. Same shape as
+// /ws-spawn (tokio::spawn + yield_now, so an idle worker can steal the child under
+// concurrent load), but each calls a distinct backend path. Under migration the
+// spawned task egresses on a worker that never handled the inbound request; only the
+// task lineage walk can attribute it.
 async fn ws_spawn_a() -> impl IntoResponse {
     let handler_tid = std::thread::current().id();
     let handle = tokio::spawn(async move {
         tokio::task::yield_now().await;
         let child_tid = std::thread::current().id();
-        // Prints migrated=true when the child resumed on a different worker than the
-        // handler — confirms work-stealing actually occurred so the discrimination
-        // numbers can be interpreted (a low gap with migrated=false everywhere would
-        // just mean nothing migrated).
+        // migrated=true means the child resumed on a different worker than the handler,
+        // so the app log shows whether work-stealing actually happened in a run.
         println!("[ws-spawn-a] child={:?} migrated={}", child_tid, child_tid != handler_tid);
         call_backend_url("ws-spawn-a", BACKEND_C).await
     });
@@ -349,18 +339,10 @@ fn call_backend_blocking_url(url: &str) -> Result<String, String> {
 const BACKEND_A: &str = "http://127.0.0.1:8093/ping-a";
 const BACKEND_B: &str = "http://127.0.0.1:8093/ping-b";
 
-// /blocking-a and /blocking-b are the probe-discrimination endpoints. Each
-// dispatches a spawn_blocking closure that calls a DISTINCT backend path.
-// spawn_blocking always runs on a blocking-pool thread that never handled the
-// inbound request, so the generic thread=request assumption cannot correlate it —
-// under concurrent A/B load the generic process-level fallback (last-write-wins)
-// misattributes, producing traces where a /blocking-a server span contains a
-// /ping-b backend span (or vice versa). The Tokio bridge attributes per task
-// identity, so cross-contamination stays low. The integration test asserts that
-// each side produces at least `minClean` cleanly-attributed chains (not that
-// contamination is zero — a small keep-alive tail is tolerated); that clean-chain
-// floor collapses with the Tokio probes detached and is met with them attached
-// (when they actually fire — debug always; release after the raw::poll re-target).
+// /blocking-a and /blocking-b: each dispatches a spawn_blocking closure that calls a
+// distinct backend path. The closure runs on a blocking-pool thread that never handled
+// the inbound request, so a thread-based lookup cannot attribute it. The suite asserts
+// zero misattribution on both builds, plus a clean-chain floor in debug (the id walk).
 async fn blocking_a() -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(|| call_backend_blocking_url(BACKEND_A))
         .await

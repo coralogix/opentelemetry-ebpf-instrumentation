@@ -10,14 +10,11 @@
 # server hard-codes localhost). See docker-compose-rust-tokio.yml.
 #
 # Build context must be the repo root.
-FROM rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460 AS rustbuilder
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rustbuilder
 
-# CARGO_PROFILE selects release (default, what users ship) or debug. The
-# probe-discrimination experiment builds debug, where the Tokio poll probe
-# (RawTask::poll) is NOT inlined and therefore fires on multi-thread workers —
-# letting us demonstrate "probes on -> pass / probes off -> fail" before the
-# release raw::poll re-target. The output dir name matches the profile
-# (target/debug or target/release).
+# CARGO_PROFILE selects release (default, what users ship) or debug. Both are tested:
+# tokio's task-id setter stays out of line only in debug, so the id walk runs only
+# there. The output dir name matches the profile (target/debug or target/release).
 ARG CARGO_PROFILE=release
 
 # RUSTFLAGS is threaded through so tests can select the symbol mangling scheme,
