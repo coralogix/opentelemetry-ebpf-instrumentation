@@ -46,6 +46,7 @@ var (
 	errUSDTProbeNotFound = errors.New("USDT probe not found")
 
 	findNamespacedPids = procs.FindNamespacedPids
+	findRustSymbols    = procs.FindRustSymbols
 	attachKprobe       = func(symbol string, program *ebpf.Program) (io.Closer, error) {
 		return kprobe.Attach(symbol, program, false)
 	}
@@ -1429,6 +1430,7 @@ func resolveProbeOffsets(
 			probe.Skip = false
 			probe.StartOffset = sym.Off
 			progData := readSymbolData(&sym)
+
 			if progData == nil {
 				if err := handleSymbolDataReadFailure(probe, symbolName, instrPath, log); err != nil {
 					return err
@@ -1474,7 +1476,7 @@ func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.Pro
 		return nil
 	}
 
-	pathSyms, err := procs.FindRustSymbols(elfFile, paths)
+	pathSyms, err := findRustSymbols(elfFile, paths)
 	if err != nil {
 		return fmt.Errorf("failed to lookup Rust symbols for %s: %w", instrPath, err)
 	}

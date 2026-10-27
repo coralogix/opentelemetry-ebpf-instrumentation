@@ -991,6 +991,16 @@ func TestResolveInstrPathUsesMappedPathWhenLibraryIsMapped(t *testing.T) {
 	assert.Equal(t, "/usr/lib/libjvm.so", mappedPath)
 }
 
+func TestResolveInstrPathSelfKeyTargetsExecutable(t *testing.T) {
+	// A mapped library whose path contains "/self" must not be taken for the executable.
+	instrPath, ino, mappedPath, found := resolveInstrPath(123, ebpfcommon.SelfLibKey, makeProcMaps("/opt/self/libself.so"), "/proc/123/exe", 42)
+
+	assert.True(t, found)
+	assert.Equal(t, "/proc/123/exe", instrPath)
+	assert.Equal(t, uint64(42), ino)
+	assert.Empty(t, mappedPath)
+}
+
 func TestUSDTIPMapPIDsIncludesNamespacedAliases(t *testing.T) {
 	original := findNamespacedPids
 	defer func() { findNamespacedPids = original }()

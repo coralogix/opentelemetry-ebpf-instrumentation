@@ -105,3 +105,82 @@ func TestUprobeModulesSkipSelfProbesForNonRust(t *testing.T) {
 
 	assert.Empty(t, modules, "the self-binary symbol scan runs only for Rust executables")
 }
+
+// stubRustSymbols replaces the ELF symbol lookup behind expandRustPathProbes for the
+// test, so the expansion runs against fake copies instead of a Rust binary.
+func stubRustSymbols(t *testing.T, syms map[string][]procs.Sym) {
+	t.Helper()
+	original := findRustSymbols
+	findRustSymbols = func(_ *elf.File, _ []string) (map[string][]procs.Sym, error) {
+		return syms, nil
+	}
+	t.Cleanup(func() { findRustSymbols = original })
+}
+
+func rustPathProbe(required, mayBeInlined bool) []*ebpfcommon.ProbeDesc {
+	return []*ebpfcommon.ProbeDesc{{
+		Required:      required,
+		DemangledPath: true,
+		MayBeInlined:  mayBeInlined,
+		Start:         &ebpf.Program{},
+		End:           &ebpf.Program{},
+	}}
+}
+
+func TestExpandRustPathProbesFailsOnRequiredPathWithoutCopies(t *testing.T) {
+	stubRustSymbols(t, nil)
+	probes := map[string][]*ebpfcommon.ProbeDesc{"tokio::poll": rustPathProbe(true, false)}
+
+	err := expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default())
+
+	require.ErrorContains(t, err, "required symbol tokio::poll not found")
+}
+
+func TestExpandRustPathProbesDropsOptionalPathWithoutCopies(t *testing.T) {
+	stubRustSymbols(t, nil)
+	logs := captureLogs(t)
+	probes := map[string][]*ebpfcommon.ProbeDesc{"tokio::poll": rustPathProbe(false, false)}
+
+	require.NoError(t, expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default()))
+
+	assert.NotContains(t, probes, "tokio::poll", "an unresolved path must never be attached at offset 0")
+	assert.NotContains(t, logs.String(), "partially resolved", "nothing resolved, so nothing is partial")
+}
+
+func TestExpandRustPathProbesExpandsEveryCopyAndWarnsWhenPartiallyResolved(t *testing.T) {
+	withRet, _ := rustTestCode(t)
+	stubRustSymbols(t, map[string][]procs.Sym{
+		"tokio::poll": {rustCopy(0x1000, withRet), rustCopy(0x2000, withRet)},
+	})
+	logs := captureLogs(t)
+	probes := map[string][]*ebpfcommon.ProbeDesc{
+		"tokio::poll":    rustPathProbe(false, false),
+		"tokio::missing": rustPathProbe(false, false),
+	}
+
+	require.NoError(t, expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default()))
+
+	require.Len(t, probes["tokio::poll"], 2, "one descriptor per monomorphized copy")
+	assert.Equal(t, uint64(0x1000), probes["tokio::poll"][0].StartOffset)
+	assert.Equal(t, uint64(0x2000), probes["tokio::poll"][1].StartOffset)
+	assert.NotEmpty(t, probes["tokio::poll"][1].ReturnOffsets)
+	assert.NotContains(t, probes, "tokio::missing")
+	assert.Contains(t, logs.String(), "rust paths only partially resolved")
+	assert.Contains(t, logs.String(), "tokio::missing")
+}
+
+func TestExpandRustPathProbesMayBeInlinedPathIsNotLost(t *testing.T) {
+	withRet, _ := rustTestCode(t)
+	stubRustSymbols(t, map[string][]procs.Sym{"tokio::poll": {rustCopy(0x1000, withRet)}})
+	logs := captureLogs(t)
+	probes := map[string][]*ebpfcommon.ProbeDesc{
+		"tokio::poll":     rustPathProbe(false, false),
+		"tokio::Id::next": rustPathProbe(false, true),
+	}
+
+	require.NoError(t, expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default()))
+
+	require.Len(t, probes["tokio::poll"], 1)
+	assert.NotContains(t, probes, "tokio::Id::next")
+	assert.NotContains(t, logs.String(), "partially resolved", "a MayBeInlined path vanishing is expected")
+}
