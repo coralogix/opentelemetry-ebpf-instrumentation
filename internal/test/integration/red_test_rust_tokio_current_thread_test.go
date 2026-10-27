@@ -97,6 +97,13 @@ func TestRustTokioCurrentThread(t *testing.T) {
 			failClosed:  true,
 			beforeBurst: fill, // the warm-up woke the mailbox: evict it again before the burst
 		})
+		// Zero misattribution alone also holds when nothing was evicted, so require the
+		// guard to have fired: the schedule hook logs origin=3 when it re-registers a task
+		// whose polled mark survived the eviction of its entry.
+		obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+		require.NoError(t, err)
+		assert.Contains(t, obiLog, "origin=3",
+			"no task was re-registered at a wake without a parent: the fill did not evict the mailbox")
 	})
 	runWeaverValidation(t)
 }
