@@ -256,7 +256,7 @@ OBI currently documents the following asynchronous or runtime-specific context p
 | Java thread pool | Java | JDK `8+` | Parent lookup walks up to 3 thread-nesting levels | Stable |
 | Java virtual threads | Java | JDK `21+` | Log enrichment is skipped for requests handled on virtual threads | Stable |
 | Python asyncio | Python | GIL-enabled, 64-bit CPython `3.9` through `3.14` | Free-threaded builds are unsupported; `asyncio.start_server()` is not correlated under uvloop; mutated contexts and cancelled `to_thread` tasks may lose correlation | Stable |
-| Rust Tokio | Rust | tokio `1.52.3`, rust `1.99.0`, symbols retained | Pooled-client connection reuse and channel hand-off fail closed after the spawning request (orphans, never a wrong parent); egress after the response is an orphan; HTTP/2 is not correlated; `capture.runtimes.rust.enabled` (Config v2) switches the probes off | Experimental |
+| Rust Tokio | Rust | tokio `1.52.3`, rust `1.99.0`, symbols retained | Pooled-client connection reuse and channel hand-off fail closed after the spawning request (orphans, never a wrong parent); egress after the response is an orphan; HTTP/2 is not correlated; threads of the process that never poll a task (a sync listener next to the runtime) keep their own thread-keyed parent; `capture.runtimes.rust.enabled` (Config v2) switches the probes off | Experimental |
 
 ## Payload Capture
 

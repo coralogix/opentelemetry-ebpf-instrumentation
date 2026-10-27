@@ -30,6 +30,7 @@ It extends the existing context propagation mechanisms documented in [context-pr
 | `tokio::task::spawn_local` on a `LocalSet` (actix-web: one current-thread runtime per worker) | The task never migrates; the handler future is polled inside the per-connection dispatcher task, which anchors | Correlated (registered at `Shared::schedule`, since the spawn's `Cell::new` copy is inlined) | Correlated (id walk) |
 | Channel handoff to a long-lived worker task (actor/queue pattern) | A worker task that outlives every request performs the egress | **Fails closed** (orphan) once the spawning request has completed; the job handed off by the request still in flight resolves | Same |
 | HTTP/2 inbound or egress | One connection task multiplexes many requests | Not supported; egress fails closed by design (untested) | Same |
+| Sync thread outside the runtime (a std-thread listener next to Tokio) | Not a task: the thread never polls | Thread-keyed (its own server span, no clone ancestry) | Same |
 
 **Misattribution is zero in every build and both mangling schemes (legacy `_ZN` and v0
 `_R`) across the validation matrix**, including adversarial pool-reuse and channel-handoff
@@ -46,12 +47,16 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
 
 ### How the contract is enforced (every decision point)
 
-1. **The process gate.** Once a process polls a Tokio task (`tokio_process`, keyed by the
-   OBI-view pid), parent resolution uses ONLY the task walks below. Every generic resolver
+1. **The process and thread gate.** Once a process polls a Tokio task (`tokio_process`,
+   keyed by the OBI-view pid), parent resolution on every thread that has polled a task
+   (`tokio_thread_state.polled`) uses ONLY the task walks below. Every generic resolver
    (`clone_map` OS-thread ancestry, `cp_support`, the nginx/puma/java thread-keyed
    lookups) is skipped: each is keyed by the handling OS thread, which under work-stealing
    belongs to a different in-flight request (the java resolver's leading
-   `server_traces[t_key]` lookup was a measured contamination leak before the gate).
+   `server_traces[t_key]` lookup was a measured contamination leak before the gate). A
+   thread of that process that never polled a task (a sync listener's thread next to the
+   runtime) resolves its own thread-keyed server span and nothing else: exact for a thread
+   that read the request itself, and no clone ancestry, which can end at a runtime thread.
 2. **Anchored-only resolution.** A trace is resolved only at a task that was explicitly
    anchored to an inbound request at server-span-save time, the one moment "this thread is
    running this request's task" is verifiably true. Lineage nodes carry no connection
@@ -199,7 +204,7 @@ Because Tokio's internal symbols are generic and monomorphized, and are emitted 
 `tokio::runtime::task::harness::Harness::<T,S>::poll` runs a task poll. PARM1 is the task `Header*`.
 
 - **Entry** (`obi_uprobe_tokio_poll`): records `current_task = PARM1` in `tokio_thread_state`, **resets `current_id` and `pending_new_id` to 0** (see [the trust guard](#the-current_id-poll-scoped-trust-guard)), marks the process in `tokio_process`, and refreshes `obi_ctx` for the task now running here.
-- **Exit** (`obi_uretprobe_tokio_poll`): clears the thread entry so a stale task is never visible between polls.
+- **Exit** (`obi_uretprobe_tokio_poll`): zeroes the thread's task fields so a stale task is never visible between polls; the entry stays, its `polled` flag marking the thread as a runtime thread.
 
 Why `Harness::poll` and not `raw::poll` or `RawTask::poll`: `RawTask::poll` is inlined into the scheduler in release; `raw::poll` is a one-instruction thunk that tail-calls `Harness::poll` with no `RET`, so a uretprobe on it is silently skipped in release, leaving `current_task` stale between polls. `Harness::poll` retains its `RET` in release (verified on every copy). It is out-of-line only by the optimiser's choice: the instrumenter warns when any copy of a path attaches without return offsets, so a toolchain that changes this is visible in the logs.
 
@@ -241,7 +246,7 @@ When a Tokio client request needs a trace parent (at egress, via `find_tokio_par
 
 Both walks climb the recorded parent chain for at most 8 hops. At every hop the entry must exist (a deleted or evicted entry ends the walk), and from the second hop on the entry's `anchor_epoch` must equal the `parent_epoch` the child recorded at spawn. The first entry that is anchored (`conn_valid`), not shared (`conn_shared == 0`) and inside its trust window resolves from its **anchor-time trace snapshot**; there is no other source. To follow a link, the Header walk needs a non-zero `parent_version` that still matches the parent's `version` (pointer reuse), the id walk needs `parent_id < id` (monotone ids, never reused). Anything else returns NULL: orphan, never a guess.
 
-For a Tokio process (marked in `tokio_process` on first poll), `find_parent_trace` resolves **only** via these walks; every generic resolver (`clone_map`/process ancestry, `cp_support`, nginx/puma/java) is skipped, because each is either for another runtime or keyed by the handling OS thread, which under work-stealing belongs to a different in-flight request.
+For a Tokio process (marked in `tokio_process` on first poll), `find_parent_trace` resolves a thread that has polled a task **only** via these walks; every generic resolver (`clone_map`/process ancestry, `cp_support`, nginx/puma/java) is skipped, because each is either for another runtime or keyed by the handling OS thread, which under work-stealing belongs to a different in-flight request. A thread of that process that never polled a task keeps its own `server_traces[t_key]` entry as the only source, with no clone ancestry: a sync listener's threads next to the runtime stay correlated as before the probes.
 
 ## Implementation Details
 
@@ -301,7 +306,7 @@ In the v0 mangling scheme a closure demangles to the SAME path as its parent fun
 
 ### The Tokio maps are gated to Tokio processes
 
-The server-span-save path writes the Tokio maps only when `tokio_thread_state` is set for the thread. Non-Tokio servers hit this path constantly and must not pay for the extra writes or LRU churn. On the egress side a non-Tokio process pays exactly one `tokio_process` lookup.
+The server-span-save path writes the Tokio maps only when `tokio_thread_state` is set for the thread. Non-Tokio servers hit this path constantly and must not pay for the extra writes or LRU churn. On the egress side a non-Tokio process pays exactly one `tokio_process` lookup, and a non-runtime thread of a Tokio process one `tokio_thread_state` lookup more.
 
 ### Probe attachment is mangling-aware
 
@@ -412,7 +417,9 @@ rustc emits tokio; a change is green only on all four.
   to the opposite endpoint's backend) and `piled` (same-side temporal: more same-side
   backend spans than server spans in one trace). The classifier identifies a span by its
   kernel span id (recovered from the "processing" child when OBI exported sub-spans), so a
-  record OBI exported twice is not mistaken for a pile.
+  record OBI exported twice is not mistaken for a pile. Its `sync_threads` case drives the
+  server's std-thread listener on port 8095, whose threads never poll a task, and requires
+  the thread-keyed floor.
 - `TestRustTokioCurrentThread` runs the same A/B discrimination against an actix-web server
   (`server-actix`): one current-thread runtime per worker with a `LocalSet`, the handler
   polled inside the per-connection dispatcher task, so tasks never migrate. Six shapes:

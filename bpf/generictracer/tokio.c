@@ -84,7 +84,7 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     // current_id and pending_new_id start at 0 on every poll: the id is trusted only when
     // the runtime's TLS setter re-sets it within this poll, which keeps the id path inert in
     // release (where the setter is inlined) even under partial inlining.
-    tokio_thread_state_t new_state = {.current_task = task_ptr, .tgid = tgid};
+    tokio_thread_state_t new_state = {.current_task = task_ptr, .tgid = tgid, .polled = 1};
     // Nested poll (a runtime driven from inside a spawn_blocking closure): the exit probe
     // restores the enclosing task.
     const tokio_thread_state_t *outer =
@@ -110,9 +110,10 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Poll exit: clears current_task so a probe firing between polls on this thread (a
-// runtime-internal Cell::new) cannot take a stale parent. obi_ctx is left alone, see
-// tokio_refresh_obi_ctx.
+// Poll exit: clears the task fields so a probe firing between polls on this thread (a
+// runtime-internal Cell::new) cannot take a stale parent. The entry itself stays: its polled
+// flag is what tells a runtime thread from one that never ran a task. obi_ctx is left alone,
+// see tokio_refresh_obi_ctx.
 SEC("uretprobe/self:tokio_poll")
 int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     (void)ctx;
@@ -139,8 +140,8 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     }
 
     thread_state->current_task = k_tokio_task_none;
-    // Removed entirely so idle threads do not occupy the LRU.
-    bpf_map_delete_elem(&tokio_thread_state, &id);
+    thread_state->current_id = 0;
+    thread_state->pending_new_id = 0;
 
     return 0;
 }

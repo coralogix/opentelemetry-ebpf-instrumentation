@@ -387,13 +387,24 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
                                                         trace_key_t *t_key,
                                                         u16 orig_dport,
                                                         const tp_info_t *wire_tp) {
-    // A Tokio process resolves parents only through the task walks: every resolver below is
-    // for another runtime or keyed by the handling OS thread, which on a work-stealing
-    // runtime often belongs to a different in-flight request, and a wrong parent propagates
-    // downstream. Keyed with valid_pid() like the tokio probes, so the two agree in pod mode
-    // with the pid filter off.
+    // A thread of a Tokio process that has polled a task resolves parents only through the
+    // task walks: every resolver below is for another runtime or keyed by the handling OS
+    // thread, which on a work-stealing runtime often belongs to a different in-flight
+    // request, and a wrong parent propagates downstream. A thread of that process that never
+    // polled a task (a sync listener's thread next to the runtime) keeps its own thread-keyed
+    // server span, which is exact, and nothing else: the clone ancestry can end at a runtime
+    // thread whose span belongs to another request, and it cannot be checked against the
+    // thread map, which is keyed by the host pid_tgid while clone_map holds namespaced keys.
+    // Keyed with valid_pid() like the tokio probes, so the two agree in pod mode with the pid
+    // filter off.
     const u32 tgid = valid_pid(pid_tgid);
     if (bpf_map_lookup_elem(&tokio_process, &tgid)) {
+        const tokio_thread_state_t *thread_state =
+            (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
+        if (!thread_state || !thread_state->polled) {
+            tp_info_pid_t *thread_parent = bpf_map_lookup_elem(&server_traces, t_key);
+            return parent_trace_matches(thread_parent, wire_tp) ? thread_parent : NULL;
+        }
         tp_info_pid_t *tokio_parent = find_tokio_parent_trace_for_thread(pid_tgid);
         if (tokio_parent && tokio_parent->valid && parent_trace_matches(tokio_parent, wire_tp)) {
             return tokio_parent;

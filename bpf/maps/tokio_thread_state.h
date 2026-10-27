@@ -20,7 +20,9 @@ typedef struct tokio_thread_state {
     u64 prev_task;      // enclosing task when polls nest (one level), restored at exit
     u32 tgid;           // OBI-view pid: the process half of every tokio map key, so the Go
                         // side can purge a dead process by the pid it knows
-    u32 _pad;
+    u8 polled;          // 1 once this thread has polled a task: a runtime thread, resolved
+                        // only through the task walks. Never set by Id::next alone
+    u8 _pad[3];
 } tokio_thread_state_t;
 
 struct {
@@ -31,9 +33,10 @@ struct {
     __uint(pinning, OBI_PIN_INTERNAL);
 } tokio_thread_state SEC(".maps");
 
-// Set once per process on its first task poll. find_parent_trace resolves a Tokio process
-// only through the task walks: worker and blocking-pool threads are shared across requests,
-// so the generic thread-ancestry resolvers would misattribute.
+// Set once per process on its first task poll. In a marked process, find_parent_trace
+// resolves a thread that has polled a task only through the task walks (worker and
+// blocking-pool threads are shared across requests, so the thread-keyed resolvers would
+// misattribute), and any other thread through its own thread-keyed server span alone.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, u32);  // tgid

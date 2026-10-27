@@ -143,6 +143,26 @@ async fn ping_l(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-l traceparent={}", traceparent)
 }
 
+// /ping-m and /ping-n are the SYNC-THREAD A/B discriminator's backends: the server's std
+// threads call them, and their parent must be the calling thread's own server span.
+async fn ping_m(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-m  traceparent={}", traceparent);
+    format!("pong-m traceparent={}", traceparent)
+}
+
+async fn ping_n(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-n  traceparent={}", traceparent);
+    format!("pong-n traceparent={}", traceparent)
+}
+
 async fn health() -> impl IntoResponse {
     "ok\n"
 }
@@ -163,7 +183,9 @@ async fn main() {
         .route("/ping-i", get(ping_i))
         .route("/ping-j", get(ping_j))
         .route("/ping-k", get(ping_k))
-        .route("/ping-l", get(ping_l));
+        .route("/ping-l", get(ping_l))
+        .route("/ping-m", get(ping_m))
+        .route("/ping-n", get(ping_n));
 
     // 8094 is a second listener for the A/B discriminators: every B side targets it, so
     // the sides differ by port (orig_dport) as well as by HTTP path.

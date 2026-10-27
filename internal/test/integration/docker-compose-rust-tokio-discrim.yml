@@ -13,6 +13,7 @@ services:
     image: hatest-rust-tokio-discrim
     ports:
       - "8092:8092" # server (the backend on 8093 stays internal)
+      - "8095:8095" # the server's std-thread sync listener
     depends_on:
       otelcol:
         condition: service_started

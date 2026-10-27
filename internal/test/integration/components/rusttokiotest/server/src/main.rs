@@ -374,6 +374,61 @@ async fn blocking_nested() -> impl IntoResponse {
     respond(handle.await.unwrap_or_else(|e| Err(e.to_string())))
 }
 
+// A synchronous HTTP/1 listener on 8095 served by std threads, next to the Tokio runtime:
+// threads that never poll a task. /sync-a and /sync-b call the backend with ureq on the
+// handling thread itself, so the parent is that thread's own server span, which OBI must
+// keep resolving in a process that also runs Tokio. One request per connection, so every
+// request is read on a fresh thread.
+const SYNC_ADDR: &str = "0.0.0.0:8095";
+const BACKEND_M: &str = "http://127.0.0.1:8093/ping-m";
+const BACKEND_N: &str = "http://127.0.0.1:8094/ping-n";
+
+fn serve_sync_listener() {
+    let listener = std::net::TcpListener::bind(SYNC_ADDR).expect("bind the sync listener");
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        std::thread::spawn(move || handle_sync_request(stream));
+    }
+}
+
+fn handle_sync_request(mut stream: std::net::TcpStream) {
+    use std::io::{BufRead, BufReader, Write};
+
+    let mut reader = BufReader::new(stream.try_clone().expect("clone the sync stream"));
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).unwrap_or(0) == 0 {
+        return;
+    }
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+            break;
+        }
+    }
+
+    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+    let (status, body) = match path {
+        "/sync-a" => sync_outcome(call_backend_blocking_url(BACKEND_M)),
+        "/sync-b" => sync_outcome(call_backend_blocking_url(BACKEND_N)),
+        "/health" => ("200 OK", "ok".to_string()),
+        _ => ("404 Not Found", "not found".to_string()),
+    };
+    let response = format!(
+        "HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        status,
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn sync_outcome(result: Result<String, String>) -> (&'static str, String) {
+    match result {
+        Ok(body) => ("200 OK", body),
+        Err(e) => ("500 Internal Server Error", e),
+    }
+}
+
 async fn health() -> impl IntoResponse {
     "ok\n"
 }
@@ -412,6 +467,11 @@ async fn main() {
     println!("  GET /blocking-b      — spawn_blocking -> ureq /ping-b (blocking discrimination B)");
     println!("  GET /ws-spawn-a      — tokio::spawn -> reqwest /ping-c (async discrimination A)");
     println!("  GET /ws-spawn-b      — tokio::spawn -> reqwest /ping-d (async discrimination B)");
+    println!(
+        "  GET :8095/sync-a|b   — std-thread listener -> ureq /ping-m|n (sync discrimination)"
+    );
+
+    std::thread::spawn(serve_sync_listener);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8092")
         .await

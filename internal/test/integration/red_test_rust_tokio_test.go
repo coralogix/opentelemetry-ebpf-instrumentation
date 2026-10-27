@@ -29,7 +29,10 @@ func tokioDebugBuild() bool {
 	return os.Getenv("CARGO_PROFILE") == "debug"
 }
 
-const tokioServerURL = "http://localhost:8092"
+const (
+	tokioServerURL     = "http://localhost:8092"
+	tokioSyncServerURL = "http://localhost:8095" // the axum server's std-thread listener
+)
 
 // tokioOBILogLines bounds the OBI log slice the trust-window check reads. The
 // context-propagation suite emits a few thousand lines, so this is the whole log.
@@ -310,6 +313,7 @@ func childOfParent(s jaeger.Span) string {
 type tokioABCase struct {
 	serverA, serverB   string // e.g. "/blocking-a", "/blocking-b"
 	backendA, backendB string // e.g. "/ping-a", "/ping-b"
+	serverURL          string // base URL of the server endpoints; tokioServerURL when empty
 	minClean           int    // required clean chains per side (hard gate); unused when failClosed
 	// failClosed is for a shape OBI does not correlate: no clean-chain floor, zero
 	// misattribution required instead (orphans are expected, a wrong span is a defect).
@@ -404,6 +408,18 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 			tolerateSameSidePile: true, // shared-client residual; cross-side stays strict
 		})
 	})
+	t.Run("sync_threads", func(t *testing.T) {
+		// The server's std-thread listener on 8095: the request is read and the backend
+		// called on a thread that never polls a task. The process runs Tokio, so the task
+		// walks own its runtime threads, but this thread must keep its own thread-keyed
+		// server span as the parent, as it did before the Tokio probes existed.
+		tokioABDiscrimination(t, tokioABCase{
+			serverURL: tokioSyncServerURL,
+			serverA:   "/sync-a", serverB: "/sync-b",
+			backendA: "/ping-m", backendB: "/ping-n",
+			minClean: 20,
+		})
+	})
 	runWeaverValidation(t)
 }
 
@@ -411,10 +427,15 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 // chains on each side. It always logs the full breakdown so probes-on and
 // probes-off runs can be compared.
 func tokioABDiscrimination(t *testing.T, c tokioABCase) {
+	serverURL := c.serverURL
+	if serverURL == "" {
+		serverURL = tokioServerURL
+	}
+
 	// Phase 1: drive light load until server traces are flowing (do NOT require
 	// clean chains — probes-off must reach Phase 3 so it logs its breakdown).
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		driveTokioAB(c.serverA, c.serverB, 2)
+		driveTokioAB(serverURL, c.serverA, c.serverB, 2)
 		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 400)), 10,
 			"no server traces yet (OBI not attached?)")
 	}, testTimeout, time.Second)
@@ -424,7 +445,7 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	}
 
 	// Phase 2: sustained concurrent A/B burst.
-	driveTokioABConcurrent(t, c.serverA, c.serverB, 150, 20)
+	driveTokioABConcurrent(t, serverURL, c.serverA, c.serverB, 150, 20)
 
 	// Phase 3: classify inside the poll so the gate waits for enough clean chains to export
 	// instead of judging one mid-export snapshot. The query limit must exceed the total
@@ -475,10 +496,10 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 }
 
 // driveTokioAB fires n sequential requests to each of serverA and serverB.
-func driveTokioAB(serverA, serverB string, n int) {
+func driveTokioAB(serverURL, serverA, serverB string, n int) {
 	for range n {
 		for _, p := range []string{serverA, serverB} {
-			if resp, err := http.Get(tokioServerURL + p); err == nil {
+			if resp, err := http.Get(serverURL + p); err == nil {
 				_ = resp.Body.Close()
 			}
 		}
@@ -487,7 +508,7 @@ func driveTokioAB(serverA, serverB string, n int) {
 
 // driveTokioABConcurrent fires perEndpoint requests to each of serverA and serverB,
 // interleaved, with at most `concurrency` in flight at once.
-func driveTokioABConcurrent(t *testing.T, serverA, serverB string, perEndpoint, concurrency int) {
+func driveTokioABConcurrent(t *testing.T, serverURL, serverA, serverB string, perEndpoint, concurrency int) {
 	t.Helper()
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -498,7 +519,7 @@ func driveTokioABConcurrent(t *testing.T, serverA, serverB string, perEndpoint, 
 			go func(p string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if resp, err := http.Get(tokioServerURL + p); err == nil {
+				if resp, err := http.Get(serverURL + p); err == nil {
 					_ = resp.Body.Close()
 				}
 			}(p)
