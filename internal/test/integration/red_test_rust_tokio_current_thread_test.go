@@ -81,9 +81,9 @@ func TestRustTokioCurrentThread(t *testing.T) {
 	t.Run("mailbox_evicted", func(t *testing.T) {
 		// A long-lived LocalSet mailbox task whose map entry the fill evicts: its next wake
 		// comes from inside a request's handler, and the schedule hook must not record that
-		// request as its parent, or every job it then runs resolves that request. The
-		// polled-Header mark makes the wake re-register the mailbox with no parent, so its
-		// jobs orphan (release) or miss the evicted id entry (debug): fail closed both ways.
+		// request as its parent, or every job it then runs resolves that request. The slot
+		// count makes the wake re-register the mailbox with no parent, so its jobs orphan
+		// (release) or miss the evicted id entry (debug): fail closed both ways.
 		fill := func(t *testing.T) {
 			resp, err := http.Get(tokioServerURL + "/evict-fill")
 			require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestRustTokioCurrentThread(t *testing.T) {
 		})
 		// Zero misattribution alone also holds when nothing was evicted, so require the
 		// guard to have fired: the schedule hook logs origin=3 when it re-registers a task
-		// whose polled mark survived the eviction of its entry.
+		// whose slot count survived the eviction of its entry.
 		obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
 		require.NoError(t, err)
 		assert.Contains(t, obiLog, "origin=3",

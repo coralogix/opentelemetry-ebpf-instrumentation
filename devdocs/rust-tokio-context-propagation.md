@@ -88,7 +88,7 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
    at every poll entry and trusted only if the runtime's own TLS setter re-set it within
    that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new` and
    the spawn-only hooks re-initialize a reused Header entry; `Shared::schedule` records no
-   parent for a task whose polled mark says its entry was evicted (the task current at a
+   parent for a task whose slot count says its entry was evicted (the task current at a
    wake is the waker, not the spawner); anchor writes are
    copy-modify-publish (a single `bpf_map_update_elem`), so concurrent readers see a
    complete old or new value, never a torn one; every entry is deleted when the process
@@ -222,7 +222,7 @@ Entry uprobe on the two spawn-only functions that follow the constructor and are
 
 ### `Shared::schedule` (spawn_local registration) — `tokio_schedule`
 
-Entry uprobe on `tokio::task::local::Shared::schedule(&self, task)`; `PT_REGS_PARM2` is the `Notified` task, i.e. the `Header*`. The spawn of every `spawn_local` ends here, but so does every wake of a local task, so the program registers only a task that has **no entry**. A task is always scheduled before its first poll, so a missing entry belongs to a spawn, or to a task polled before whose entry the LRU evicted. The polled-Header mark (`tokio_polled_headers`, see [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake)) tells them apart: a marked task is re-registered with **no parent**, since the task current at a wake is the waker, not the spawner. A task asleep across OBI's attach whose first event is a wake by another task carries no mark and is adopted as that task's child (see the attach window in Known Limitations). Flagged `MayBeInlined`: a binary without a `LocalSet` has no such symbol.
+Entry uprobe on `tokio::task::local::Shared::schedule(&self, task)`; `PT_REGS_PARM2` is the `Notified` task, i.e. the `Header*`. The spawn of every `spawn_local` ends here, but so does every wake of a local task, so the program registers only a task that has **no entry**. A task is always scheduled before its first poll, so a missing entry belongs to a spawn, or to a task seen before whose entry the LRU evicted. The slot count (`tokio_task_slots`, see [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake)) tells them apart: a task whose slot is live is re-registered with **no parent**, since the task current at a wake is the waker, not the spawner. A task asleep across OBI's attach whose first event is a wake by another task has an empty slot and is adopted as that task's child (see the attach window in Known Limitations). Flagged `MayBeInlined`: a binary without a `LocalSet` has no such symbol.
 
 ### `Id::next` (task-id allocation) — `tokio_id_next`
 
@@ -289,16 +289,24 @@ is the first to go under capacity, since only a poll or a wake touches an entry.
 guard, the next wake of an evicted `LocalSet` task would reach `Shared::schedule` with no
 entry and be registered as a child of the task current on the waking thread, the waker: a
 mailbox task woken by request A's handler would then resolve A for every job it runs until
-A's response, cross-endpoint. `tokio_polled_headers` is a 2 MiB array of one-byte slots
-hashed from `(tgid, Header)`, set at every poll entry and cleared at `raw::dealloc`; being
-an array, it survives the eviction of the task maps. The schedule hook consults it when the
-entry is missing: a marked task is a wake and is re-registered with no parent (its egresses
-orphan), an unmarked one is a spawn. A slot collision (one in 2 million per marked task,
-about 1.4% of spawns at 30,000 live tasks) reads as "polled" and only withholds a parent.
-The marks are bytes, not bits, so a mark is one store and needs no atomic on the 5.8 floor;
-they are hashed, not keyed by pid, so a process exit does not purge them: a stale slot costs
-a reused pid one parentless task at that address, cleared again at its dealloc.
-`TestRustTokioCurrentThread/mailbox_evicted` drives the sequence.
+A's response, cross-endpoint. `tokio_task_slots` is a 2 MiB array of one-byte counts of the
+live known tasks per slot, hashed from `(tgid, Header)`; being an array, it survives the
+eviction of the task maps. A task is counted once, at its registration (`Cell::new`, the
+spawn hooks, a spawn seen at `Shared::schedule`) or at the first poll of a task never
+registered (older than OBI's attach), which also gives it a root entry; the count is
+released at `raw::dealloc`, and only when the task still had an entry, since a task without
+one may never have been counted and its decrement could erase a neighbour's. The schedule
+hook consults the slot when the entry is missing: a live slot is a wake and the task is
+re-registered with no parent (its egresses orphan), an empty one is a spawn. A count, not a
+bit, so the dealloc of a task sharing a slot with a sleeping one cannot erase the sleeper's.
+A slot shared with another live task (one in 2 million per live task, about 1.4% of spawns
+at 30,000 live tasks) reads as live and only withholds a parent; a count an evicted task
+leaves behind does the same at its slot, and the count saturates rather than wraps. The
+counts are bytes, so a change is one read-modify-write without the atomics the 5.8 floor
+lacks; they are hashed, not keyed by pid, so a process exit does not purge them: a dead
+process's unobserved deallocs leave a reused pid's tasks at those slots parentless until
+their own dealloc. `TestRustTokioCurrentThread/mailbox_evicted` drives the sequence and
+requires the re-registration (`origin=3`) in OBI's log.
 
 ### Closure symbols are excluded from path matching
 
@@ -369,9 +377,10 @@ path.
   the setter is attached, so the effect is bounded to requests in flight during the
   attach. Tasks spawned during the window record no parent state and orphan. A `LocalSet`
   task asleep across the attach whose first event is a wake by another task is registered
-  at that wake as the waker's child (it carries no polled mark, so `Shared::schedule` reads
-  the wake as a spawn): a one-off lineage under the epoch and version guards, same class
-  as the shared-task in-flight window.
+  at that wake as the waker's child (its slot is empty, so `Shared::schedule` reads the
+  wake as a spawn): a one-off lineage under the epoch and version guards, same class as
+  the shared-task in-flight window. A task polled at least once after the attach is
+  counted at that poll and is not adopted later.
 
 - **HTTP/2.** Inbound HTTP/2 anchors are epoch-guarded per request but the untag hooks the
   HTTP/1 response path only, so their trust window does not close at the response. HTTP/2

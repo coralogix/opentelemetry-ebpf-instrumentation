@@ -17,7 +17,7 @@
 
 #include <common/connection_info.h>
 #include <common/preempt_guard.h>
-#include <common/tokio_polled.h>
+#include <common/tokio_slots.h>
 #include <common/tokio_task.h>
 
 #include <pid/pid.h>
@@ -94,8 +94,14 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     }
     bpf_map_update_elem(&tokio_thread_state, &id, &new_state, BPF_ANY);
 
-    // Survives the eviction of this task's entry: see tokio_polled_headers.h.
-    tokio_mark_polled(tgid, task_ptr);
+    // A task polled with no entry and an empty slot was never registered (older than OBI's
+    // attach, or every spawn hook inlined away): it gets a root entry and its slot count,
+    // so its eviction cannot turn its next wake into an adoption. An evicted task keeps its
+    // count and is not counted again.
+    const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
+    if (!bpf_map_lookup_elem(&tokio_task_state, &task_key) && !tokio_slot_live(tgid, task_ptr)) {
+        tokio_register_task(id, tgid, task_ptr, k_tokio_origin_poll);
+    }
 
     // Marks the process as Tokio: find_parent_trace then resolves only through the task
     // walks, never through the thread-keyed resolvers.
@@ -146,36 +152,44 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Which spawn-time probe registered a task, and whether it saw a spawn at all.
+// Which probe registered a task, and whether it saw a spawn at all.
 enum tokio_task_origin {
     k_tokio_origin_cell_new = 0,
     k_tokio_origin_bind = 1,
     k_tokio_origin_schedule = 2,
-    // Shared::schedule for a task polled before: a wake, not a spawn, so no spawner is known.
-    k_tokio_origin_schedule_polled = 3,
+    // Shared::schedule for a task whose slot is live: a wake, not a spawn, no spawner known.
+    k_tokio_origin_schedule_known = 3,
+    // First poll of a task never registered (older than OBI's attach): a root.
+    k_tokio_origin_poll = 4,
 };
 
 // Registers new_task_ptr as a child of the task the spawning thread is polling now. Every
-// caller runs on the spawning thread inside the parent's poll, so current_task is the
-// parent, except the wake re-registration of an evicted task, which records no parent
-// because the current task is its waker. Lineage only: the child takes the parent's
-// incarnation stamp and anchor epoch, never its connection, so an egress must climb to the
-// anchor (an inherited copy on a long-lived descendant would outlive its request).
-// Overwrites: a previous occupant of the Header address may still have an entry (its
-// dealloc was not observed), and only its paired task id is carried over, the version is a
-// fresh stamp. A second registration of the same spawn (Cell::new, then bind_inner)
-// rewrites the same lineage before the task can have children or an anchor.
+// spawn-time caller runs on the spawning thread inside the parent's poll, so current_task
+// is the parent; the wake re-registration of an evicted task and the first-poll
+// registration of an unknown one record no parent, since the current task is the waker,
+// or the task itself. Lineage only: the child takes the parent's incarnation stamp and
+// anchor epoch, never its connection, so an egress must climb to the anchor (an inherited
+// copy on a long-lived descendant would outlive its request). Overwrites: a previous
+// occupant of the Header address may still have an entry (its dealloc was not observed),
+// and only its paired task id is carried over, the version is a fresh stamp. A second
+// registration of the same spawn (Cell::new, then bind_inner) rewrites the same lineage
+// before the task can have children or an anchor. The slot count takes one per task: a
+// registration that finds no entry, except the wake of a task counted when first seen.
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
         (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
-    const u8 spawner_known = origin != k_tokio_origin_schedule_polled;
+    const u8 spawner_known =
+        origin != k_tokio_origin_schedule_known && origin != k_tokio_origin_poll;
     const u64 parent_task =
         (spawner_known && thread_state) ? thread_state->current_task : k_tokio_task_none;
 
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
         (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
+    if (!existing && origin != k_tokio_origin_schedule_known) {
+        tokio_slot_inc(tgid, new_task_ptr);
+    }
 
     // Id::next runs right before the task's constructor on the spawning thread, so the
     // pending id belongs to this task. Consumed once.
@@ -266,9 +280,9 @@ int GUARDED_PROG(obi_uprobe_tokio_bind, struct pt_regs *, ctx) {
 // with Cell::new; the spawn ends in local::Shared::schedule, which also runs on every wake
 // of a local task, so a task is registered here only when it has no entry. A task is
 // always scheduled before its first poll, so a missing entry belongs to a spawn, or to a
-// task polled before whose entry the LRU evicted: the polled mark tells them apart, and the
+// task seen before whose entry the LRU evicted: the slot count tells them apart, and the
 // evicted one is re-registered with no parent, since the current task is its waker. A task
-// asleep across OBI's attach whose first event is a wake by another task carries no mark
+// asleep across OBI's attach whose first event is a wake by another task has an empty slot
 // and is adopted as that task's child (the attach-window limitation in the devdoc). PARM2
 // is the Notified task, i.e. the Header.
 SEC("uprobe/self:tokio_schedule")
@@ -291,7 +305,7 @@ int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
     }
 
     const enum tokio_task_origin origin =
-        tokio_was_polled(tgid, task_ptr) ? k_tokio_origin_schedule_polled : k_tokio_origin_schedule;
+        tokio_slot_live(tgid, task_ptr) ? k_tokio_origin_schedule_known : k_tokio_origin_schedule;
     tokio_register_task(id, tgid, task_ptr, origin);
 
     return 0;
@@ -325,8 +339,12 @@ int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
         const tokio_task_key_t id_key = tokio_task_key(tgid, dying->task_id);
         bpf_map_delete_elem(&tokio_task_id_state, &id_key);
     }
+    // The slot count is released only with the entry: a task without one may never have
+    // been counted, and its decrement could erase a live neighbour's.
+    if (dying) {
+        tokio_slot_dec(tgid, task_ptr);
+    }
     bpf_map_delete_elem(&tokio_task_state, &task_key);
-    tokio_clear_polled(tgid, task_ptr);
 
     return 0;
 }
