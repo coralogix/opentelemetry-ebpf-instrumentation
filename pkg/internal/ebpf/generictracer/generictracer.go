@@ -204,19 +204,16 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 	p.purgeTokioState(uint32(pid))
 }
 
-// purgeTokioState drops every Tokio map entry of a process that is gone. The maps are
-// keyed by the OBI-view pid (tokio_thread_state_t.tgid), the same pid BlockPID receives,
-// and are otherwise only LRU-evicted: a later process reusing the tgid would inherit the
-// tokio_process mark (forced onto the fail-closed Tokio-only resolution) and stale lineage
-// entries (task ids restart at 1, Header pointers come back from the allocator).
+// purgeTokioState drops every Tokio map entry of a process that is gone. The maps are keyed
+// by the OBI-view pid, the pid BlockPID receives, and are otherwise only LRU-evicted: a
+// later process reusing the pid would inherit the tokio_process mark and stale lineage.
 func (p *Tracer) purgeTokioState(tgid uint32) {
 	if p.bpfObjects.TokioProcess == nil {
 		return
 	}
-	// Every exiting instrumented process lands here. Only a Tokio process has state to
-	// drop, and deleting its flag tells the two apart without scanning anything: a
-	// non-Tokio exit costs this one failed delete. (The flag map holds one entry per
-	// process and never fills, so it is not LRU-evicted ahead of the task entries.)
+	// Deleting the flag tells a Tokio process from any other without scanning: a non-Tokio
+	// exit costs one failed delete. The flag map holds one entry per process, so it is not
+	// LRU-evicted ahead of the task entries.
 	if err := p.bpfObjects.TokioProcess.Delete(tgid); err != nil {
 		return
 	}
@@ -238,6 +235,7 @@ func (p *Tracer) purgeTokioState(tgid uint32) {
 			keys = append(keys, key)
 		}
 	}
+	// Best effort: an entry may have been LRU-evicted since it was listed.
 	for _, k := range keys {
 		_ = m.Delete(k)
 	}
@@ -257,6 +255,7 @@ func purgeTokioTaskMap(m *ebpf.Map, tgid uint32, value any) {
 			keys = append(keys, key)
 		}
 	}
+	// Best effort: an entry may have been LRU-evicted since it was listed.
 	for _, k := range keys {
 		_ = m.Delete(k)
 	}
@@ -682,116 +681,54 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				End:      p.bpfObjects.ObiUprobeTaskStepRet,
 			}},
 		},
-		// Tokio async runtime — statically linked into the Rust binary, so the probes
-		// target the executable itself and not a shared library.
-		// Symbol keys are demangled paths (without the per-build hash
-		// suffix and without generic type parameters).
+		// Tokio runtime, statically linked into the executable: the keys are demangled
+		// paths (no build hash, no generic arguments), one attachment per monomorphized
+		// copy. Why each symbol: devdocs/rust-tokio-context-propagation.md, "Probe Points".
 		ebpfcommon.SelfLibKey: {
-			// Poll tracking (entry + exit). We probe
-			// tokio::runtime::task::harness::Harness::<T,S>::poll, the function that
-			// actually runs a task poll. Every poll reaches it: the vtable-stored free
-			// fn tokio::runtime::task::raw::poll::<T,S> is a one-instruction thunk whose
-			// entire body is `b <Harness::<T,S>::poll>` (a tail call), so Harness::poll
-			// runs on EVERY poll for EVERY scheduler — async workers AND the blocking
-			// pool — in both debug and release (verified on Linux release: 27 copies,
-			// legacy and v0 alike).
-			//
-			// Why Harness::poll and not raw::poll: raw::poll tail-calls (b, no ret), so
-			// a uretprobe on it finds no RET and is silently skipped in release —
-			// leaving current_task never cleared and going stale between polls, a
-			// misattribution source. Harness::poll KEEPS its ret in release (27/27), so
-			// the EXIT uretprobe attaches reliably and current_task is cleared at poll
-			// end in every build. We do not probe raw::RawTask::poll either: it inlines
-			// into the scheduler's run_task in release and its symbol is bypassed.
-			//
-			// PARM1 = ptr: NonNull<Header>. raw::poll passes x0 through untouched (its
-			// body is only the tail branch), and Harness is a transparent NonNull whose
-			// pointee's first field is Header, so PARM1 is the same Header pointer the
-			// handlers already expect — the BPF programs are unchanged. Generic over
-			// <T,S> -> many monomorphized copies, one attachment per copy whose demangled
-			// path equals this key. Harness::poll_inner and its nested helpers start with
-			// the same path but are different functions (out-of-line in debug builds) and
-			// are not matched.
-			//
-			// Fragility: unlike raw::poll (address-taken for the vtable, so never
-			// inlinable), Harness::poll is out-of-line only by the optimiser's current
-			// choice. It is the only poll-path function that retains a ret in release,
-			// so it is the required probe point — but a future toolchain could inline
-			// it, which is why the 4-build (debug/release x legacy/v0) symbol gate must
-			// be re-checked on toolchain bumps.
+			// Poll entry/exit. Every poll of every scheduler reaches Harness::<T,S>::poll
+			// (raw::poll is a tail-call thunk into it) and it keeps a RET in release, so the
+			// exit probe attaches; raw::poll has no RET and RawTask::poll is inlined. PARM1 is
+			// the task Header. Out of line only by the optimiser's choice: re-check the symbol
+			// baseline on toolchain bumps.
 			"tokio::runtime::task::harness::Harness::poll": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioPoll,
 				End:           p.bpfObjects.ObiUretprobeTokioPoll,
 			}},
-			// Task creation — universal. Every task-creation path funnels through
-			// tokio::runtime::task::core::Cell::<T,S>::new, which allocates the task
-			// cell and returns Box<Cell<T,S>>. Cell is #[repr(C)] with `header: Header`
-			// as its first field, so the returned pointer IS the task Header pointer.
-			//
-			// We probe Cell::new (uretprobe, reads the Header from the return register)
-			// rather than the *bind* functions because those are asymmetric across
-			// schedulers: OwnedTasks factors out bind_inner (which receives the built
-			// Task<S> = Header) but LocalOwnedTasks::bind builds the task inline and has
-			// no such helper — its argument at entry is the raw future, NOT the Header,
-			// so a task_new uprobe there wrote a garbage key (spawn_local / LocalSet,
-			// e.g. actix-web). Cell::new is the single point common to ALL paths — the
-			// multi-thread and current-thread runtimes, spawn_local/LocalSet, and the
-			// blocking pool — and it survives release (new_task / RawTask::new inline
-			// away, but Cell::new does the heap allocation and stays out-of-line).
-			//
-			// Generic over <T,S> -> many monomorphized copies; the instrumenter attaches
-			// to every one whose demangled path equals this key. The nested helpers
-			// Cell::new::new_header and Cell::new::check are inlined in release and
-			// out-of-line in debug; they are different paths and are not matched (a prefix
-			// match attached this uretprobe to them too: one return per spawn with a
-			// pointer into the cell, and one returning unit, RC=0).
+			// Task creation. Cell::<T,S>::new is the one constructor every task-creation path
+			// uses (both runtimes, spawn_local, the blocking pool) and stays out of line in
+			// release; RC is Box<Cell>, whose first field is the Header. The bind functions
+			// are not probed: LocalOwnedTasks::bind receives the raw future, not the Header.
+			// The nested helpers Cell::new::new_header and ::check are different paths and
+			// are not matched.
 			"tokio::runtime::task::core::Cell::new": {{
 				Required:      false,
 				DemangledPath: true,
 				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
 			}},
-			// Task destruction — the vtable dealloc slot, sibling of raw::poll. We probe
-			// it (entry uprobe, PARM1 = NonNull<Header>) to delete the task's
-			// tokio_task_state entry so a future task of the SAME process that reuses this
-			// Header allocation (the allocator hands a freed cell straight back for the next
-			// task of that size) cannot inherit the previous occupant's stale conn; other
-			// processes never collide because the key carries the pid. This is an ENTRY
-			// probe on an address-taken function, so it fires reliably in release; deleting
-			// at destruction makes a reused Header start clean (fail closed) rather than
-			// resolving a new task's egress to the freed task's request. Links that
-			// surviving children still hold to the freed address are refused by the
-			// incarnation stamp check in the walk, not by this delete.
+			// Task destruction: the vtable dealloc slot, an entry probe on an address-taken
+			// function, so it fires in release. Deletes the task's entries so a reused Header
+			// address starts clean; links surviving children still hold to it are refused by
+			// the incarnation stamp, not by this delete.
 			"tokio::runtime::task::raw::dealloc": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioDealloc,
 			}},
-			// Debug-build task identity: the TLS setter behind tokio::task::id().
-			// tokio::runtime::context::set_current_task_id(Option<Id>) is called by the
-			// runtime around every task poll and carries the exact per-request task Id in
-			// DEBUG builds — where the Harness::poll-derived current_task collapses to a
-			// coarse per-worker root and the Header walk correlates nothing. In RELEASE
-			// its call sites are inlined: the surviving symbol copy attaches but never
-			// fires, so the id path is structurally inert there (the Header walk is the
-			// release mechanism; the two cover each other's failure mode). PARM1 =
-			// Option<NonZeroU64> task id (None == 0 on clear). Closure copies of the
-			// symbol are excluded at match time (isRustClosureSymbol): in v0 the
-			// fn's internal closure demangles to the same path and its PARM1 is
-			// &Context, which would poison the per-thread id.
+			// Debug-build task identity: the TLS setter behind tokio::task::id(), called
+			// around every poll. Out of line in debug, where it carries the exact task id; in
+			// release its call sites are inlined and the attached copy never fires. PARM1 is
+			// Option<NonZeroU64> (None == 0). Closure copies are excluded at match time
+			// (isRustClosureSymbol): their PARM1 is &Context.
 			"tokio::runtime::context::set_current_task_id": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioSetTaskId,
 			}},
-			// Debug-build id lineage: tokio::runtime::task::id::Id::next is the monotone
-			// task-Id allocator, called once per task creation immediately before the
-			// task's Cell::new on the spawning thread. The uretprobe (RC = fresh Id)
-			// creates the id-keyed lineage entry (parent = the spawner's current id) and
-			// leaves the id pending for the Cell::new pairing, so dealloc can delete the
-			// id entry when the task dies. Resolves no usable copy in release (inlined) —
-			// the id map stays empty there by construction.
+			// Debug-build id lineage: the monotone task-id allocator, called right before the
+			// task's Cell::new on the spawning thread; RC is the new id. Resolves no usable
+			// copy in release (inlined), hence MayBeInlined.
 			"tokio::runtime::task::id::Id::next": {{
 				Required:      false,
 				DemangledPath: true,
