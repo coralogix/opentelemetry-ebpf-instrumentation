@@ -90,20 +90,39 @@ func TestRustTokioCurrentThread(t *testing.T) {
 			defer resp.Body.Close()
 			require.Equal(t, http.StatusOK, resp.StatusCode)
 		}
+		// The first fill spawns the mailbox, so the poll probe must already fire: the health
+		// check only proves the server is up, and a mailbox spawned before OBI attached is
+		// never registered nor counted.
+		require.EventuallyWithT(t, func(ct *assert.CollectT) {
+			resp, err := http.Get(tokioServerURL + "/health")
+			require.NoError(ct, err)
+			_ = resp.Body.Close()
+			obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+			require.NoError(ct, err)
+			require.Contains(ct, obiLog, "tokio poll_future entry", "the Tokio poll probe has not fired yet")
+		}, testTimeout, time.Second)
 		fill(t)
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/mbox-a", serverB: "/mbox-b",
 			backendA: "/ping-k", backendB: "/ping-l",
-			failClosed:  true,
-			beforeBurst: fill, // the warm-up woke the mailbox: evict it again before the burst
+			failClosed: true,
+			beforeBurst: func(t *testing.T) {
+				// Zero misattribution alone also holds when nothing was evicted, so require
+				// the guard to have fired: the schedule hook logs origin=3 when it
+				// re-registers a task whose slot count survived the eviction of its entry.
+				// Checked here, after the warm-up woke the mailbox and before the second
+				// fill: the mailbox was the oldest unreferenced entry when the first fill
+				// overflowed the map, while its re-registered entry sits in the registering
+				// CPU's local LRU list until that CPU allocates 128 more nodes, so a second
+				// fill evicts it only by chance, and its log lines would push this one past
+				// the slice LogsTail reads.
+				obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+				require.NoError(t, err)
+				require.Contains(t, obiLog, "origin=3",
+					"no task was re-registered at a wake without a parent: the fill did not evict the mailbox")
+				fill(t) // evict the mailbox again before the burst
+			},
 		})
-		// Zero misattribution alone also holds when nothing was evicted, so require the
-		// guard to have fired: the schedule hook logs origin=3 when it re-registers a task
-		// whose slot count survived the eviction of its entry.
-		obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
-		require.NoError(t, err)
-		assert.Contains(t, obiLog, "origin=3",
-			"no task was re-registered at a wake without a parent: the fill did not evict the mailbox")
 	})
 	runWeaverValidation(t)
 }
