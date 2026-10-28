@@ -179,22 +179,34 @@ The design depends on these Tokio behaviors (all verified by disassembly, source
 
 ### Symbol baseline
 
-Measured on the integration test server and backend (axum 0.7.9, hyper 1.10.1, reqwest
-0.13.4, tokio 1.52.3, rust 1.96.0), arm64, legacy mangling (the v0 build has the same
-functions; copy counts vary with monomorphization). Copies = monomorphized symbol copies
-the instrumenter attached, after exact-path matching; "fires" = the probe is observed at
-runtime.
+Measured on the integration servers and their backend (tokio 1.52.3, axum 0.7.9, hyper
+1.10.1, reqwest 0.13.4, actix-web 4.18.1 with actix-rt 2.15.0, rust 1.99.0), arm64, Linux
+6.8. Copies = monomorphized symbol copies the instrumenter attached after exact-path
+matching, as the `rust path resolved` log lines report them; the legacy and v0 mangling
+builds give identical counts. "Fires" = the probe is observed at runtime.
 
-| Probe | Release, server | Debug, server / backend | Fires in release | Fires in debug |
-|---|---|---|---|---|
-| `Harness::poll` entry + exit | 37 copies, all with `RET` | 74 / 20 | yes | yes |
-| `Cell::new` (return) | 31 | 74 / 20 | yes | yes |
-| `raw::dealloc` | 28 | 74 / 20 | yes | yes |
-| `set_current_task_id` | attaches, inlined call sites | 1 / 1 | never | yes |
-| `Id::next` (return) | no usable copy | 1 / 1 | never | yes |
+| Probe | Release: axum server / backend | Release: actix server / backend | Debug: axum server / backend | Debug: actix server / backend | Fires in release | Fires in debug |
+|---|---|---|---|---|---|---|
+| `Harness::poll` entry + exit | 37 / 10, all with `RET` | 42 / 10 | 74 / 20 | 88 / 20 | yes | yes |
+| `Cell::new` (return) | 30 / 8 | 25 / 8 | 74 / 20 | 88 / 20 | yes | yes |
+| `OwnedTasks::bind_inner` | 2 / 1 | 4 / 1 | 2 / 2 | 4 / 2 | yes | yes |
+| `Spawner::spawn_task` | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 | yes | yes |
+| `Shared::schedule` | absent / absent | 1 / absent | absent / absent | 1 / absent | yes, actix | yes, actix |
+| `raw::dealloc` | 28 / 10 | 34 / 10 | 74 / 20 | 88 / 20 | yes | yes |
+| `set_current_task_id` | 1 / 1, call sites inlined | 1 / 1 | 1 / 1 | 1 / 1 | never | yes |
+| `Id::next` (return) | no usable copy | no usable copy | 1 / 1 | 1 / 1 | never | yes |
 
 In debug every generic task function has one copy per `<T,S>` pair, hence the equal counts;
 release inlines part of the poll and creation paths, hence the uneven ones.
+`Shared::schedule` exists only in a binary with a `LocalSet` (the actix server),
+`Spawner::spawn_task` only in one that links the blocking pool.
+
+Program sizes at this baseline, identical on arm64 and x86 (instructions; the branch offset
+limit is 32,767 per program): `obi_uprobe_tokio_poll` 619, `obi_uretprobe_tokio_poll` 442,
+`obi_uretprobe_tokio_cell_new` 399, `obi_uprobe_tokio_bind` 399, `obi_uprobe_tokio_schedule`
+426, `obi_uprobe_tokio_dealloc` 339, `obi_uprobe_tokio_set_task_id` 239,
+`obi_uretprobe_tokio_id_next` 374, and `obi_protocol_tcp`, which inlines the parent lookup,
+19,563.
 
 The x86 matrix has not been measured yet; re-check this table on every toolchain bump
 (see the inlining limitation below).
@@ -413,10 +425,11 @@ path.
   evicted live task orphans its egresses, never misattributes: an evicted `LocalSet` task
   re-registers at its next wake with no parent, see
   [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake).
-  With the 2 MiB slot array the five maps hold about 10 MiB of keys and values (3.7 MiB
-  `tokio_task_state`, 3.0 MiB `tokio_task_id_state`, 1.4 MiB `tokio_thread_state`, 0.1 MiB
-  `tokio_process`), more with the kernel's per-element headers and buckets, preallocated
-  when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
+  With the 2 MiB slot array the five maps hold about 11.5 MiB of keys and values (4.4 MiB
+  `tokio_task_state` at 152 B per entry, 3.7 MiB `tokio_task_id_state` at 128 B, 1.4 MiB
+  `tokio_thread_state`, 0.1 MiB `tokio_process`), for which the kernel charges 19.3 MiB of
+  memlock with its per-element headers and buckets (`bpftool map show`, Linux 6.8),
+  preallocated when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
   false` skips the probes and leaves the maps allocated.
 
 - **Validated on arm64 only** until the x86 integration matrix runs.
