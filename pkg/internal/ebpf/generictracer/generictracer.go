@@ -210,6 +210,8 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 // The slot counts are hashed, not keyed, and stay (see tokio_task_slots.h).
 // With the BPF pid filter off the maps are keyed by the host pid and this purge misses:
 // those entries live until LRU eviction.
+// A purge walks the three maps in full, up to 90,000 entries per Tokio process exit:
+// unnoticeable at normal churn, visible on a crash-looping Rust pod.
 func (p *Tracer) purgeTokioState(tgid uint32) {
 	if p.bpfObjects.TokioProcess == nil {
 		return
