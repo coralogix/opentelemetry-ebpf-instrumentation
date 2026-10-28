@@ -131,7 +131,7 @@ func rustDemangleV0(name string) string {
 
 	p := &v0Parser{sym: s, cache: make(map[int]string)}
 	result := p.path(0)
-	if result == "" {
+	if result == "" || p.overflow {
 		return ""
 	}
 	// Normalise impl syntax: "<Type>::method" -> "Type::method"
@@ -145,12 +145,19 @@ func rustDemangleV0(name string) string {
 	return result
 }
 
+// maxRustV0PathLen bounds one demangled path element. A back-reference pastes the
+// element it points at, so a symbol whose elements each reference the next one twice
+// doubles the text per element: a few hundred bytes of symbol would demangle to
+// gigabytes. No real element comes near this once generic arguments are dropped.
+const maxRustV0PathLen = 4096
+
 // v0Parser is a stateful parser for the Rust v0 symbol mangling grammar.
 // See RFC 2603 (https://rust-lang.github.io/rfcs/2603-rust-symbol-name-mangling-v0.html).
 type v0Parser struct {
-	sym   string
-	pos   int
-	cache map[int]string // byte-offset of element start -> demangled string
+	sym      string
+	pos      int
+	cache    map[int]string // byte-offset of element start -> demangled string
+	overflow bool           // an element exceeded maxRustV0PathLen; the symbol is rejected
 }
 
 // path parses one path element at the current position.
@@ -229,10 +236,12 @@ func (p *v0Parser) path(depth int) string {
 			p.pos = savedPos
 			p.cache[ref] = result
 		}
-		p.cache[startPos] = result
-		return result
 	}
 
+	if len(result) > maxRustV0PathLen {
+		p.overflow = true
+		result = ""
+	}
 	p.cache[startPos] = result
 	return result
 }

@@ -590,3 +590,28 @@ func TestIsRustClosureSymbol(t *testing.T) {
 		}
 	}
 }
+
+// v0BackrefChain builds a v0 symbol of n trait-impl elements that each reference the
+// next one twice, ending in a plain `<foo as bar>`; the demangled text doubles per
+// element. References are fixed-width (two base62 digits) so every element is 9 bytes.
+func v0BackrefChain(n int) string {
+	const digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const elemLen = 9
+
+	var b strings.Builder
+	b.WriteString("_R")
+	for i := range n {
+		next := (i+1)*elemLen - 1 // base62 encodes value+1
+		ref := "B" + string(digits[next/62]) + string(digits[next%62]) + "_"
+		b.WriteString("X" + ref + ref)
+	}
+	b.WriteString("XC3fooC3bar")
+	return b.String()
+}
+
+func TestRustDemangleV0_BackrefChainIsBounded(t *testing.T) {
+	assert.Equal(t, "foo as bar", rustDemangleV0(v0BackrefChain(0)))
+	assert.NotEmpty(t, rustDemangleV0(v0BackrefChain(4)))
+	// 40 elements would demangle to terabytes; the parser must reject the symbol.
+	assert.Empty(t, rustDemangleV0(v0BackrefChain(40)))
+}
