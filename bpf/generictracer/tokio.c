@@ -187,9 +187,14 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     }
 
     // Marks the process as Tokio: find_parent_trace then resolves only through the task
-    // walks, never through the thread-keyed resolvers.
-    const u8 is_tokio = 1;
-    bpf_map_update_elem(&tokio_process, &tgid, &is_tokio, BPF_ANY);
+    // walks, never through the thread-keyed resolvers. Looked up first: an update of a
+    // present LRU key pops a fresh node and recycles the old one on every poll, and the
+    // purge deletes the key at process exit, after the last poll. Two threads racing the
+    // first mark both write the same byte.
+    if (!bpf_map_lookup_elem(&tokio_process, &tgid)) {
+        const u8 is_tokio = 1;
+        bpf_map_update_elem(&tokio_process, &tgid, &is_tokio, BPF_ANY);
+    }
 
     // No connection is derived from the polling thread: on a work-stealing runtime the task
     // polled here may belong to another in-flight request. Connections come only from the
