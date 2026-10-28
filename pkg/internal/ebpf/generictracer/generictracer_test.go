@@ -609,6 +609,7 @@ func TestRustUProbesAreGated(t *testing.T) {
 		"tokio::runtime::task::list::OwnedTasks::bind_inner",
 		"tokio::runtime::blocking::pool::Spawner::spawn_task",
 		"tokio::task::local::Shared::schedule",
+		"tokio::runtime::task::harness::Harness::complete",
 		"tokio::runtime::task::raw::dealloc",
 		"tokio::runtime::context::set_current_task_id",
 		"tokio::runtime::task::id::Id::next",

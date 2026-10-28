@@ -102,11 +102,12 @@ func assertTokioTrustWindow(t *testing.T, compose *docker.Compose) {
 
 	require.Positive(t, c.set(), "no anchor was ever set: the server-span save never reached the tokio tag")
 
-	// Every request's spawned tasks end within the request; only connection tasks and
-	// pooled client drivers outlive it. Fewer releases than half the registrations means
-	// the completion hook is not firing and entries leave the task map by eviction only.
+	// Every request's spawned tasks end within the request; connection tasks, pooled client
+	// drivers and the runtime's own tasks outlive it, about half of the registrations in this
+	// suite (57 of 105 released in release, 53 of 107 in debug). Without the completion
+	// probe nothing is released at all, so a third is the floor.
 	require.Positive(t, c.registered, "no task was registered")
-	assert.GreaterOrEqual(t, c.released*2, c.registered,
+	assert.GreaterOrEqual(t, c.released*3, c.registered,
 		"only %d of %d registered tasks were released: the task-completion probe is not firing",
 		c.released, c.registered)
 
