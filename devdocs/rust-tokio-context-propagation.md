@@ -413,6 +413,11 @@ path.
   evicted live task orphans its egresses, never misattributes: an evicted `LocalSet` task
   re-registers at its next wake with no parent, see
   [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake).
+  With the 2 MiB slot array the five maps hold about 10 MiB of keys and values (3.7 MiB
+  `tokio_task_state`, 3.0 MiB `tokio_task_id_state`, 1.4 MiB `tokio_thread_state`, 0.1 MiB
+  `tokio_process`), more with the kernel's per-element headers and buckets, preallocated
+  when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
+  false` skips the probes and leaves the maps allocated.
 
 - **Validated on arm64 only** until the x86 integration matrix runs.
 
