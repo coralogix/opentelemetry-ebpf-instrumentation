@@ -622,3 +622,11 @@ func TestRustDemangle_LengthOverflow(t *testing.T) {
 	assert.Empty(t, rustDemangle("_ZN9227000000000000000"))
 	assert.Empty(t, rustDemangleV0("_RNvC9227000000000000000"))
 }
+
+// A nil ELF file makes the symbol table read panic; the scan must report it as an
+// error instead of taking the process down.
+func TestFindRustSymbols_RecoversFromPanic(t *testing.T) {
+	out, err := FindRustSymbols(nil, []string{"tokio::runtime::task::raw::poll"})
+	require.ErrorContains(t, err, "panicked")
+	assert.Nil(t, out)
+}

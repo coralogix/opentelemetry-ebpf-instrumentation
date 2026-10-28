@@ -766,8 +766,17 @@ func isRustClosureSymbol(name string) bool {
 // `Cell::new::new_header` or `Harness::poll_inner` are different paths and never match,
 // even though they start with the key (they are inlined in release and out-of-line in
 // debug builds, where a prefix match attached the parent's probes to them).
-func FindRustSymbols(f *elf.File, paths []string) (map[string][]Sym, error) {
-	out := map[string][]Sym{}
+func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err error) {
+	// The demanglers run on every symbol of every Rust executable on the host; a panic
+	// in them must fail this scan, not the process, as in findLanguageFromElf.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("panic while scanning Rust symbols", "panic", r)
+			out, err = nil, fmt.Errorf("rust symbol scan panicked: %v", r)
+		}
+	}()
+
+	out = map[string][]Sym{}
 	// Shared across both symbol tables: a function can appear in .symtab and .dynsym,
 	// and attaching a uprobe twice at one file offset would double-fire.
 	seen := map[uint64]struct{}{}
