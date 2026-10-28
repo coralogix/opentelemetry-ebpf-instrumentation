@@ -61,6 +61,88 @@ static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u32 tgid, u64 ta
     obi_ctx__del(pid_tgid);
 }
 
+// Which probe registered a task, and whether it saw a spawn at all.
+enum tokio_task_origin {
+    k_tokio_origin_cell_new = 0,
+    k_tokio_origin_bind = 1,
+    k_tokio_origin_schedule = 2,
+    // Shared::schedule for a task whose slot is live: a wake, or a spawn sharing the slot
+    // with a live task; no spawner is known, so no parent.
+    k_tokio_origin_schedule_known = 3,
+    // First poll of a task with no entry: older than OBI's attach, or evicted. A root.
+    k_tokio_origin_poll = 4,
+};
+
+// Registers new_task_ptr as a child of the task the spawning thread is polling now. Every
+// spawn-time caller runs on the spawning thread inside the parent's poll, so current_task
+// is the parent; the wake re-registration of an evicted task and the first-poll
+// registration of an unknown one record no parent, since the current task is the waker,
+// or the task itself. Lineage only: the child takes the parent's incarnation stamp and
+// anchor epoch, never its connection, so an egress must climb to the anchor (an inherited
+// copy on a long-lived descendant would outlive its request). Overwrites: a previous
+// occupant of the Header address may still have an entry (its dealloc was not observed),
+// and only its paired task id is carried over, the version is a fresh stamp. A second
+// registration of the same spawn (Cell::new, then bind_inner) rewrites the same lineage
+// before the task can have children or an anchor. Every registration that finds no counted
+// entry takes a slot count, a wake re-registration included, since a live slot may be a
+// neighbour's and the task must not depend on it; the entry remembers that it holds one,
+// so only the dealloc of the task holding the entry releases it.
+static __always_inline void
+tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
+    tokio_thread_state_t *thread_state =
+        (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
+    const u8 spawner_known =
+        origin != k_tokio_origin_schedule_known && origin != k_tokio_origin_poll;
+    const u64 parent_task =
+        (spawner_known && thread_state) ? thread_state->current_task : k_tokio_task_none;
+
+    const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
+    const tokio_task_state_t *existing =
+        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
+    // A second registration of the same spawn, or a new occupant over a stale entry, keeps
+    // a count the entry already holds; an uncounted stale entry (one the anchor created on
+    // the spot) does not keep a task from taking its own. An evicted task counted again
+    // leaks its first count at its slot, which only withholds parents there.
+    const u8 inherited = existing && existing->counted;
+    const u8 counted = inherited || tokio_slot_inc(tgid, new_task_ptr);
+
+    // Id::next runs right before the task's constructor on the spawning thread, so the
+    // pending id belongs to this task. Consumed once.
+    u64 paired_task_id = 0;
+    if (thread_state && thread_state->pending_new_id) {
+        paired_task_id = thread_state->pending_new_id;
+        thread_state->pending_new_id = 0;
+    } else if (existing) {
+        // Keeps the id twin deletable at dealloc when a Header is reused without an
+        // observed dealloc.
+        paired_task_id = existing->task_id;
+    }
+
+    bpf_dbg_printk(
+        "tokio task_new: new=%llx parent=%llx origin=%d", new_task_ptr, parent_task, (u32)origin);
+
+    tokio_task_state_t new_state = {
+        .parent = parent_task,
+        .version = tokio_task_incarnation(),
+        .task_id = paired_task_id,
+        .conn_valid = 0,
+        .counted = counted,
+    };
+
+    // Pointer-reuse guard (parent_version) and re-anchor guard (parent_epoch) for the walk.
+    if (parent_task != k_tokio_task_none) {
+        const tokio_task_key_t parent_key = tokio_task_key(tgid, parent_task);
+        const tokio_task_state_t *parent_state =
+            (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &parent_key);
+        if (parent_state) {
+            new_state.parent_version = parent_state->version;
+            new_state.parent_epoch = parent_state->anchor_epoch;
+        }
+    }
+
+    bpf_map_update_elem(&tokio_task_state, &new_task_key, &new_state, BPF_ANY);
+}
+
 // Poll entry on Harness::<T,S>::poll, attached to every monomorphized copy (see
 // generictracer.go for why this symbol): PARM1 is the task Header. Reached by every poll
 // of every scheduler, since raw::poll is a tail-call thunk into it, and it keeps a RET in
@@ -151,88 +233,6 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     thread_state->pending_new_id = 0;
 
     return 0;
-}
-
-// Which probe registered a task, and whether it saw a spawn at all.
-enum tokio_task_origin {
-    k_tokio_origin_cell_new = 0,
-    k_tokio_origin_bind = 1,
-    k_tokio_origin_schedule = 2,
-    // Shared::schedule for a task whose slot is live: a wake, or a spawn sharing the slot
-    // with a live task; no spawner is known, so no parent.
-    k_tokio_origin_schedule_known = 3,
-    // First poll of a task with no entry: older than OBI's attach, or evicted. A root.
-    k_tokio_origin_poll = 4,
-};
-
-// Registers new_task_ptr as a child of the task the spawning thread is polling now. Every
-// spawn-time caller runs on the spawning thread inside the parent's poll, so current_task
-// is the parent; the wake re-registration of an evicted task and the first-poll
-// registration of an unknown one record no parent, since the current task is the waker,
-// or the task itself. Lineage only: the child takes the parent's incarnation stamp and
-// anchor epoch, never its connection, so an egress must climb to the anchor (an inherited
-// copy on a long-lived descendant would outlive its request). Overwrites: a previous
-// occupant of the Header address may still have an entry (its dealloc was not observed),
-// and only its paired task id is carried over, the version is a fresh stamp. A second
-// registration of the same spawn (Cell::new, then bind_inner) rewrites the same lineage
-// before the task can have children or an anchor. Every registration that finds no counted
-// entry takes a slot count, a wake re-registration included, since a live slot may be a
-// neighbour's and the task must not depend on it; the entry remembers that it holds one,
-// so only the dealloc of the task holding the entry releases it.
-static __always_inline void
-tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
-    tokio_thread_state_t *thread_state =
-        (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
-    const u8 spawner_known =
-        origin != k_tokio_origin_schedule_known && origin != k_tokio_origin_poll;
-    const u64 parent_task =
-        (spawner_known && thread_state) ? thread_state->current_task : k_tokio_task_none;
-
-    const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
-    const tokio_task_state_t *existing =
-        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &new_task_key);
-    // A second registration of the same spawn, or a new occupant over a stale entry, keeps
-    // a count the entry already holds; an uncounted stale entry (one the anchor created on
-    // the spot) does not keep a task from taking its own. An evicted task counted again
-    // leaks its first count at its slot, which only withholds parents there.
-    const u8 inherited = existing && existing->counted;
-    const u8 counted = inherited || tokio_slot_inc(tgid, new_task_ptr);
-
-    // Id::next runs right before the task's constructor on the spawning thread, so the
-    // pending id belongs to this task. Consumed once.
-    u64 paired_task_id = 0;
-    if (thread_state && thread_state->pending_new_id) {
-        paired_task_id = thread_state->pending_new_id;
-        thread_state->pending_new_id = 0;
-    } else if (existing) {
-        // Keeps the id twin deletable at dealloc when a Header is reused without an
-        // observed dealloc.
-        paired_task_id = existing->task_id;
-    }
-
-    bpf_dbg_printk(
-        "tokio task_new: new=%llx parent=%llx origin=%d", new_task_ptr, parent_task, (u32)origin);
-
-    tokio_task_state_t new_state = {
-        .parent = parent_task,
-        .version = tokio_task_incarnation(),
-        .task_id = paired_task_id,
-        .conn_valid = 0,
-        .counted = counted,
-    };
-
-    // Pointer-reuse guard (parent_version) and re-anchor guard (parent_epoch) for the walk.
-    if (parent_task != k_tokio_task_none) {
-        const tokio_task_key_t parent_key = tokio_task_key(tgid, parent_task);
-        const tokio_task_state_t *parent_state =
-            (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &parent_key);
-        if (parent_state) {
-            new_state.parent_version = parent_state->version;
-            new_state.parent_epoch = parent_state->anchor_epoch;
-        }
-    }
-
-    bpf_map_update_elem(&tokio_task_state, &new_task_key, &new_state, BPF_ANY);
 }
 
 // Task creation: uretprobe on Cell::<T,S>::new, the constructor every task-creation path
