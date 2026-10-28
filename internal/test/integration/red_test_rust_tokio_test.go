@@ -482,12 +482,17 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	// trace), or the second subtest's clean chains never fit the window.
 	const classifyLimit = 3000
 	var cleanA, cleanB, contaminated, piled, grouped, other, duplicates int
+	var lastTraces []jaeger.Trace
 	t.Cleanup(func() {
 		t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated(egress)=%d piled(same-side)=%d grouped(inbound)=%d other(incomplete)=%d duplicates(exported twice)=%d",
 			c.serverA, c.serverB, cleanA, cleanB, contaminated, piled, grouped, other, duplicates)
+		if contaminated > 0 {
+			tokioLogContaminated(t, lastTraces, c)
+		}
 	})
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
-		cleanA, cleanB, contaminated, piled, grouped, other, duplicates = tokioClassifyAB(tokioQueryServerTraces(ct, classifyLimit), c)
+		lastTraces = tokioQueryServerTraces(ct, classifyLimit)
+		cleanA, cleanB, contaminated, piled, grouped, other, duplicates = tokioClassifyAB(lastTraces, c)
 		if c.failClosed {
 			// Wait until the burst has exported, so this cannot pass before traffic flows,
 			// then require zero misattribution, cross-side and same-side.
@@ -611,6 +616,37 @@ func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, cont
 		}
 	}
 	return cleanA, cleanB, contaminated, piled, grouped, other, duplicates
+}
+
+// tokioLogContaminated prints the first contaminated traces of a case with every span and
+// its start time (UTC, microseconds), so a wrong egress can be matched with OBI's walk lines
+// at the same instant in the suite log.
+func tokioLogContaminated(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
+	t.Helper()
+	const maxTraces = 5
+	logged := 0
+	for i := range traces {
+		tr, _ := tokioUniqueSpans(traces[i])
+		aServer := len(tokioFindSpans(tr, "server", c.serverA)) > 0
+		bServer := len(tokioFindSpans(tr, "server", c.serverB)) > 0
+		aBackend := len(tokioFindSpans(tr, "backend", c.backendA)) > 0
+		bBackend := len(tokioFindSpans(tr, "backend", c.backendB)) > 0
+		crossSide := (aServer && bBackend) || (bServer && aBackend)
+		if !crossSide {
+			continue
+		}
+		var b strings.Builder
+		for _, s := range tr.Spans {
+			fmt.Fprintf(&b, "\n    %s %s kind=%s path=%s start=%s dur=%dus",
+				tr.Processes[s.ProcessID].ServiceName, s.OperationName, tokioSpanTag(s, "span.kind"),
+				tokioSpanTag(s, "url.path"), time.UnixMicro(s.StartTime).UTC().Format("15:04:05.000000"), s.Duration)
+		}
+		t.Logf("contaminated trace %s:%s", tr.TraceID, b.String())
+		logged++
+		if logged == maxTraces {
+			return
+		}
+	}
 }
 
 // tokioUniqueSpans drops duplicate exports of one kernel record (first kept) and OBI's
