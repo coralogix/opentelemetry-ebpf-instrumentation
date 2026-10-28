@@ -28,7 +28,7 @@
 enum {
     k_tokio_slot_lanes = 8,
     k_tokio_slot_shift = 21,
-    k_tokio_slot_words = (1u << k_tokio_slot_shift) / k_tokio_slot_lanes,
+    k_tokio_slot_words = (1U << k_tokio_slot_shift) / k_tokio_slot_lanes,
     k_tokio_slot_max = 255,
 };
 
