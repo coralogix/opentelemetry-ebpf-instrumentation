@@ -377,8 +377,9 @@ async fn blocking_nested() -> impl IntoResponse {
 // A synchronous HTTP/1 listener on 8095 served by std threads, next to the Tokio runtime:
 // threads that never poll a task. /sync-a and /sync-b call the backend with ureq on the
 // handling thread itself, so the parent is that thread's own server span, which OBI must
-// keep resolving in a process that also runs Tokio. One request per connection, so every
-// request is read on a fresh thread.
+// keep resolving in a process that also runs Tokio. One request per connection, closed by
+// the response's `Connection: close` so the client never reuses it: every request is read
+// on a fresh thread that carries no earlier server span.
 const SYNC_ADDR: &str = "0.0.0.0:8095";
 const BACKEND_M: &str = "http://127.0.0.1:8093/ping-m";
 const BACKEND_N: &str = "http://127.0.0.1:8094/ping-n";
