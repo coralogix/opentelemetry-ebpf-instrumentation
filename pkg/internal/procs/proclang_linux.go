@@ -46,9 +46,10 @@ func rustDemangle(name string) string {
 			// End of the outer nested name — we are done.
 			goto done
 		}
-		// Read a length-prefixed identifier.
+		// Read a length-prefixed identifier. Digits past the symbol's own length cannot
+		// form a valid one and would overflow n.
 		n := 0
-		for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+		for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' && n <= len(rest) {
 			n = n*10 + int(rest[0]-'0')
 			rest = rest[1:]
 		}
@@ -270,8 +271,9 @@ func (p *v0Parser) ident() string {
 		p.pos += n
 		return s
 	}
+	// Digits past the symbol's own length cannot form a valid one and would overflow n.
 	n := 0
-	for p.pos < len(p.sym) && p.sym[p.pos] >= '0' && p.sym[p.pos] <= '9' {
+	for p.pos < len(p.sym) && p.sym[p.pos] >= '0' && p.sym[p.pos] <= '9' && n <= len(p.sym) {
 		n = n*10 + int(p.sym[p.pos]-'0')
 		p.pos++
 	}

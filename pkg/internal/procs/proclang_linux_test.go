@@ -615,3 +615,10 @@ func TestRustDemangleV0_BackrefChainIsBounded(t *testing.T) {
 	// 40 elements would demangle to terabytes; the parser must reject the symbol.
 	assert.Empty(t, rustDemangleV0(v0BackrefChain(40)))
 }
+
+// A decimal length longer than the symbol must stop the scan before it overflows into
+// a negative slice bound.
+func TestRustDemangle_LengthOverflow(t *testing.T) {
+	assert.Empty(t, rustDemangle("_ZN9227000000000000000"))
+	assert.Empty(t, rustDemangleV0("_RNvC9227000000000000000"))
+}
