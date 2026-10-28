@@ -86,7 +86,7 @@ too. Fail fast, never guess, no fallbacks on uncertainty.
    into it could be rewritten under the reader.
 7. **State that could go stale is reset or destroyed, not reused.** `current_id` is zeroed
    at every poll entry and trusted only if the runtime's own TLS setter re-set it within
-   that poll; `raw::dealloc` deletes both identity records at task death; `Cell::new` and
+   that poll; `Harness::complete` deletes both identity records at task end; `Cell::new` and
    the spawn-only hooks re-initialize a reused Header entry; `Shared::schedule` records no
    parent for a task whose slot count says its entry was evicted (the task current at a
    wake is the waker, not the spawner); anchor writes are
@@ -176,6 +176,7 @@ The design depends on these Tokio behaviors (all verified by disassembly, source
 3. Task creation calls `tokio::runtime::task::id::Id::next` (a monotone `u64` counter; **ids are never reused**) immediately before the task's `Cell::new` on the spawning thread. This adjacency is what pairs a task's Id with its Header.
 4. The runtime maintains the TLS current-task id via `tokio::runtime::context::set_current_task_id`, called on poll enter (set) and exit (restore), including around **blocking-pool** task polls, which is why the id walk can correlate `spawn_blocking` in debug.
 5. Tokio is **statically linked** into the application binary, so all probes target the executable itself (`SEC("uprobe/self:...")`).
+6. Every task whose future finishes or is cancelled passes through `tokio::runtime::task::harness::Harness::<T,S>::complete`, inside the poll that finished it and before its memory is freed, whoever drops the last reference afterwards. A completed task frees itself through `Harness::dealloc` inlined into `complete` and `drop_reference`; the vtable thunk `raw::dealloc` runs only when a `Task` or `Notified` handle is the last reference dropped, so it is not a task-end signal (0 of 128,000 tasks in the integration suites reached it). `complete` keeps one out-of-line copy per `<T,S>` pair in release, the same count as `Harness::poll` (37 in the test server, 10 in the backend), as a local symbol with an `.llvm.` suffix that both demanglers ignore.
 
 ### Symbol baseline
 
@@ -192,7 +193,8 @@ builds give identical counts. "Fires" = the probe is observed at runtime.
 | `OwnedTasks::bind_inner` | 2 / 1 | 4 / 1 | 2 / 2 | 4 / 2 | yes | yes |
 | `Spawner::spawn_task` | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 | yes | yes |
 | `Shared::schedule` | absent / absent | 1 / absent | absent / absent | 1 / absent | yes, actix | yes, actix |
-| `raw::dealloc` | 28 / 10 | 34 / 10 | 74 / 20 | 88 / 20 | yes | yes |
+| `Harness::complete` (added after this measurement) | 37 / 10 by `nm` | not measured yet | not measured yet | not measured yet | yes | yes |
+| `raw::dealloc` | 28 / 10 | 34 / 10 | 74 / 20 | 88 / 20 | only for a handle-drop last reference | same |
 | `set_current_task_id` | 1 / 1, call sites inlined | 1 / 1 | 1 / 1 | 1 / 1 | never | yes |
 | `Id::next` (return) | no usable copy | no usable copy | 1 / 1 | 1 / 1 | never | yes |
 
@@ -249,9 +251,13 @@ Resolves no usable copy in release (inlined), so the id map stays empty there by
 
 `tokio::runtime::context::set_current_task_id(Option<Id>)`: entry uprobe; PARM1 is the id being made current (niche-optimized `Option<NonZeroU64>`: `None == 0`). Updates `tokio_thread_state.current_id`, only on an entry created by poll entry (the trust guard). Fires only in debug builds (call sites inlined in release). A belt-and-braces `id > u32::MAX` skip guards against any unexpected shim passing a pointer; skipping a genuine huge id could only orphan.
 
+### `Harness::complete` (task completion) — `tokio_complete`
+
+Entry uprobe on `Harness::<T,S>::complete` (PARM1 = `Header*`: the harness is one pointer passed by value), reached by every task whose future finished or was cancelled, inside the poll that finished it. Deletes the task's Header-keyed entry so a reused `Header` allocation starts clean, **deletes the id-keyed twin entry** (via the paired `task_id`), and releases the task's slot count if the entry says it took one. The task is never polled again; a child still linking to it fails closed on the walk.
+
 ### `raw::dealloc` (task destruction) — `tokio_dealloc`
 
-Entry uprobe on the vtable dealloc slot (PARM1 = `Header*`), fires reliably in release. Deletes the task's Header-keyed entry so a reused `Header` allocation starts clean, **and deletes the id-keyed twin entry** (via the paired `task_id`). The id deletion is what fail-closes the pooled-driver-reuse hazard: a driver task's id lineage points at the request that first spawned it; once that request's tasks are deallocated, a later request reusing the pooled driver walks into a miss (orphan) instead of resolving the first request's trace.
+Entry uprobe on the vtable dealloc slot (PARM1 = `Header*`), the same release as `Harness::complete`. A completed task frees itself through `Harness::dealloc` inlined into `complete` and `drop_reference`, so this thunk runs only when a `Task` or `Notified` handle is the last reference dropped (a `Notified` discarded at shutdown, a blocking task whose `JoinHandle` went first): the second chance, not the common path. The id deletion is what fail-closes the pooled-driver-reuse hazard: a driver task's id lineage points at the request that first spawned it; once that request's tasks are deallocated, a later request reusing the pooled driver walks into a miss (orphan) instead of resolving the first request's trace.
 
 ## Parent Lookup
 
@@ -292,7 +298,7 @@ Poll entry resets `current_id` to 0; only the TLS setter firing **within the cur
 
 ### Task pointer reuse is stamped (Header path only)
 
-Tokio reuses `Header*` addresses: a freed task cell is handed straight back for the next task of the same size in the same process. `raw::dealloc` deletes the dead task's entry, which protects the newcomer from the old anchor, but not the links that the dead task's surviving children still hold to the address (a fire-and-forget child whose connection task closed). Each Header entry therefore carries a `version` that is an **incarnation stamp**: the monotonic creation time (`bpf_ktime_get_ns`). A child records `parent_version` at spawn and the walk follows the link only when the parent's current stamp still matches; two occupants of one address cannot share a stamp (the second is created microseconds after the first was freed, against a clock tick of tens of nanoseconds), and an unverifiable `parent_version == 0` link is never trusted. A counter restarting at 1 for each occupant (the previous scheme) matched the old child's stamp whenever both occupants were first-time anchors. The id path needs none of this: ids are never reused, and the walk's monotonicity check (`parent_id < id`) rejects corrupted links.
+Tokio reuses `Header*` addresses: a freed task cell is handed straight back for the next task of the same size in the same process. `Harness::complete` deletes the dead task's entry, which protects the newcomer from the old anchor, but not the links that the dead task's surviving children still hold to the address (a fire-and-forget child whose connection task closed). Each Header entry therefore carries a `version` that is an **incarnation stamp**: the monotonic creation time (`bpf_ktime_get_ns`). A child records `parent_version` at spawn and the walk follows the link only when the parent's current stamp still matches; two occupants of one address cannot share a stamp (the second is created microseconds after the first was freed, against a clock tick of tens of nanoseconds), and an unverifiable `parent_version == 0` link is never trusted. A counter restarting at 1 for each occupant (the previous scheme) matched the old child's stamp whenever both occupants were first-time anchors. The id path needs none of this: ids are never reused, and the walk's monotonicity check (`parent_id < id`) rejects corrupted links.
 
 ### Evicted tasks are not adopted at their wake
 
@@ -306,12 +312,12 @@ live known tasks per slot, hashed from `(tgid, Header)`; being an array, it surv
 eviction of the task maps. Every registration that finds no counted entry takes a count:
 `Cell::new`, the spawn hooks, either outcome of `Shared::schedule`, and the first poll of
 a task with no entry (older than OBI's attach, or evicted), which also gives it a root
-entry. The entry records that the task took a count (`counted`), and `raw::dealloc`
-releases one only for such a task: an entry the anchor created on the spot may share its
+entry. The entry records that the task took a count (`counted`), and the release at
+`Harness::complete` (or `raw::dealloc`) frees one only for such a task: an entry the anchor created on the spot may share its
 slot with the task the count belongs to, and a task without an entry may have lost its
 count to eviction, so neither decrements. The schedule hook consults the slot when the
 entry is missing: a live slot is a wake and the task is re-registered with no parent (its
-egresses orphan), an empty one is a spawn. A count, not a bit, so the dealloc of a task
+egresses orphan), an empty one is a spawn. A count, not a bit, so the release of a task
 sharing a slot with a sleeping one cannot erase the sleeper's. A spawn sharing its slot
 with a live task (one in 2 million per live task, about 1.4% of spawns at 30,000 live
 tasks) loses its parent and nothing else, since it still takes its own count; a task

@@ -741,10 +741,22 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				MayBeInlined:  true,
 				Start:         p.bpfObjects.ObiUprobeTokioSchedule,
 			}},
+			// Task completion: Harness::<T,S>::complete runs for every task whose future
+			// finished or was cancelled, inside the poll that finished it, with the Header as
+			// PARM1 (the harness is one pointer by value). One copy per future type, kept out
+			// of line in release (a local symbol with an .llvm. suffix, which the demanglers
+			// ignore). Deletes the task's entries and releases its slot count; links surviving
+			// children still hold to it are refused by the incarnation stamp, not by this
+			// delete.
+			"tokio::runtime::task::harness::Harness::complete": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioComplete,
+			}},
 			// Task destruction: the vtable dealloc slot, an entry probe on an address-taken
-			// function, so it fires in release. Deletes the task's entries so a reused Header
-			// address starts clean; links surviving children still hold to it are refused by
-			// the incarnation stamp, not by this delete.
+			// function. A completed task frees itself through Harness::dealloc inlined into
+			// complete, so this fires only when a Task or Notified handle is the last
+			// reference dropped: the second chance, not the common path.
 			"tokio::runtime::task::raw::dealloc": {{
 				Required:      false,
 				DemangledPath: true,

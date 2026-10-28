@@ -41,9 +41,10 @@ const tokioOBILogLines = 200_000
 // tokioAnchorCounts are the kernel debug lines OBI emits when a task is anchored to an
 // inbound request (SET) and released at its response (CLEAR), on the Header path
 // ("task") and on the id path ("id"), plus the Header-path SETs seen after the id setter
-// probe was attached.
+// probe was attached, and the task registrations and releases (task end) seen.
 type tokioAnchorCounts struct {
 	taskSet, taskClear, idSet, idClear, taskSetAfterAttach int
+	registered, released                                   int
 }
 
 func (c tokioAnchorCounts) set() int   { return c.taskSet + c.idSet }
@@ -77,6 +78,10 @@ func tokioParseAnchorCounts(obiLog string) tokioAnchorCounts {
 			c.idSet++
 		case strings.Contains(line, "tokio handler id conn CLEAR"):
 			c.idClear++
+		case strings.Contains(line, "tokio task_new:"):
+			c.registered++
+		case strings.Contains(line, "tokio task release:"):
+			c.released++
 		}
 	}
 	return c
@@ -92,10 +97,18 @@ func assertTokioTrustWindow(t *testing.T, compose *docker.Compose) {
 	require.NoError(t, err)
 
 	c := tokioParseAnchorCounts(obiLog)
-	t.Logf("anchors: task SET=%d CLEAR=%d, id SET=%d CLEAR=%d, task SET after setter attach=%d",
-		c.taskSet, c.taskClear, c.idSet, c.idClear, c.taskSetAfterAttach)
+	t.Logf("anchors: task SET=%d CLEAR=%d, id SET=%d CLEAR=%d, task SET after setter attach=%d; tasks registered=%d released=%d",
+		c.taskSet, c.taskClear, c.idSet, c.idClear, c.taskSetAfterAttach, c.registered, c.released)
 
 	require.Positive(t, c.set(), "no anchor was ever set: the server-span save never reached the tokio tag")
+
+	// Every request's spawned tasks end within the request; only connection tasks and
+	// pooled client drivers outlive it. Fewer releases than half the registrations means
+	// the completion hook is not firing and entries leave the task map by eviction only.
+	require.Positive(t, c.registered, "no task was registered")
+	assert.GreaterOrEqual(t, c.released*2, c.registered,
+		"only %d of %d registered tasks were released: the task-completion probe is not firing",
+		c.released, c.registered)
 
 	const inFlightSlack = 2
 	unclosed := c.set() - c.clear()

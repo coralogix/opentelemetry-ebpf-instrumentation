@@ -321,10 +321,59 @@ int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Task destruction: entry uprobe on the vtable dealloc slot (PARM1 is the Header), which
-// fires reliably in release. Deletes both identity entries, so a reused Header address
-// starts clean and a pooled driver's stale id lineage resolves nothing instead of the
-// request that first spawned it.
+// Task end: deletes both identity entries, so a reused Header address starts clean and a
+// pooled driver's stale id lineage resolves nothing instead of the request that first
+// spawned it, and releases the task's slot count.
+static __always_inline void tokio_release_task(u64 id, u32 tgid, u64 task_ptr) {
+    const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
+    const tokio_task_state_t *dying =
+        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &task_key);
+
+    bpf_dbg_printk("tokio task release: tid=%d task=%llx", (u32)id, task_ptr);
+
+    if (dying && dying->task_id) {
+        const tokio_task_key_t id_key = tokio_task_key(tgid, dying->task_id);
+        bpf_map_delete_elem(&tokio_task_id_state, &id_key);
+    }
+    // Only an entry holding a count releases one: an entry the anchor created on the spot
+    // may share its slot with the task the count belongs to, and a task without an entry
+    // may have lost its count to eviction, so neither decrements. A count that is never
+    // released only withholds parents at its slot.
+    if (dying && dying->counted) {
+        tokio_slot_dec(tgid, task_ptr);
+    }
+    bpf_map_delete_elem(&tokio_task_state, &task_key);
+}
+
+// Task completion: entry uprobe on Harness::complete (PARM1 is the Header: the harness is
+// one pointer passed by value), which runs for every task whose future finished or was
+// cancelled, whoever drops the last reference. A finished task frees itself through
+// Harness::dealloc inlined into complete and drop_reference, so the vtable thunk below
+// is reached only when a Task or Notified handle is the last reference dropped (0 of
+// 128,000 tasks in the integration suites). The entry can go now: the task is never
+// polled again, and a child still linking to it fails closed on the walk.
+SEC("uprobe/self:tokio_complete")
+int GUARDED_PROG(obi_uprobe_tokio_complete, struct pt_regs *, ctx) {
+    const u64 id = bpf_get_current_pid_tgid();
+
+    const u32 tgid = valid_pid(id);
+    if (!tgid) {
+        return 0;
+    }
+
+    const u64 task_ptr = (u64)PT_REGS_PARM1(ctx);
+    if (task_ptr == k_tokio_task_none) {
+        return 0;
+    }
+
+    tokio_release_task(id, tgid, task_ptr);
+
+    return 0;
+}
+
+// Task destruction: entry uprobe on the vtable dealloc slot (PARM1 is the Header). The
+// second chance for a task that never completed (a Notified dropped at shutdown, a
+// blocking task whose JoinHandle went first).
 SEC("uprobe/self:tokio_dealloc")
 int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -339,24 +388,7 @@ int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
         return 0;
     }
 
-    const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
-    const tokio_task_state_t *dying =
-        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &task_key);
-
-    bpf_dbg_printk("tokio task dealloc: tid=%d task=%llx", (u32)id, task_ptr);
-
-    if (dying && dying->task_id) {
-        const tokio_task_key_t id_key = tokio_task_key(tgid, dying->task_id);
-        bpf_map_delete_elem(&tokio_task_id_state, &id_key);
-    }
-    // Only an entry holding a count releases one: an entry the anchor created on the spot
-    // may share its slot with the task the count belongs to, and a task without an entry
-    // may have lost its count to eviction, so neither decrements. A count that is never
-    // released only withholds parents at its slot.
-    if (dying && dying->counted) {
-        tokio_slot_dec(tgid, task_ptr);
-    }
-    bpf_map_delete_elem(&tokio_task_state, &task_key);
+    tokio_release_task(id, tgid, task_ptr);
 
     return 0;
 }
