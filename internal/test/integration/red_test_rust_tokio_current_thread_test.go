@@ -52,11 +52,14 @@ func TestRustTokioCurrentThread(t *testing.T) {
 		})
 	})
 	t.Run("spawn_local", func(t *testing.T) {
-		// LocalSet tasks: the egress is a raw write on the child task itself.
+		// LocalSet tasks: the egress is a raw write on the child task itself. The clean
+		// count varies most here (22 to 152 per side across runs at the default length):
+		// a longer burst keeps the floor a defect signal.
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/local-a", serverB: "/local-b",
 			backendA: "/ping-e", backendB: "/ping-f",
-			minClean: 20,
+			minClean:    20,
+			perEndpoint: 2 * tokioBurstPerEndpoint,
 		})
 	})
 	t.Run("nested", func(t *testing.T) {

@@ -345,7 +345,18 @@ type tokioABCase struct {
 	// beforeBurst runs between the warm-up and the concurrent burst, for a case that must
 	// disturb the server first (the evicted-mailbox case refills the task map).
 	beforeBurst func(t *testing.T)
+	// perEndpoint is the burst length per side; 0 means tokioBurstPerEndpoint. A case whose
+	// clean count sits near its floor at the default length drives more, so the floor is a
+	// defect signal and not a timing one.
+	perEndpoint int
 }
+
+// tokioBurstPerEndpoint is the default burst length per side, with tokioBurstConcurrency
+// requests in flight at once.
+const (
+	tokioBurstPerEndpoint = 150
+	tokioBurstConcurrency = 20
+)
 
 // TestRustTokioProbeDiscrimination drives concurrent A/B load across distinct backends and
 // counts cleanly attributed chains per side. It asserts both halves of the contract: a
@@ -459,7 +470,11 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	}
 
 	// Phase 2: sustained concurrent A/B burst.
-	driveTokioABConcurrent(t, serverURL, c.serverA, c.serverB, 150, 20)
+	perEndpoint := c.perEndpoint
+	if perEndpoint == 0 {
+		perEndpoint = tokioBurstPerEndpoint
+	}
+	driveTokioABConcurrent(t, serverURL, c.serverA, c.serverB, perEndpoint, tokioBurstConcurrency)
 
 	// Phase 3: classify inside the poll so the gate waits for enough clean chains to export
 	// instead of judging one mid-export snapshot. The query limit must exceed the total
