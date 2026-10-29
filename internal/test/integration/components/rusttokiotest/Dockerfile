@@ -50,8 +50,11 @@ WORKDIR /app
 COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/${SERVER_BIN} ./server
 COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/backend ./backend
 
-# Run the backend in the background and the server in the foreground (one container,
-# shared localhost). The server stays in the foreground so the container's lifecycle
-# tracks it. START_DELAY (seconds, default 0) holds both back so a suite can have OBI
+# Run one backend process per port in the background and the server in the foreground
+# (one container, shared localhost). Two backend processes, not one with two listeners:
+# OBI keys a server's inbound trace by the client's address and port plus the server's
+# pid, and the A/B bursts open connections from one ephemeral port to both backend ports
+# a few times per run. The server stays in the foreground so the container's lifecycle
+# tracks it. START_DELAY (seconds, default 0) holds all three back so a suite can have OBI
 # attached before the app exists (docker-compose-rust-tokio-obi-first.yml).
-CMD ["sh", "-c", "sleep ${START_DELAY:-0}; ./backend & exec ./server"]
+CMD ["sh", "-c", "sleep ${START_DELAY:-0}; ./backend 8093 & ./backend 8094 & exec ./server"]

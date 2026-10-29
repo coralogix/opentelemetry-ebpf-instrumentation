@@ -188,7 +188,20 @@ async fn main() {
         .route("/ping-n", get(ping_n));
 
     // 8094 is a second listener for the A/B discriminators: every B side targets it, so
-    // the sides differ by port (orig_dport) as well as by HTTP path.
+    // the sides differ by port (orig_dport) as well as by HTTP path. With a port argument
+    // the process serves that port alone: OBI keys a server's inbound trace by the client's
+    // address and port plus the server's pid, so one process holding both listeners merges
+    // the traces of two connections a client opens from one ephemeral port to each of
+    // them, which the A/B bursts do a few times per run. The image starts one backend per
+    // port; no argument keeps both listeners in this process for local use.
+    if let Some(port) = std::env::args().nth(1) {
+        println!("backend listening on http://0.0.0.0:{}", port);
+        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+            .await
+            .unwrap();
+        axum::serve(listener, app).await.unwrap();
+        return;
+    }
     println!("backend listening on http://0.0.0.0:8093 and :8094");
     let l8093 = tokio::net::TcpListener::bind("0.0.0.0:8093").await.unwrap();
     let l8094 = tokio::net::TcpListener::bind("0.0.0.0:8094").await.unwrap();
