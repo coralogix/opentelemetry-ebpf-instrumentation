@@ -124,10 +124,24 @@ jobs:
 
       - name: Set up Go
         if: steps.guard.outputs.should_run == 'true' && steps.detect.outputs.run_go == 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: "go.mod"
-          cache: true
+          cache: false
+
+      - name: Resolve Go module cache directory
+        id: go-env
+        if: steps.guard.outputs.should_run == 'true' && steps.detect.outputs.run_go == 'true'
+        run: echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go module cache
+        if: steps.guard.outputs.should_run == 'true' && steps.detect.outputs.run_go == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] go.sum verifies module integrity
+        with:
+          path: ${{ steps.go-env.outputs.gomodcache }}
+          key: go-mod-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-
 
       - name: Update Go dependency artifacts
         if: steps.guard.outputs.should_run == 'true' && steps.detect.outputs.run_go == 'true'
