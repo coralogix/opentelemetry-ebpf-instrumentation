@@ -2,9 +2,9 @@
 # (capture.runtimes.rust.enabled: false, Config v2) for TestRustTokioRuntimeDisabled.
 # No weaver: the suite checks what OBI attaches, not what it emits.
 services:
-  # One container running BOTH server (8092) and backend (8093) so the server can
-  # reach its backend over 127.0.0.1. OBI shares this container's network + pid
-  # namespace, so it instruments both processes.
+  # One container running the server (8092) and one backend process per port (8093,
+  # 8094) so the server reaches its backends over 127.0.0.1. OBI shares this container's
+  # network + pid namespace, so it instruments all three processes.
   tokioserver:
     build:
       context: ../../..
@@ -14,7 +14,7 @@ services:
         RUSTFLAGS: ${RUSTFLAGS:-}
     image: hatest-rust-tokio
     ports:
-      - "8092:8092" # server (the backend on 8093 stays internal)
+      - "8092:8092" # server (the backends on 8093 and 8094 stay internal)
     depends_on:
       jaeger:
         condition: service_started

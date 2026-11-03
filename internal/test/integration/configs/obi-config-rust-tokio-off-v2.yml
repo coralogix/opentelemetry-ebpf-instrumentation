@@ -30,7 +30,7 @@ extensions:
         - action: include
           match:
             process:
-              open_ports: "8092,8093" # server (8092) + backend (8093)
+              open_ports: "8092,8093,8094" # server (8092) + one backend process per port (8093, 8094)
       instrumentation:
         http:
           track_request_headers: true
