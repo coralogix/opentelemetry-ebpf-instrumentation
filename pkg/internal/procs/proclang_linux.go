@@ -314,14 +314,10 @@ scan:
 		}
 		hasDigit = true
 		p.pos++
-		// Keep consuming digits so pos lands on the '_' terminator even for large
-		// values: disambiguator hashes (whose value is skipped) encode base62 numbers
-		// far larger than len(p.sym). Bailing out mid-number here would strand pos
-		// inside the hash and derail every subsequent token. Once the value exceeds
-		// any usable string length / byte position it can only be out-of-range —
-		// which every caller already rejects via its ">= len(p.sym)" bounds check —
-		// so stop accumulating (avoiding signed-int overflow to a negative index) but
-		// keep scanning to the terminator.
+		// Keep scanning to the terminator: disambiguator hashes are base62 numbers far
+		// larger than len(p.sym), and stopping inside one would derail every later token.
+		// Past len(p.sym) the value can only be out of range, so stop accumulating before
+		// it overflows.
 		if !overflow {
 			n = n*62 + d
 			if n > len(p.sym) {
@@ -341,25 +337,16 @@ scan:
 	return 0
 }
 
-// skipGenericArgs consumes an I…E generic-argument list STRUCTURALLY: pos starts
-// at the first arg (just after the base path) and ends just past the matching 'E'.
-//
-// A byte scan for 'I'/'E' is NOT sufficient: v0 generic args contain other
-// E-terminated constructs (D…E dyn bounds, T…E tuples, nested I…E) and, crucially,
-// capital 'I'/'E' bytes inside identifier names (IntoFuture, Executor, Incoming)
-// and inside back-reference base62 — all of which desync a naive scanner and leave
-// pos short of the true terminator, which then misaligns the trailing method
-// identifier in the enclosing N element (dropping e.g. "::poll"). Parsing each arg
-// per the grammar skips identifiers by length and balances nesting correctly.
+// skipGenericArgs consumes an I…E generic-argument list by the grammar: pos starts at
+// the first arg and ends just past the matching 'E'. A byte scan for 'E' is not enough:
+// nested E-terminated constructs and 'E' bytes inside identifiers (Executor) or
+// back-reference base62 would stop it short and misalign the trailing method identifier.
 func (p *v0Parser) skipGenericArgs(depth int) {
 	for depth <= 256 && p.pos < len(p.sym) && p.sym[p.pos] != 'E' {
 		before := p.pos
 		p.skipArg(depth + 1)
-		// Forward-progress guard: path() returns WITHOUT advancing pos once its own
-		// recursion cap (64) is hit, so on a pathologically deep symbol this loop
-		// could otherwise spin forever (hanging instrumentation). Advancing one byte
-		// keeps it bounded — a mis-skipped deep symbol simply fails to match
-		// (fail closed), which is acceptable; the alternative is a hang.
+		// path() returns without advancing once its recursion cap is hit: advance one byte
+		// rather than spin; a mis-skipped deep symbol fails to match.
 		if p.pos <= before {
 			p.pos++
 		}

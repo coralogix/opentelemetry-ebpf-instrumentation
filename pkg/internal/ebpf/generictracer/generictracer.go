@@ -690,34 +690,21 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 		// paths (no build hash, no generic arguments), one attachment per monomorphized
 		// copy. Why each symbol: devdocs/rust-tokio-context-propagation.md, "Probe Points".
 		ebpfcommon.SelfLibKey: {
-			// Poll entry/exit. Every poll of every scheduler reaches Harness::<T,S>::poll
-			// (raw::poll is a tail-call thunk into it) and it keeps a RET in release, so the
-			// exit probe attaches; raw::poll has no RET and RawTask::poll is inlined. PARM1 is
-			// the task Header. Out of line only by the optimiser's choice: re-check the symbol
-			// baseline on toolchain bumps.
+			// Poll entry/exit: keeps a RET in release, unlike raw::poll.
 			"tokio::runtime::task::harness::Harness::poll": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioPoll,
 				End:           p.bpfObjects.ObiUretprobeTokioPoll,
 			}},
-			// Task creation. Cell::<T,S>::new is the one constructor every task-creation path
-			// uses (both runtimes, spawn_local, the blocking pool); RC is Box<Cell>, whose
-			// first field is the Header. One copy per spawned future type, and release
-			// inlines the copies of small futures away, hence the spawn hooks below. The
-			// nested helpers Cell::new::new_header and ::check are different paths and are
-			// not matched.
+			// Task creation: release inlines the copies of small futures, hence the spawn hooks.
 			"tokio::runtime::task::core::Cell::new": {{
 				Required:      false,
 				DemangledPath: true,
 				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
 			}},
-			// Spawn-time registration that does not depend on the future type: the step
-			// after the constructor that is generic over the scheduler only, so it keeps an
-			// out-of-line copy per scheduler. bind_inner takes every tokio::spawn on both
-			// runtimes (tokio factored it out of bind<T> as "the part that's the same for
-			// every type of future"), spawn_task every spawn_blocking. PARM2 is the Header.
-			// spawn_task is absent from a binary that never links the blocking pool.
+			// Spawn-time registration, generic over the scheduler only: every tokio::spawn,
+			// and every spawn_blocking (absent from a binary without the blocking pool).
 			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
 				Required:      false,
 				DemangledPath: true,
@@ -729,52 +716,34 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				MayBeInlined:  true,
 				Start:         p.bpfObjects.ObiUprobeTokioBind,
 			}},
-			// spawn_local's counterpart: LocalOwnedTasks::bind is generic over the future
-			// and inlined with Cell::new, so the spawn is caught at local::Shared::schedule,
-			// which also runs on every wake of a local task (the program registers only a
-			// task with no entry, and records no parent for one whose slot count says it
-			// was evicted). PARM2 is the Notified task, i.e. the Header. Absent from a
-			// binary without a LocalSet.
+			// spawn_local registration, shared with every wake of a local task; absent from
+			// a binary without a LocalSet.
 			"tokio::task::local::Shared::schedule": {{
 				Required:      false,
 				DemangledPath: true,
 				MayBeInlined:  true,
 				Start:         p.bpfObjects.ObiUprobeTokioSchedule,
 			}},
-			// Task completion: Harness::<T,S>::complete runs for every task whose future
-			// finished or was cancelled, inside the poll that finished it, with the Header as
-			// PARM1 (the harness is one pointer by value). One copy per future type, kept out
-			// of line in release (a local symbol with an .llvm. suffix, which the demanglers
-			// ignore). Deletes the task's entries and releases its slot count; links surviving
-			// children still hold to it are refused by the incarnation stamp, not by this
-			// delete.
+			// Task completion: out of line in release, as a local .llvm.-suffixed symbol.
 			"tokio::runtime::task::harness::Harness::complete": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioComplete,
 			}},
-			// Task destruction: the vtable dealloc slot, an entry probe on an address-taken
-			// function. A completed task frees itself through Harness::dealloc inlined into
-			// complete, so this fires only when a Task or Notified handle is the last
-			// reference dropped: the second chance, not the common path.
+			// Task destruction: the second chance for a task that never completed.
 			"tokio::runtime::task::raw::dealloc": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioDealloc,
 			}},
-			// Debug-build task identity: the TLS setter behind tokio::task::id(), called
-			// around every poll. Out of line in debug, where it carries the exact task id; in
-			// release its call sites are inlined and the attached copy never fires. PARM1 is
-			// Option<NonZeroU64> (None == 0). Closure copies are excluded at match time
-			// (isRustClosureSymbol): their PARM1 is &Context.
+			// Debug-build task identity: the TLS setter, inlined in release. Closure copies
+			// are excluded at match time (isRustClosureSymbol).
 			"tokio::runtime::context::set_current_task_id": {{
 				Required:      false,
 				DemangledPath: true,
 				Start:         p.bpfObjects.ObiUprobeTokioSetTaskId,
 			}},
-			// Debug-build id lineage: the monotone task-id allocator, called right before the
-			// task's Cell::new on the spawning thread; RC is the new id. Resolves no usable
-			// copy in release (inlined), hence MayBeInlined.
+			// Debug-build id lineage; inlined in release, hence MayBeInlined.
 			"tokio::runtime::task::id::Id::next": {{
 				Required:      false,
 				DemangledPath: true,

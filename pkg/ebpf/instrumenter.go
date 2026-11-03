@@ -1576,10 +1576,7 @@ func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
 	}
 	returns, err := goexec.FindReturnOffsets(sym.Off, progData)
 	if err != nil {
-		// Return-offset decoding failed (an instruction the disassembler can't decode).
-		// Do NOT drop the whole copy: the entry uprobe needs no return offsets, so we
-		// still attach it and only skip the uretprobe (handled by the len==0 path below).
-		// Dropping everything here would silently lose poll tracking for this copy.
+		// The entry uprobe needs no return offsets: keep the copy, skip only the uretprobe.
 		log.Debug("error finding return offsets for Rust symbol; attaching entry probe only", "path", symbolName)
 		returns = nil
 	}
@@ -1587,15 +1584,10 @@ func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
 	end := template.End
 	missingReturns := len(returns) == 0 && end != nil
 	if missingReturns {
-		// No RET offsets — either a release tail-call (indirect br, no ret) or a decode
-		// failure above. Attach the entry probe only; tokio_thread_state stays accurate
-		// during poll execution when HTTP probes fire.
 		log.Debug("rust tail-call / undecodable function, skipping uretprobe", "path", symbolName)
 		end = nil
 	}
 
-	// A uretprobe-only template (e.g. Cell::new) whose copy has no return
-	// offsets would attach nothing — skip it
 	if template.Start == nil && end == nil {
 		log.Debug("rust path copy has no attachable probe, skipping", "path", symbolName)
 		return nil, missingReturns
