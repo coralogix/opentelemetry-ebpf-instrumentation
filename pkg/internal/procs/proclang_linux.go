@@ -639,6 +639,37 @@ func findExeSymbols(f *elf.File, wanted map[string]string, match func(string) bo
 		types = []elf.SymType{elf.STT_FUNC}
 	}
 
+	err = eachSymbolTableEntry(ctx, func(strtab []byte, symbol *fastelf.Elf64_Sym) {
+		if !slices.Contains(types, elf.ST_TYPE(symbol.Info)) {
+			return
+		}
+
+		name := fastelf.GetCStringUnsafe(strtab, symbol.Name)
+		var requested string
+		var ok bool
+		if match == nil {
+			requested, ok = wanted[name]
+		} else if match(name) {
+			requested, ok = strings.Clone(name), true
+		}
+		if !ok {
+			return
+		}
+
+		addresses[requested] = resolveSymbol(f, elf.Symbol{
+			Name: requested, Value: symbol.Value, Size: symbol.Size,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return addresses, nil
+}
+
+// eachSymbolTableEntry calls visit for every entry of the first .symtab and of the first
+// .dynsym of ctx, with the string table the entry's name lives in. A name read from it is
+// backed by the mapped file and must be copied to outlive ctx.
+func eachSymbolTableEntry(ctx *fastelf.ElfContext, visit func(strtab []byte, symbol *fastelf.Elf64_Sym)) error {
 	for _, sectionType := range []uint32{fastelf.SHT_SYMTAB, fastelf.SHT_DYNSYM} {
 		for _, section := range ctx.Sections {
 			if section == nil || section.Type != sectionType {
@@ -650,17 +681,17 @@ func findExeSymbols(f *elf.File, wanted map[string]string, match func(string) bo
 			}
 
 			if section.Link == 0 || uint64(section.Link) >= uint64(len(ctx.Sections)) {
-				return nil, errors.New("section has invalid string table link")
+				return errors.New("section has invalid string table link")
 			}
 
 			strtab, ok := ctx.SectionData(ctx.Sections[section.Link])
 			if !ok {
-				return nil, errors.New("invalid string table bounds")
+				return errors.New("invalid string table bounds")
 			}
 
 			offset, entrySize, count, ok := ctx.SymbolTableBounds(section)
 			if !ok || section.Entsize != elf.Sym64Size || section.Size%section.Entsize != 0 {
-				return nil, errors.New("invalid symbol table bounds or entry size")
+				return errors.New("invalid symbol table bounds or entry size")
 			}
 
 			populateRange(ctx.Data, ctx.Sections[section.Link].Offset, ctx.Sections[section.Link].Size)
@@ -668,31 +699,12 @@ func findExeSymbols(f *elf.File, wanted map[string]string, match func(string) bo
 
 			// Symbol tables begin with a reserved null entry.
 			for i := 1; i < count; i++ {
-				symbol := fastelf.ReadStruct[fastelf.Elf64_Sym](ctx.Data, offset+i*entrySize)
-				if !slices.Contains(types, elf.ST_TYPE(symbol.Info)) {
-					continue
-				}
-
-				name := fastelf.GetCStringUnsafe(strtab, symbol.Name)
-				var requested string
-				var ok bool
-				if match == nil {
-					requested, ok = wanted[name]
-				} else if match(name) {
-					requested, ok = strings.Clone(name), true
-				}
-				if !ok {
-					continue
-				}
-
-				addresses[requested] = resolveSymbol(f, elf.Symbol{
-					Name: requested, Value: symbol.Value, Size: symbol.Size,
-				})
+				visit(strtab, fastelf.ReadStruct[fastelf.Elf64_Sym](ctx.Data, offset+i*entrySize))
 			}
 			break
 		}
 	}
-	return addresses, nil
+	return nil
 }
 
 // populateRange asks the kernel to read the given range of a mapped file in a
@@ -766,9 +778,13 @@ func isRustClosureSymbol(name string) bool {
 // `Cell::new::new_header` or `Harness::poll_inner` are different paths and never match,
 // even though they start with the key (they are inlined in release and out-of-line in
 // debug builds, where a prefix match attached the parent's probes to them).
+//
+// The symbol tables are streamed as in FindExeSymbols and only the symbols that name the
+// crate of a requested path are demangled, so a large Rust binary that does not link
+// that crate costs one walk of its symbol table.
 func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err error) {
-	// The demanglers run on every symbol of every Rust executable on the host; a panic
-	// in them must fail this scan, not the process, as in findLanguageFromElf.
+	// The demanglers run on the crate's symbols of every Rust executable on the host; a
+	// panic in them must fail this scan, not the process, as in findLanguageFromElf.
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Warn("panic while scanning Rust symbols", "panic", r)
@@ -777,36 +793,32 @@ func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err err
 	}()
 
 	out = map[string][]Sym{}
+	if f.SectionByType(elf.SHT_SYMTAB) == nil && f.SectionByType(elf.SHT_DYNSYM) == nil {
+		return out, nil
+	}
+
+	ctx, err := fastelf.NewElfContextFromELF(f)
+	if err != nil {
+		return nil, err
+	}
+	defer ctx.Close()
+
+	crates := mangledCrateNames(paths)
 	// Shared across both symbol tables: a function can appear in .symtab and .dynsym,
 	// and attaching a uprobe twice at one file offset would double-fire.
 	seen := map[uint64]struct{}{}
 
-	syms, err := f.Symbols()
-	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return nil, err
-	}
-	collectRustSymbols(f, syms, out, paths, seen)
-
-	dynsyms, err := f.DynamicSymbols()
-	if err != nil && !errors.Is(err, elf.ErrNoSymbols) {
-		return nil, err
-	}
-	collectRustSymbols(f, dynsyms, out, paths, seen)
-
-	return out, nil
-}
-
-// collectRustSymbols fills `out` (path -> []Sym) for every ELF symbol whose
-// demangled Rust path equals one of the requested paths. Symbols that do not demangle
-// are silently skipped (they would be caught by collectSymbols).
-func collectRustSymbols(f *elf.File, syms []elf.Symbol, out map[string][]Sym, paths []string, seen map[uint64]struct{}) {
-	for _, s := range syms {
+	err = eachSymbolTableEntry(ctx, func(strtab []byte, symbol *fastelf.Elf64_Sym) {
 		// Only STT_FUNC. Rust monomorphized generics (the Tokio copies) are always
 		// STT_FUNC; STT_NOTYPE function symbols only arise from ICF/LTO folding or
 		// hand-written asm (not Rust defaults), so matching them is not worth the risk
 		// of attaching a uprobe to a non-entry symbol that merely demangles to the path.
-		if elf.ST_TYPE(s.Info) != elf.STT_FUNC {
-			continue
+		if elf.ST_TYPE(symbol.Info) != elf.STT_FUNC {
+			return
+		}
+		name := fastelf.GetCStringUnsafe(strtab, symbol.Name)
+		if !namesMangledCrate(name, crates) {
+			return
 		}
 		// Closures are never the intended probe target. In v0 a closure demangles to
 		// the SAME path as its parent fn (our parser drops the NC closure namespace), so
@@ -814,35 +826,58 @@ func collectRustSymbols(f *elf.File, syms []elf.Symbol, out map[string][]Sym, pa
 		// ("…::{{closure}}") and are filtered too, for symmetry. Probing a closure fires
 		// the handler with the closure's ABI (e.g. PARM1 = &Context instead of the task
 		// Id), which poisons per-thread state. Filter on the RAW mangled form instead.
-		if isRustClosureSymbol(s.Name) {
-			continue
+		if isRustClosureSymbol(name) {
+			return
 		}
-		demangled := rustDemangle(s.Name)
+		demangled := rustDemangle(name)
 		if demangled == "" {
-			demangled = rustDemangleV0(s.Name)
+			demangled = rustDemangleV0(name)
 		}
-		if demangled == "" {
-			continue
+		if demangled == "" || !slices.Contains(paths, demangled) {
+			return
 		}
-		for _, path := range paths {
-			if demangled == path {
-				sym := resolveSymbol(f, s)
-				// Skip a file offset already recorded (e.g. the same function present
-				// in both .symtab and .dynsym) so it is not probed twice.
-				if _, dup := seen[sym.Off]; dup {
-					break
-				}
-				seen[sym.Off] = struct{}{}
-				slog.Debug("rust symbol matched",
-					"mangled", s.Name,
-					"demangled", demangled,
-					"path", path,
-					"offset", fmt.Sprintf("0x%x", sym.Off))
-				out[path] = append(out[path], sym)
-				break
-			}
+		// name is backed by the mapped file, which is unmapped when this scan returns.
+		sym := resolveSymbol(f, elf.Symbol{Name: strings.Clone(name), Value: symbol.Value, Size: symbol.Size})
+		// Skip a file offset already recorded (e.g. the same function present
+		// in both .symtab and .dynsym) so it is not probed twice.
+		if _, dup := seen[sym.Off]; dup {
+			return
+		}
+		seen[sym.Off] = struct{}{}
+		slog.Debug("rust symbol matched",
+			"mangled", sym.Name,
+			"path", demangled,
+			"offset", fmt.Sprintf("0x%x", sym.Off))
+		out[demangled] = append(out[demangled], sym)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// mangledCrateNames returns the crate of every path as both mangling schemes spell an
+// identifier, its decimal length followed by its bytes ("5tokio"): a mangled symbol
+// without that substring cannot demangle to a path in the crate.
+func mangledCrateNames(paths []string) []string {
+	var crates []string
+	for _, path := range paths {
+		crate, _, _ := strings.Cut(path, "::")
+		mangled := fmt.Sprintf("%d%s", len(crate), crate)
+		if !slices.Contains(crates, mangled) {
+			crates = append(crates, mangled)
 		}
 	}
+	return crates
+}
+
+func namesMangledCrate(symbol string, crates []string) bool {
+	for _, crate := range crates {
+		if strings.Contains(symbol, crate) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchExeSymbols(ctx *fastelf.ElfContext) svc.InstrumentableType {

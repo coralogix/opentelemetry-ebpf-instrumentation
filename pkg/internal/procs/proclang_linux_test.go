@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -458,6 +459,88 @@ func TestFindRustSymbols_NoFalseMatchOnNonRust(t *testing.T) {
 	out, err := FindRustSymbols(f, []string{"tokio::runtime::task::raw::poll"})
 	require.NoError(t, err)
 	assert.Empty(t, out["tokio::runtime::task::raw::poll"])
+}
+
+// The symbols are real ones of the test servers: a legacy and a v0 copy of Harness::poll,
+// the raw::poll vtable target, a v0 closure (which demangles to its parent's path), a
+// nested helper, a function of another crate and an object with a copy's name. The
+// .dynsym repeats raw::poll at the same address.
+func TestFindRustSymbolsTables(t *testing.T) {
+	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
+	const rawPoll = "tokio::runtime::task::raw::poll"
+	const trySend = "hyper::client::dispatch::Sender::try_send"
+	names := []string{
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$4poll17h0123456789abcdefE",
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessNCNCNvCs388xbHJbcbW_6server7chan_tx00INtNtCsbSVVNPxiylx_5alloc4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE4pollB1a_",
+		"_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE",
+		"_RNCNvMNtNtCsiYXsGep02p_5hyper6client8dispatchINtB4_6SenderE8try_send0B1E_",
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$10poll_inner17h0123456789abcdefE",
+		"_ZN4core3fmt5write17h0123456789abcdefE",
+	}
+	symtab := symbolTableFixture{typ: elf.SHT_SYMTAB, strings: []byte{0}, symbols: []elf.Sym64{{}}}
+	for i, name := range names {
+		symtab.symbols = append(symtab.symbols, elf.Sym64{
+			Name: uint32(len(symtab.strings)), Info: byte(elf.STT_FUNC), Value: uint64(0x1000 * (i + 1)), Size: 8,
+		})
+		symtab.strings = append(symtab.strings, name+"\x00"...)
+	}
+	symtab.symbols = append(symtab.symbols, elf.Sym64{Name: 1, Info: byte(elf.STT_OBJECT), Value: 0x7000, Size: 8})
+	dynsym := symbolTableFixture{
+		typ: elf.SHT_DYNSYM, strings: append([]byte{0}, names[2]+"\x00"...),
+		symbols: []elf.Sym64{{}, {Name: 1, Info: byte(elf.STT_FUNC), Value: 0x3000, Size: 8}},
+	}
+	f, _ := symbolELFFixture(t, symtab, dynsym)
+
+	out, err := FindRustSymbols(f, []string{harnessPoll, rawPoll, trySend})
+	require.NoError(t, err)
+
+	offsets := func(syms []Sym) []uint64 {
+		var offs []uint64
+		for _, s := range syms {
+			offs = append(offs, s.Off)
+		}
+		return offs
+	}
+	assert.Len(t, out, 2)
+	assert.Equal(t, []uint64{0x1000, 0x2000}, offsets(out[harnessPoll]))
+	assert.Equal(t, []uint64{0x3000}, offsets(out[rawPoll]))
+	assert.NotContains(t, out, trySend, "a closure must not be taken as a copy of its parent")
+	_, err = f.SectionByType(elf.SHT_SYMTAB).Data()
+	require.NoError(t, err)
+	assert.Equal(t, names[0], out[harnessPoll][0].Name)
+}
+
+// Symbols of other crates cost no allocation: the demanglers run only on the symbols
+// that name a requested crate.
+func TestFindRustSymbolsAllocations(t *testing.T) {
+	const maxScanAllocations = 100
+	const rawPoll = "tokio::runtime::task::raw::poll"
+
+	f, _ := largeRustSymbolELFFixture(t, 10_000)
+	var out map[string][]Sym
+	var err error
+	allocations := testing.AllocsPerRun(3, func() {
+		out, err = FindRustSymbols(f, []string{rawPoll})
+	})
+	require.NoError(t, err)
+	require.Len(t, out[rawPoll], 1)
+	assert.Equal(t, uint64(10_001), out[rawPoll][0].Value)
+	assert.Less(t, allocations, float64(maxScanAllocations), "scan must not allocate for symbols of other crates")
+}
+
+// largeRustSymbolELFFixture holds count legacy-mangled functions of another crate and
+// one copy of raw::poll, last.
+func largeRustSymbolELFFixture(tb testing.TB, count int) (*elf.File, string) {
+	tb.Helper()
+
+	table := symbolTableFixture{typ: elf.SHT_SYMTAB, strings: []byte{0}, symbols: make([]elf.Sym64, count+2)}
+	for i := 1; i <= count; i++ {
+		table.symbols[i] = elf.Sym64{Name: uint32(len(table.strings)), Info: byte(elf.STT_FUNC), Value: uint64(i), Size: 8}
+		table.strings = fmt.Appendf(table.strings, "_ZN4core3fmt5write17h%016xE\x00", i)
+	}
+	table.symbols[count+1] = elf.Sym64{Name: uint32(len(table.strings)), Info: byte(elf.STT_FUNC), Value: uint64(count + 1), Size: 8}
+	table.strings = append(table.strings, "_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE\x00"...)
+	return symbolELFFixture(tb, table)
 }
 
 func openSymbolFixtureELF(t *testing.T) *elf.File {
