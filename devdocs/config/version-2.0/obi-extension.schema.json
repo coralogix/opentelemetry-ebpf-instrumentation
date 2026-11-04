@@ -1173,6 +1173,36 @@
               }
             }
           }
+        },
+        "opamp": {
+          "type": "object",
+          "description": "Connect OBI to an OpAMP server for remote configuration and status reporting.\nThe server sends a Config v2 document that is merged over this file; only discovery selection changes are applied without a restart.\nIf omitted, OpAMP is disabled and the configuration file is watched instead.\n",
+          "additionalProperties": false,
+          "required": [
+            "endpoint"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "minLength": 1,
+              "description": "OpAMP server URL. `ws://` and `wss://` use the WebSocket transport, `http://` and `https://` use plain HTTP polling.\n"
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "HTTP headers sent with every OpAMP request, for example authorization.\nIf omitted, no extra headers are sent.\n"
+            },
+            "instance_uid": {
+              "type": "string",
+              "description": "Agent instance UID, a UUID. If omitted, a UUIDv7 is generated once and stored in `state_dir`.\n"
+            },
+            "state_dir": {
+              "type": "string",
+              "description": "Directory that keeps the instance UID and the last applied remote configuration across restarts.\nIf omitted, nothing is persisted.\n"
+            }
+          }
         }
       }
     },

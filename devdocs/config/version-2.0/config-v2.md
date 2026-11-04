@@ -1177,6 +1177,43 @@ keep the original pipeline context alive. This option cannot be combined with
 `WithDynamicSelector`, that API continues to own its PID and workload selections
 independently. Config v1 files are not watched by standalone OBI.
 
+Rejections that only a restart can apply match `discover.ErrRestartRequired`
+through `errors.Is`. Any other error means the configuration is invalid or was
+not processed.
+
+## Remote configuration with OpAMP
+
+Standalone OBI connects to an [OpAMP](https://opentelemetry.io/docs/specs/opamp/)
+server when `extensions.obi.daemon.opamp` is set. The file watcher is disabled
+while OpAMP is enabled.
+
+```yaml
+extensions:
+  obi:
+    daemon:
+      opamp:
+        endpoint: wss://opamp.example.com/v1/opamp
+        headers:
+          Authorization: "Bearer ${OPAMP_TOKEN}"
+        state_dir: /var/lib/obi
+```
+
+`ws://` and `wss://` endpoints use the WebSocket transport, and `http://` and
+`https://` use HTTP polling. The server sends a Config v2 fragment as the `obi`
+entry of the remote config map, or as its only entry. OBI merges it over the
+local file: mappings merge key by key, and lists and scalars replace the local
+value. The fragment can't set `extensions.obi.daemon.opamp`.
+
+Changes that the discovery refresh accepts apply immediately and report
+`APPLIED`. Any other change reports `FAILED` with the reason. When the change
+only needs a restart, OBI saves it in `state_dir` and starts with it next time,
+then reports it as `APPLIED`. The saved configuration is discarded if it no
+longer validates at startup. `state_dir` also keeps the generated instance UID;
+set `instance_uid` to pin it instead.
+
+OBI reports its effective configuration with header values redacted, its
+health, and the status of the last remote configuration.
+
 ## Related docs
 
 - Config v1 to v2 migration guide: [migration.md](migration.md)

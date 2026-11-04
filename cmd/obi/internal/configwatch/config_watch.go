@@ -13,6 +13,7 @@ import (
 
 	"go.opentelemetry.io/obi/cmd/obi/internal/configload"
 	"go.opentelemetry.io/obi/internal/config/schema"
+	"go.opentelemetry.io/obi/pkg/appolly/discover"
 	"go.opentelemetry.io/obi/pkg/obi"
 )
 
@@ -110,7 +111,7 @@ func loadConfig(data []byte) (*obi.Config, error) {
 	cfg, err := configload.LoadV2(data)
 	if err != nil {
 		if _, ok := errors.AsType[*schema.NotV2Error](err); ok {
-			return nil, errors.New("configuration version changed; restart OBI to apply this configuration")
+			return nil, discover.RestartRequiredf("configuration version changed; restart OBI to apply this configuration")
 		}
 		return nil, err
 	}

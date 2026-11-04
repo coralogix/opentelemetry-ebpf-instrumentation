@@ -19,6 +19,7 @@ type Daemon struct {
 	Shutdown        Shutdown        `yaml:"shutdown"`
 	InternalMetrics InternalMetrics `yaml:"internal_metrics"`
 	Telemetry       DaemonTelemetry `yaml:"telemetry"`
+	OpAMP           *OpAMP          `yaml:"opamp,omitempty"`
 }
 
 // LogFormat describes daemon log encoding.
@@ -115,4 +116,11 @@ type DaemonPrometheusTelemetry struct {
 	SpanMetricsServiceCacheSize     int      `yaml:"span_metrics_service_cache_size"`
 	ExtraResourceAttributes         []string `yaml:"extra_resource_attributes"`
 	ExtraSpanResourceAttributes     []string `yaml:"extra_span_resource_attributes"`
+}
+
+type OpAMP struct {
+	Endpoint    string            `yaml:"endpoint"`
+	Headers     map[string]string `yaml:"headers,omitempty"`
+	InstanceUID string            `yaml:"instance_uid,omitempty"`
+	StateDir    string            `yaml:"state_dir,omitempty"`
 }

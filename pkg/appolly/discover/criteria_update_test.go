@@ -113,7 +113,7 @@ func TestCriteriaUpdaterRejectsIncompatibleConfig(t *testing.T) {
 			change(next)
 			updater := NewCriteriaUpdater(initial)
 			err := updater.Update(t.Context(), next)
-			require.ErrorContains(t, err, "restart OBI")
+			require.ErrorIs(t, err, ErrRestartRequired)
 		})
 	}
 }
@@ -190,10 +190,10 @@ func TestCriteriaUpdaterPreservesExportCallbacks(t *testing.T) {
 
 			changedExporter := *replacement
 			changedExporter.Traces.TracesEndpoint = "http://localhost:4318"
-			require.ErrorContains(t, updater.Update(ctx, &changedExporter), "restart OBI")
+			require.ErrorIs(t, updater.Update(ctx, &changedExporter), ErrRestartRequired)
 			changedExporter = *replacement
 			changedExporter.OTELMetrics.MetricsEndpoint = "http://localhost:4318"
-			require.ErrorContains(t, updater.Update(ctx, &changedExporter), "restart OBI")
+			require.ErrorIs(t, updater.Update(ctx, &changedExporter), ErrRestartRequired)
 			include, _ = updater.Updates().Current()
 			require.True(t, include[0].GetOpenPorts().Matches(6060))
 
@@ -490,7 +490,7 @@ func TestCriteriaRefreshRejectsRetainedServiceChange(t *testing.T) {
 	first := testutil.ReadChannel(t, events, time.Second)
 	require.Equal(t, "first", first[0].Obj.Criteria[0].GetName())
 	next := criteriaConfig(t, "    - name: first\n      open_ports: 9090\n    - name: second\n      open_ports: 8080\n")
-	require.ErrorContains(t, updater.Update(ctx, next), "restart OBI")
+	require.ErrorIs(t, updater.Update(ctx, next), ErrRestartRequired)
 	current, _ := updater.Updates().Current()
 	require.True(t, current[0].GetOpenPorts().Matches(8080))
 	// The rejected replacement must not emit deletions or alter subsequent matches.
@@ -1260,7 +1260,7 @@ func TestCriteriaRefreshAcceptsExplicitDefaultSettings(t *testing.T) {
 func TestCriteriaUpdaterRejectsSwappedNames(t *testing.T) {
 	initial := criteriaConfig(t, "    - name: first\n      open_ports: 8080\n    - name: second\n      open_ports: 9090\n")
 	next := criteriaConfig(t, "    - name: second\n      open_ports: 8080\n    - name: first\n      open_ports: 9090\n")
-	require.ErrorContains(t, NewCriteriaUpdater(initial).Update(t.Context(), next), "restart OBI")
+	require.ErrorIs(t, NewCriteriaUpdater(initial).Update(t.Context(), next), ErrRestartRequired)
 }
 
 func TestCriteriaUpdaterRejectsNewPipelineFeatures(t *testing.T) {
@@ -1268,7 +1268,7 @@ func TestCriteriaUpdaterRejectsNewPipelineFeatures(t *testing.T) {
 	initial.Metrics.Features = export.FeatureApplicationRED
 	next := criteriaConfig(t, "    - exe_path: /srv/app\n    - exe_path: /srv/worker\n      metrics:\n        features: [application_runtime]\n")
 	next.Metrics.Features = export.FeatureApplicationRED
-	require.ErrorContains(t, NewCriteriaUpdater(initial).Update(t.Context(), next), "restart OBI")
+	require.ErrorIs(t, NewCriteriaUpdater(initial).Update(t.Context(), next), ErrRestartRequired)
 }
 
 func TestCriteriaUpdaterRejectsDynamicSelector(t *testing.T) {
@@ -1294,7 +1294,7 @@ func TestCriteriaUpdaterLogsCallbacks(t *testing.T) {
 	next.Logs.InjectHeaders = func(h map[string]string) { h["tenant"] = "one" }
 	require.NoError(t, updater.Update(ctx, &next))
 	next.Logs.InjectHeaders = func(h map[string]string) { h["tenant"] = "two" }
-	require.ErrorContains(t, updater.Update(ctx, &next), "restart OBI")
+	require.ErrorIs(t, updater.Update(ctx, &next), ErrRestartRequired)
 }
 
 func TestCriteriaUpdaterRejectsExceptionChanges(t *testing.T) {
@@ -1305,7 +1305,7 @@ func TestCriteriaUpdaterRejectsExceptionChanges(t *testing.T) {
 			next := criteriaConfig(t, "    - exe_path: /srv/app\n")
 			changed := !enabled
 			next.Discovery.Instrument[0].Exceptions = &services.ExceptionsOverride{Enabled: &changed}
-			require.ErrorContains(t, NewCriteriaUpdater(initial).Update(t.Context(), next), "restart OBI")
+			require.ErrorIs(t, NewCriteriaUpdater(initial).Update(t.Context(), next), ErrRestartRequired)
 		})
 	}
 }

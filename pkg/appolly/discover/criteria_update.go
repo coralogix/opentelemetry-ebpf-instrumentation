@@ -5,7 +5,6 @@ package discover // import "go.opentelemetry.io/obi/pkg/appolly/discover"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -60,11 +59,11 @@ func (u *CriteriaUpdater) Update(ctx context.Context, cfg *obi.Config) error {
 		!maps.Equal(u.traceHeaders, injectedHeaders(cfg.Traces.InjectHeaders)) ||
 		!maps.Equal(u.metricHeaders, injectedHeaders(cfg.OTELMetrics.InjectHeaders)) ||
 		!maps.Equal(u.logHeaders, injectedHeaders(cfg.Logs.InjectHeaders)) {
-		return errors.New("only discovery selection criteria can be refreshed; restart OBI to apply other configuration changes")
+		return RestartRequiredf("only discovery selection criteria can be refreshed; restart OBI to apply other configuration changes")
 	}
 
 	if cfg.JoinMetricsConfig().Features&^(u.features|export.FeatureEmpty) != 0 {
-		return errors.New("new metric features require pipeline initialization; restart OBI to apply this configuration")
+		return RestartRequiredf("new metric features require pipeline initialization; restart OBI to apply this configuration")
 	}
 
 	if err := cfg.Discovery.Validate(); err != nil {
@@ -236,7 +235,7 @@ func (m *Matcher) refresh(ctx context.Context, update services.CriteriaUpdate) e
 	}
 	if hasConflict {
 		// A stable PID keeps retries of the same rejection from bypassing log deduplication.
-		return fmt.Errorf("service settings would change for PID %d; restart OBI to apply this configuration", conflictingPID)
+		return RestartRequiredf("service settings would change for PID %d; restart OBI to apply this configuration", conflictingPID)
 	}
 
 	for pid, match := range next.ProcessHistory {
@@ -372,7 +371,7 @@ func refreshableCriteria(cfg *obi.Config) []services.Selector {
 // Definitions may be added, removed or reordered, but existing service settings cannot be replaced.
 func compatibleDefinitions(current, next []services.Selector) error {
 	if !definitionsKeepSettings(current, next) {
-		return errors.New("service settings changed in discovery definitions; restart OBI to apply this configuration")
+		return RestartRequiredf("service settings changed in discovery definitions; restart OBI to apply this configuration")
 	}
 
 	byPredicate := map[string][]selectorSettings{}
@@ -404,7 +403,7 @@ func compatibleDefinitions(current, next []services.Selector) error {
 		}
 
 		if !found {
-			return errors.New("service settings changed for an existing discovery predicate; restart OBI to apply this configuration")
+			return RestartRequiredf("service settings changed for an existing discovery predicate; restart OBI to apply this configuration")
 		}
 	}
 
@@ -433,7 +432,7 @@ func predicateKey(selector services.Selector) (string, error) {
 		match.Metrics = perapp.SvcMetricsConfig{}
 		predicates = match
 	default:
-		return "", errors.New("unsupported discovery selector for config refresh; restart OBI")
+		return "", RestartRequiredf("unsupported discovery selector for config refresh; restart OBI")
 	}
 
 	data, err := yaml.Marshal(predicates)

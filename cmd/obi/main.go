@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/obi/cmd/obi/internal/configcmd"
 	"go.opentelemetry.io/obi/cmd/obi/internal/configload"
 	"go.opentelemetry.io/obi/cmd/obi/internal/configwatch"
+	"go.opentelemetry.io/obi/cmd/obi/internal/opamp"
 	"go.opentelemetry.io/obi/internal/config/schema"
 	"go.opentelemetry.io/obi/pkg/appolly/discover"
 	"go.opentelemetry.io/obi/pkg/buildinfo"
@@ -111,6 +112,12 @@ func main() {
 		configPath = &cfg
 	}
 	config, configVersion, configData := loadConfig(configPath)
+	agent := opampAgent(configVersion, configData)
+	if agent != nil {
+		if remoteConfig, ok := agent.StartupConfig(); ok {
+			config = remoteConfig
+		}
+	}
 	if err := lvl.UnmarshalText([]byte(config.LogLevel)); err != nil {
 		slog.Error("unknown log level specified, choices are [DEBUG, INFO, WARN, ERROR]", "error", err)
 		os.Exit(-1)
@@ -170,10 +177,21 @@ func main() {
 	// child process isn't found.
 	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	var opts []instrumenter.Option
+	apply := restartRequired
 	if configVersion == configVersionV2 && configPath != nil && *configPath != "" && config.Enabled(obi.FeatureAppO11y) {
 		updater := discover.NewCriteriaUpdater(config)
 		opts = append(opts, instrumenter.WithCriteriaUpdater(updater))
-		go configwatch.Watch(ctx, *configPath, configData, updater.Update)
+		apply = updater.Update
+		if agent == nil {
+			go configwatch.Watch(ctx, *configPath, configData, updater.Update)
+		}
+	}
+	if agent != nil {
+		go func() {
+			if err := agent.Run(ctx, apply); err != nil {
+				slog.Error("OpAMP agent stopped", "error", err)
+			}
+		}()
 	}
 	var runErr error
 	if configVersion == configVersionV2 {
@@ -188,4 +206,28 @@ func main() {
 		os.Exit(-1)
 	}
 	slog.Info("OpenTelemetry eBPF Instrumentation successfully exiting")
+}
+
+func opampAgent(configVersion string, configData []byte) *opamp.Agent {
+	if configVersion != configVersionV2 {
+		return nil
+	}
+	settings, err := opamp.SettingsFromConfig(configData)
+	if err != nil {
+		slog.Error("wrong OpAMP configuration", "error", err)
+		os.Exit(-1)
+	}
+	if settings == nil {
+		return nil
+	}
+	agent, err := opamp.New(settings, configData)
+	if err != nil {
+		slog.Error("can't start the OpAMP agent", "error", err)
+		os.Exit(-1)
+	}
+	return agent
+}
+
+func restartRequired(context.Context, *obi.Config) error {
+	return discover.RestartRequiredf("application observability was not enabled at startup; restart OBI to apply this configuration")
 }

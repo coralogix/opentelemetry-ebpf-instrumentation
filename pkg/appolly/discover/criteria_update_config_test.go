@@ -114,7 +114,7 @@ extensions:
 					// Reject header-only edits and edits that also change selection.
 					for _, port := range []int{9090, 7070} {
 						next := load(port, tc.traces, tc.metrics)
-						require.ErrorContains(t, updater.Update(ctx, next), "restart OBI")
+						require.ErrorIs(t, updater.Update(ctx, next), discover.ErrRestartRequired)
 						include, _ := updater.Updates().Current()
 						require.Len(t, include, 1)
 						require.True(t, include[0].GetOpenPorts().Matches(9090))
