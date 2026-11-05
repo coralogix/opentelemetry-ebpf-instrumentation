@@ -249,7 +249,7 @@ func anyCompleteTokioChain(traces []jaeger.Trace, urlPath string) bool {
 		tr, _ := tokioUniqueSpans(traces[i])
 		serverRoot := tokioFindSpans(tr, "server", urlPath)
 		// Client spans carry the target as url.full, not url.path: match the /ping suffix.
-		clientSpans := tokioFindClientSpans(tr, "server", "/ping")
+		clientSpans := tokioFindClientSpans(tr, "/ping")
 		backendSpans := tokioFindSpans(tr, "backend", "/ping")
 		if len(serverRoot) != 1 || len(clientSpans) == 0 || len(backendSpans) == 0 {
 			continue
@@ -284,12 +284,12 @@ func tokioFindSpans(tr jaeger.Trace, service, urlPath string) []jaeger.Span {
 	return out
 }
 
-// tokioFindClientSpans returns the CLIENT spans in tr for the given OBI service
-// whose url.full ends with pathSuffix (client spans use url.full, not url.path).
-func tokioFindClientSpans(tr jaeger.Trace, service, pathSuffix string) []jaeger.Span {
+// tokioFindClientSpans returns the CLIENT spans of the server service in tr whose
+// url.full ends with pathSuffix (client spans use url.full, not url.path).
+func tokioFindClientSpans(tr jaeger.Trace, pathSuffix string) []jaeger.Span {
 	var out []jaeger.Span
 	for _, s := range tr.Spans {
-		if tr.Processes[s.ProcessID].ServiceName != service {
+		if tr.Processes[s.ProcessID].ServiceName != "server" {
 			continue
 		}
 		if tokioSpanTag(s, "span.kind") != "client" {
@@ -362,7 +362,9 @@ const (
 // counts cleanly attributed chains per side. It asserts both halves of the contract: a
 // clean-chain floor where correlation is supported, and zero misattribution everywhere,
 // cross-side (contaminated) and same-side (piled). Without the Tokio probes the generic
-// path cannot follow a cross-thread egress and the clean chains collapse.
+// path cannot follow a cross-thread egress and the clean chains collapse. A cross-side
+// backend span without its client span (stray) is OBI's same-host correlation colliding on
+// a shared ephemeral port, not the walk: logged, not gated (tokioClassifyAB).
 func TestRustTokioProbeDiscrimination(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-rust-tokio-discrim.yml",
 		path.Join(pathOutput, "test-suite-rust-tokio-discrim.log"))
@@ -481,18 +483,18 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	// traces both subtests produce (they share one Jaeger, and every orphan is its own
 	// trace), or the second subtest's clean chains never fit the window.
 	const classifyLimit = 3000
-	var cleanA, cleanB, contaminated, piled, grouped, other, duplicates int
+	var cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates int
 	var lastTraces []jaeger.Trace
 	t.Cleanup(func() {
-		t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated(egress)=%d piled(same-side)=%d grouped(inbound)=%d other(incomplete)=%d duplicates(exported twice)=%d",
-			c.serverA, c.serverB, cleanA, cleanB, contaminated, piled, grouped, other, duplicates)
-		if contaminated > 0 {
-			tokioLogContaminated(t, lastTraces, c)
+		t.Logf("A/B discrimination [%s vs %s]: cleanA=%d cleanB=%d contaminated(egress)=%d stray(backend-only)=%d piled(same-side)=%d grouped(inbound)=%d other(incomplete)=%d duplicates(exported twice)=%d",
+			c.serverA, c.serverB, cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates)
+		if contaminated+stray > 0 {
+			tokioLogCrossSide(t, lastTraces, c)
 		}
 	})
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		lastTraces = tokioQueryServerTraces(ct, classifyLimit)
-		cleanA, cleanB, contaminated, piled, grouped, other, duplicates = tokioClassifyAB(lastTraces, c)
+		cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates = tokioClassifyAB(lastTraces, c)
 		if c.failClosed {
 			// Wait until the burst has exported, so this cannot pass before traffic flows,
 			// then require zero misattribution, cross-side and same-side.
@@ -575,10 +577,18 @@ func tokioQueryServerTraces(ct *assert.CollectT, limit int) []jaeger.Trace {
 	return tq.Data
 }
 
-// tokioClassifyAB buckets each trace for case c: clean A, clean B, contaminated (both an A
-// and a B marker, only possible by misattribution), piled, grouped (two server endpoints in
-// one trace with no cross backend: inbound keep-alive grouping, not an egress error) or
-// other (incomplete, or another subtest's endpoints).
+// tokioClassifyAB buckets each trace for case c: clean A, clean B, contaminated (a server
+// span of one side with the other side's CLIENT span: the walk resolved the wrong request),
+// stray (a server span of one side with only the other side's BACKEND span: not the walk,
+// see below), piled, grouped (two server endpoints in one trace with no cross backend:
+// inbound keep-alive grouping, not an egress error) or other (incomplete, or another
+// subtest's endpoints).
+//
+// The walk's output is the client span's trace. The backend span joins through OBI's
+// same-host correlation, keyed by the client address and port alone (trace_key_from_conn),
+// and Linux hands one ephemeral port to concurrent connections toward different
+// destinations: a backend reading first takes the other connection's context. That is a
+// generic OBI residual (devdoc Known Limitations), counted as stray and logged, not gated.
 //
 // piled is the same-side temporal misattribution the A/B split is blind to: a trace that
 // holds a same-side server span and more same-side backend spans than server spans. Each
@@ -586,7 +596,7 @@ func tokioQueryServerTraces(ct *assert.CollectT, limit int) []jaeger.Trace {
 // request's egress resolved into this trace. The same-side server span is required: a
 // fail-closed egress is an orphan trace (a backend span with no owning server span) and
 // must land in other, not piled.
-func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, contaminated, piled, grouped, other, duplicates int) {
+func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates int) {
 	for i := range traces {
 		tr, dups := tokioUniqueSpans(traces[i])
 		duplicates += dups
@@ -596,11 +606,16 @@ func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, cont
 		bBackends := len(tokioFindSpans(tr, "backend", c.backendB))
 		aServer, bServer := aServers > 0, bServers > 0
 		aBackend, bBackend := aBackends > 0, bBackends > 0
+		aClient := len(tokioFindClientSpans(tr, c.backendA)) > 0
+		bClient := len(tokioFindClientSpans(tr, c.backendB)) > 0
 
 		switch {
-		// Cross-side: the egress carried the wrong traceparent.
-		case (aServer && bBackend) || (bServer && aBackend):
+		// Cross-side egress: the client span carries the other side's trace.
+		case (aServer && bClient) || (bServer && aClient):
 			contaminated++
+		// Cross-side backend span without its client span: the shared-port key, not the walk.
+		case (aServer && bBackend) || (bServer && aBackend):
+			stray++
 		// Same-side surplus with the owning server span present.
 		case (aServer && aBackends > aServers) || (bServer && bBackends > bServers):
 			piled++
@@ -615,13 +630,13 @@ func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, cont
 			other++
 		}
 	}
-	return cleanA, cleanB, contaminated, piled, grouped, other, duplicates
+	return cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates
 }
 
-// tokioLogContaminated prints the first contaminated traces of a case with every span and
-// its start time (UTC, microseconds), so a wrong egress can be matched with OBI's walk lines
-// at the same instant in the suite log.
-func tokioLogContaminated(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
+// tokioLogCrossSide prints the first cross-side traces of a case, contaminated or stray,
+// with every span and its start time (UTC, microseconds), so a wrong egress can be matched
+// with OBI's walk lines at the same instant in the suite log.
+func tokioLogCrossSide(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
 	t.Helper()
 	const maxTraces = 5
 	logged := 0
@@ -631,8 +646,15 @@ func tokioLogContaminated(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
 		bServer := len(tokioFindSpans(tr, "server", c.serverB)) > 0
 		aBackend := len(tokioFindSpans(tr, "backend", c.backendA)) > 0
 		bBackend := len(tokioFindSpans(tr, "backend", c.backendB)) > 0
-		crossSide := (aServer && bBackend) || (bServer && aBackend)
-		if !crossSide {
+		aClient := len(tokioFindClientSpans(tr, c.backendA)) > 0
+		bClient := len(tokioFindClientSpans(tr, c.backendB)) > 0
+		var kind string
+		switch {
+		case (aServer && bClient) || (bServer && aClient):
+			kind = "contaminated"
+		case (aServer && bBackend) || (bServer && aBackend):
+			kind = "stray"
+		default:
 			continue
 		}
 		var b strings.Builder
@@ -641,7 +663,7 @@ func tokioLogContaminated(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
 				tr.Processes[s.ProcessID].ServiceName, s.OperationName, tokioSpanTag(s, "span.kind"),
 				tokioSpanTag(s, "url.path"), time.UnixMicro(s.StartTime).UTC().Format("15:04:05.000000"), s.Duration)
 		}
-		t.Logf("contaminated trace %s:%s", tr.TraceID, b.String())
+		t.Logf("%s trace %s:%s", kind, tr.TraceID, b.String())
 		logged++
 		if logged == maxTraces {
 			return

@@ -119,7 +119,10 @@ The contract holds everywhere except the following, all documented in
 The test suite enforces the contract in both observable directions: `contaminated == 0`
 (cross-endpoint joins) is gated on every case, and `piled == 0` (same-endpoint temporal
 joins, the form cross-A/B testing is blind to) is gated everywhere except the two shared-task
-suites, where the residual is logged and watched instead.
+suites, where the residual is logged and watched instead. `contaminated` counts the cross-side
+**client** span, the walk's own output; a cross-side backend span without its client span is
+`stray`, OBI's generic same-host correlation colliding on a shared ephemeral port (see
+[Known Limitations](#known-limitations)), logged and not gated.
 
 ## Architecture
 
@@ -389,6 +392,21 @@ path.
   the received message), tracked as follow-up work. `TestRustTokioProbeDiscrimination`'s
   `pooled_reuse` and `channel_handoff` subtests exercise both shapes adversarially, gate
   `contaminated == 0` strictly and log the same-side residual.
+
+- **Outside the walk: OBI's same-host backend link is keyed by the client port alone.** A
+  backend's inbound span takes the server's client context from `trace_map`, whose key drops
+  the server address and port (`trace_key_from_conn`, a proxy port-forwarding accommodation;
+  a traceparent header, where the tpinjector can inject one, overrides it). Linux hands one
+  ephemeral source port to concurrent connections toward different destinations, so two
+  pooled connections `127.0.0.1:59592 → :8093` and `→ :8094` share the key: the backend
+  that reads first takes the other connection's context and its span joins the wrong trace,
+  the second finds the entry consumed and orphans. The walk's own client span is unaffected.
+  Measured 2026-11-05 (debug build, kernel 6.8 with header injection disabled by the FIONREAD
+  misreport): 55 of 765 egress source ports served both backends, one cross-side backend
+  span in 24 A/B runs. Generic OBI, on main as well. The suites count it as `stray`, log the
+  trace and gate only `contaminated`. Running one backend process per port (the suite image)
+  removes the sibling collision in `server_traces_aux`, whose key carries the server pid, not
+  this one.
 
 - **Fire-and-forget spawns orphan after the response.** A task spawned by a handler that
   performs its egress after the server has already answered resolves nothing: the anchor's
