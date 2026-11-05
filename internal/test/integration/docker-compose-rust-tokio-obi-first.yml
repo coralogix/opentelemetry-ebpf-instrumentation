@@ -30,6 +30,9 @@ services:
     volumes:
       - ./configs/:/configs
       - ./system/sys/kernel/security:/sys/kernel/security
+      # sockops enrollment attaches at the host cgroup root; the FIONREAD compensation tracepoints need tracefs
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup
       - ../../../testoutput:/coverage
       - ../../../testoutput/run-rust-tokio-obi-first:/var/run/obi
     image: hatest-obi

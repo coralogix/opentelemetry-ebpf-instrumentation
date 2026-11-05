@@ -37,6 +37,14 @@ It extends the existing context propagation mechanisms documented in [context-pr
 suites designed to force cross-request leakage. Correlation coverage is the same in both
 builds; only the mechanism differs (Header walk in release, id walk in debug).
 
+The five suites mount the host cgroup root and tracefs into the OBI container
+(`docker-compose-rust-tokio*.yml`), as the other traceparent suites do. Without the cgroup
+mount the tpinjector's sockops attaches at OBI's own container cgroup and never enrolls the
+server's sockets; without tracefs the FIONREAD compensation tracepoints cannot attach on an
+affected kernel and OBI disables context propagation. Either way the backend spans would link
+only through the same-host black-box path, and the header path, the one users get across
+hosts, would run untested.
+
 ## The Correctness Contract
 
 The governing rule, in one line: **resolve a parent trace only through a validated,
