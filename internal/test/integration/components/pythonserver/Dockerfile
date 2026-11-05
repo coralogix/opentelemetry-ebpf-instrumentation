@@ -2,7 +2,7 @@
 FROM python:3.15.0-slim@sha256:ea4f1f290e071bf7d28199cfb3e09f5dbad31b50e9c32fd58f2f2d7be915f3ae
 EXPOSE 7770
 COPY internal/test/integration/components/pythonserver/requirements.txt /requirements.txt
-RUN pip install --require-hashes -r /requirements.txt
+RUN pip install --only-binary=:all: --require-hashes -r /requirements.txt
 # Alternative: RUN pip install flask uwsgi
 
 # Set the working directory to /build

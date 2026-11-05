@@ -3,7 +3,7 @@ FROM python:3.15@sha256:3c24e0b3ef4c5e2409f918894ccd5e05756eea2015ae6ddd289179b2
 EXPOSE 8080
 
 COPY internal/test/integration/components/pythonamqp/requirements.txt /requirements.txt
-RUN pip install --no-cache-dir --require-hashes -r /requirements.txt
+RUN pip install --no-cache-dir --only-binary=:all: --no-binary=python-qpid-proton --require-hashes -r /requirements.txt
 
 COPY internal/test/integration/components/pythonamqp/main.py /main.py
 
