@@ -1396,7 +1396,11 @@ func gatherOffsetsImpl(
 
 	errs := make([]error, len(probeMaps))
 	for i, probes := range probeMaps {
-		errs[i] = resolveProbeOffsets(probes, syms, instrPath, log)
+		if err := resolveProbeOffsets(probes, syms, instrPath, log); err != nil {
+			errs[i] = err
+			continue
+		}
+		errs[i] = expandRustPathProbes(elfFile, probes, instrPath, log)
 	}
 
 	return errs, nil
@@ -1410,8 +1414,8 @@ func resolveProbeOffsets(
 ) error {
 	for symbolName, probeArray := range probes {
 		for _, probe := range probeArray {
-			// Demangled-path probes are resolved by expandRustPathProbes below (one probe
-			// per monomorphized copy), not by mangled-name lookup.
+			// Demangled-path probes are resolved by expandRustPathProbes after this pass
+			// (one probe per monomorphized copy), not by mangled-name lookup.
 			if probe.DemangledPath {
 				continue
 			}
@@ -1449,10 +1453,6 @@ func resolveProbeOffsets(
 				"size", sym.Len,
 			)
 		}
-	}
-
-	if err := expandRustPathProbes(elfFile, probes, instrPath, log); err != nil {
-		return err
 	}
 
 	return nil
