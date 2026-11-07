@@ -6,7 +6,7 @@ package request // import "go.opentelemetry.io/obi/pkg/appolly/app/request"
 import (
 	"strings"
 
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 const (

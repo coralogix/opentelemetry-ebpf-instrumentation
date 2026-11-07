@@ -13,7 +13,7 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"go.opentelemetry.io/obi/pkg/cloud"
 	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"

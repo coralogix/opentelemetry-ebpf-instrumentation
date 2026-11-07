@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,10 +20,9 @@ const upstreamSemconvSchemaURLPrefix = "https://opentelemetry.io/schemas/"
 
 // TestSemconvVersionMatchesManifest guards against drift between the Go-side
 // semconv import and the upstream-semconv dependency pinned in the OBI
-// schema registry's manifest. The two MUST move together — bumping the Go
-// import without updating `schemas/obi/manifest.yaml` (or vice versa) would
-// cause weaver to validate emissions against the wrong version of the
-// upstream registry.
+// schema registry's manifest. The Go import may lag the manifest, because
+// opentelemetry-go publishes semconv packages after the semconv release,
+// but it must never be newer than the registry weaver validates against.
 func TestSemconvVersionMatchesManifest(t *testing.T) {
 	manifestPath := filepath.Join("..", "..", "..", "schemas", "obi", "manifest.yaml")
 	raw, err := os.ReadFile(manifestPath)
@@ -55,10 +55,10 @@ func TestSemconvVersionMatchesManifest(t *testing.T) {
 	// The schema_url ends with `/<version>`; extract that segment.
 	manifestSemconvVersion := dep.SchemaURL[strings.LastIndex(dep.SchemaURL, "/")+1:]
 
-	require.Equal(t, SemconvVersion(), manifestSemconvVersion,
-		"go.opentelemetry.io/otel/semconv version (%s) does not match "+
+	require.LessOrEqual(t, semver.Compare("v"+SemconvVersion(), "v"+manifestSemconvVersion), 0,
+		"go.opentelemetry.io/otel/semconv version (%s) is newer than "+
 			"the upstream semconv schema_url version pinned in "+
-			"schemas/obi/manifest.yaml (%s); bump them together",
+			"schemas/obi/manifest.yaml (%s); bump the manifest too",
 		SemconvVersion(), manifestSemconvVersion)
 
 	// The registry_path also embeds the version; sanity-check it matches.

@@ -10,9 +10,10 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"go.opentelemetry.io/obi/pkg/buildinfo"
+	"go.opentelemetry.io/obi/pkg/export/attributes/semconvgenai"
 )
 
 // Name of an attribute. This is the common internal representation of a metric attribute name,
@@ -318,17 +319,17 @@ const (
 
 	// GenAI
 	// NOTE: semconv v1.42.0 drops gen_ai.* (moved to a separate repo with no Go bindings yet); revisit these on the next semconv bump.
-	GenAIInput             = Name(semconv.GenAIInputMessagesKey)
-	GenAIInstructions      = Name(semconv.GenAISystemInstructionsKey)
-	GenAIOutput            = Name(semconv.GenAIOutputMessagesKey)
+	GenAIInput             = Name(semconvgenai.GenAIInputMessagesKey)
+	GenAIInstructions      = Name(semconvgenai.GenAISystemInstructionsKey)
+	GenAIOutput            = Name(semconvgenai.GenAIOutputMessagesKey)
 	GenAIMetadata          = Name("gen_ai.metadata")
-	GenAITools             = Name(semconv.GenAIToolDefinitionsKey)
-	GenAIToolName          = Name(semconv.GenAIToolNameKey)
-	GenAIToolType          = Name(semconv.GenAIToolTypeKey)
-	GenAIToolCallID        = Name(semconv.GenAIToolCallIDKey)
-	GenAIToolCallArguments = Name(semconv.GenAIToolCallArgumentsKey)
-	GenAIToolCallResult    = Name(semconv.GenAIToolCallResultKey)
-	GenAIPromptName        = Name(semconv.GenAIPromptNameKey)
+	GenAITools             = Name(semconvgenai.GenAIToolDefinitionsKey)
+	GenAIToolName          = Name(semconvgenai.GenAIToolNameKey)
+	GenAIToolType          = Name(semconvgenai.GenAIToolTypeKey)
+	GenAIToolCallID        = Name(semconvgenai.GenAIToolCallIDKey)
+	GenAIToolCallArguments = Name(semconvgenai.GenAIToolCallArgumentsKey)
+	GenAIToolCallResult    = Name(semconvgenai.GenAIToolCallResultKey)
+	GenAIPromptName        = Name(semconvgenai.GenAIPromptNameKey)
 	GenAIResponseError     = Name("gen_ai.response.error")
 	OpenAIRequestQuestions = Name("openai.request.questions")
 )
@@ -362,10 +363,10 @@ const (
 // MCP (Model Context Protocol) attributes
 // NOTE: semconv v1.42.0 drops mcp.* too, same caveat as the GenAI block above.
 const (
-	MCPMethodName      = Name(semconv.McpMethodNameKey)
-	MCPSessionID       = Name(semconv.McpSessionIDKey)
-	MCPProtocolVersion = Name(semconv.McpProtocolVersionKey)
-	MCPResourceURI     = Name(semconv.McpResourceURIKey)
+	MCPMethodName      = Name(semconvgenai.McpMethodNameKey)
+	MCPSessionID       = Name(semconvgenai.McpSessionIDKey)
+	MCPProtocolVersion = Name(semconvgenai.McpProtocolVersionKey)
+	MCPResourceURI     = Name(semconvgenai.McpResourceURIKey)
 )
 
 // DNS events
@@ -376,17 +377,17 @@ const (
 // GenAI events
 
 const (
-	GenAIOperationName = Name(semconv.GenAIOperationNameKey)
-	GenAIProviderName  = Name(semconv.GenAIProviderNameKey)
+	GenAIOperationName = Name(semconvgenai.GenAIOperationNameKey)
+	GenAIProviderName  = Name(semconvgenai.GenAIProviderNameKey)
 	QwenProviderName   = "qwen"
 	// With GenAI events, it's the first time we have a single event produce two separate metrics: input->tokens, output->tokens.
 	// All of our current metrics have one set of attributes and a value for that. These two attributes are internal and they
-	// map to semconv.GenAITokenTypeKey when they are generated in metrics. The span_getter.go code will generate
-	// semconv.GenAITokenTypeKey with "input" string and semconv.GenAITokenTypeKey with "output" string.
-	GenAITokenTypeInput  = Name(semconv.GenAITokenTypeKey)
+	// map to semconvgenai.GenAITokenTypeKey when they are generated in metrics. The span_getter.go code will generate
+	// semconvgenai.GenAITokenTypeKey with "input" string and semconvgenai.GenAITokenTypeKey with "output" string.
+	GenAITokenTypeInput  = Name(semconvgenai.GenAITokenTypeKey)
 	GenAITokenTypeOutput = Name("gen_ai.token.type_output")
-	GenAIRequestModel    = Name(semconv.GenAIRequestModelKey)
-	GenAIResponseModel   = Name(semconv.GenAIResponseModelKey)
+	GenAIRequestModel    = Name(semconvgenai.GenAIRequestModelKey)
+	GenAIResponseModel   = Name(semconvgenai.GenAIResponseModelKey)
 )
 
 // Stat metrics
