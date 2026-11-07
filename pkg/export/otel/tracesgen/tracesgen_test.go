@@ -18,13 +18,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	trace2 "go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
 	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
 	"go.opentelemetry.io/obi/pkg/export/attributes"
 	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/attributes/semconvgenai"
 	"go.opentelemetry.io/obi/pkg/export/instrumentations"
 	"go.opentelemetry.io/obi/pkg/metadata"
 )
@@ -1721,26 +1722,26 @@ func TestOllamaEmbeddingAttributes(t *testing.T) {
 	}))
 
 	for key, expected := range map[attribute.Key]any{
-		semconv.GenAIProviderNameKey:             "ollama",
-		semconv.GenAIOperationNameKey:            "embeddings",
-		semconv.GenAIRequestModelKey:             "all-minilm:l6-v2",
-		semconv.GenAIResponseModelKey:            "all-minilm:l6-v2",
-		semconv.GenAIUsageInputTokensKey:         int64(8),
-		semconv.GenAIEmbeddingsDimensionCountKey: int64(4),
+		semconvgenai.GenAIProviderNameKey:             "ollama",
+		semconvgenai.GenAIOperationNameKey:            "embeddings",
+		semconvgenai.GenAIRequestModelKey:             "all-minilm:l6-v2",
+		semconvgenai.GenAIResponseModelKey:            "all-minilm:l6-v2",
+		semconvgenai.GenAIUsageInputTokensKey:         int64(8),
+		semconvgenai.GenAIEmbeddingsDimensionCountKey: int64(4),
 	} {
 		v, ok := attrs.Get(string(key))
 		require.True(t, ok, "missing %s", key)
 		assert.Equal(t, expected, v.AsRaw(), "attribute %s", key)
 	}
 
-	input, ok := attrs.Get(string(semconv.GenAIInputMessagesKey))
+	input, ok := attrs.Get(string(semconvgenai.GenAIInputMessagesKey))
 	require.True(t, ok)
 	assert.Contains(t, input.Str(), "why is the sky blue?")
 
 	for _, key := range []attribute.Key{
-		semconv.GenAIOutputMessagesKey,
-		semconv.GenAIUsageOutputTokensKey,
-		semconv.GenAIResponseFinishReasonsKey,
+		semconvgenai.GenAIOutputMessagesKey,
+		semconvgenai.GenAIUsageOutputTokensKey,
+		semconvgenai.GenAIResponseFinishReasonsKey,
 		genAIRequestStreamKey,
 	} {
 		_, ok := attrs.Get(string(key))
@@ -1761,9 +1762,9 @@ func TestOllamaChatKeepsOutputWithoutDimensions(t *testing.T) {
 
 	attrs := AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{attr.GenAIOutput: {}}))
 
-	_, ok := attrs.Get(string(semconv.GenAIOutputMessagesKey))
+	_, ok := attrs.Get(string(semconvgenai.GenAIOutputMessagesKey))
 	assert.True(t, ok)
-	_, ok = attrs.Get(string(semconv.GenAIEmbeddingsDimensionCountKey))
+	_, ok = attrs.Get(string(semconvgenai.GenAIEmbeddingsDimensionCountKey))
 	assert.False(t, ok)
 }
 
@@ -1798,30 +1799,30 @@ func TestCohereChatAttributes(t *testing.T) {
 	attrs := AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{}))
 
 	for key, expected := range map[attribute.Key]any{
-		semconv.GenAIProviderNameKey:            "cohere",
-		semconv.GenAIOperationNameKey:           "chat",
-		semconv.GenAIResponseIDKey:              "c14c80c3",
-		semconv.GenAIRequestModelKey:            "command-a-03-2025",
-		semconv.GenAIResponseModelKey:           "command-a-03-2025",
-		semconv.GenAIRequestMaxTokensKey:        int64(256),
-		semconv.GenAIRequestTemperatureKey:      0.3,
-		semconv.GenAIRequestTopPKey:             0.75,
-		semconv.GenAIRequestTopKKey:             40.0,
-		semconv.GenAIRequestFrequencyPenaltyKey: 0.1,
-		semconv.GenAIRequestPresencePenaltyKey:  0.2,
-		semconv.GenAIRequestSeedKey:             int64(42),
-		genAIRequestStreamKey:                   true,
+		semconvgenai.GenAIProviderNameKey:            "cohere",
+		semconvgenai.GenAIOperationNameKey:           "chat",
+		semconvgenai.GenAIResponseIDKey:              "c14c80c3",
+		semconvgenai.GenAIRequestModelKey:            "command-a-03-2025",
+		semconvgenai.GenAIResponseModelKey:           "command-a-03-2025",
+		semconvgenai.GenAIRequestMaxTokensKey:        int64(256),
+		semconvgenai.GenAIRequestTemperatureKey:      0.3,
+		semconvgenai.GenAIRequestTopPKey:             0.75,
+		semconvgenai.GenAIRequestTopKKey:             40.0,
+		semconvgenai.GenAIRequestFrequencyPenaltyKey: 0.1,
+		semconvgenai.GenAIRequestPresencePenaltyKey:  0.2,
+		semconvgenai.GenAIRequestSeedKey:             int64(42),
+		genAIRequestStreamKey:                        true,
 	} {
 		v, ok := attrs.Get(string(key))
 		require.True(t, ok, "missing %s", key)
 		assert.Equal(t, expected, v.AsRaw(), "attribute %s", key)
 	}
 
-	reasons, ok := attrs.Get(string(semconv.GenAIResponseFinishReasonsKey))
+	reasons, ok := attrs.Get(string(semconvgenai.GenAIResponseFinishReasonsKey))
 	require.True(t, ok)
 	assert.Equal(t, []any{"COMPLETE"}, reasons.Slice().AsRaw())
 
-	stops, ok := attrs.Get(string(semconv.GenAIRequestStopSequencesKey))
+	stops, ok := attrs.Get(string(semconvgenai.GenAIRequestStopSequencesKey))
 	require.True(t, ok)
 	assert.Equal(t, []any{"END"}, stops.Slice().AsRaw())
 }
@@ -1862,12 +1863,12 @@ func TestGenAIResponseModelFallbackIsGuarded(t *testing.T) {
 
 	attrs := AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{}))
 
-	_, ok := attrs.Get(string(semconv.GenAIResponseModelKey))
+	_, ok := attrs.Get(string(semconvgenai.GenAIResponseModelKey))
 	assert.False(t, ok, "gen_ai.response.model must be absent when neither model was parsed")
 
 	span.GenAI.Qwen.Request.Model = "qwen-max"
 	attrs = AttrsToMap(TraceAttributesSelector(span, map[attr.Name]struct{}{}))
-	model, ok := attrs.Get(string(semconv.GenAIResponseModelKey))
+	model, ok := attrs.Get(string(semconvgenai.GenAIResponseModelKey))
 	require.True(t, ok, "the fallback must still report the request model when one was parsed")
 	assert.Equal(t, "qwen-max", model.Str())
 }
@@ -2460,98 +2461,98 @@ func TestGenAISpanNameMatchesEmittedAttributes(t *testing.T) {
 			name:     "OpenAI chat",
 			subType:  request.HTTPSubtypeOpenAI,
 			genAI:    &request.GenAI{OpenAI: &request.VendorOpenAI{OperationName: request.ChatOperationName, Request: request.OpenAIInput{Model: "gpt-4o"}, ResponseModel: "gpt-4o-2024-08-06"}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat gpt-4o",
 		},
 		{
 			name:     "OpenAI unrecognized endpoint",
 			subType:  request.HTTPSubtypeOpenAI,
 			genAI:    &request.GenAI{OpenAI: &request.VendorOpenAI{OperationName: request.OtherOperationName, Request: request.OpenAIInput{Model: "gpt-4o"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "_OTHER gpt-4o",
 		},
 		{
 			name:     "OpenAI-compatible chat",
 			subType:  request.HTTPSubtypeOpenAICompatible,
 			genAI:    &request.GenAI{OpenAICompatible: &request.VendorOpenAI{OperationName: request.ChatOperationName, ProviderName: "litellm", Request: request.OpenAIInput{Model: "gpt-4o-mini"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat gpt-4o-mini",
 		},
 		{
 			name:     "Anthropic messages",
 			subType:  request.HTTPSubtypeAnthropic,
 			genAI:    &request.GenAI{Anthropic: &request.VendorAnthropic{Input: request.AnthropicRequest{Model: "claude-sonnet-4-6"}, Output: request.AnthropicResponse{Type: request.ChatOperationName, Model: "claude-sonnet-4-6"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat claude-sonnet-4-6",
 		},
 		{
 			name:     "Anthropic without request model",
 			subType:  request.HTTPSubtypeAnthropic,
 			genAI:    &request.GenAI{Anthropic: &request.VendorAnthropic{Output: request.AnthropicResponse{Type: request.ChatOperationName, Model: "claude-sonnet-4-6"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat",
 		},
 		{
 			name:     "Gemini without request model",
 			subType:  request.HTTPSubtypeGemini,
 			genAI:    &request.GenAI{Gemini: &request.VendorGemini{Output: request.GeminiResponse{ModelVersion: "gemini-2.0-flash-001"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "generate_content",
 		},
 		{
 			name:     "Qwen empty operation",
 			subType:  request.HTTPSubtypeQwen,
 			genAI:    &request.GenAI{Qwen: &request.VendorOpenAI{Request: request.OpenAIInput{Model: "qwen-plus"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "_OTHER qwen-plus",
 		},
 		{
 			name:     "Ollama",
 			subType:  request.HTTPSubtypeOllama,
 			genAI:    &request.GenAI{Ollama: &request.VendorOpenAI{OperationName: request.ChatOperationName, Request: request.OpenAIInput{Model: "llama3.2"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat llama3.2",
 		},
 		{
 			name:     "Cohere",
 			subType:  request.HTTPSubtypeCohere,
 			genAI:    &request.GenAI{Cohere: &request.VendorOpenAI{OperationName: request.ChatOperationName, Request: request.OpenAIInput{Model: "command-a-03-2025"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "chat command-a-03-2025",
 		},
 		{
 			name:     "Bedrock",
 			subType:  request.HTTPSubtypeAWSBedrock,
 			genAI:    &request.GenAI{Bedrock: &request.VendorBedrock{Model: "amazon.titan-text-premier-v1:0"}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "invoke_model amazon.titan-text-premier-v1:0",
 		},
 		{
 			name:     "Embedding",
 			subType:  request.HTTPSubtypeEmbedding,
 			genAI:    &request.GenAI{Embedding: &request.VendorEmbedding{Provider: "voyage", Model: "voyage-3"}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "embeddings voyage-3",
 		},
 		{
 			name:     "Rerank without request model",
 			subType:  request.HTTPSubtypeRerank,
 			genAI:    &request.GenAI{Rerank: &request.VendorRerank{Provider: "cohere", Output: request.RerankResponse{Model: "rerank-v3.5"}}},
-			target:   semconv.GenAIRequestModelKey,
+			target:   semconvgenai.GenAIRequestModelKey,
 			expected: "rerank",
 		},
 		{
 			name:     "Retrieval with data source",
 			subType:  request.HTTPSubtypeRetrieval,
 			genAI:    &request.GenAI{Retrieval: &request.VendorRetrieval{Provider: "pinecone", Input: request.RetrievalRequest{Namespace: "docs"}}},
-			target:   semconv.GenAIDataSourceIDKey,
+			target:   semconvgenai.GenAIDataSourceIDKey,
 			expected: "retrieval docs",
 		},
 		{
 			name:     "Retrieval without data source",
 			subType:  request.HTTPSubtypeRetrieval,
 			genAI:    &request.GenAI{Retrieval: &request.VendorRetrieval{Provider: "qdrant"}},
-			target:   semconv.GenAIDataSourceIDKey,
+			target:   semconvgenai.GenAIDataSourceIDKey,
 			expected: "retrieval",
 		},
 	} {
@@ -2559,7 +2560,7 @@ func TestGenAISpanNameMatchesEmittedAttributes(t *testing.T) {
 			span := &request.Span{Type: request.EventTypeHTTPClient, SubType: tc.subType, Method: "POST", Route: "/v1/any", GenAI: tc.genAI}
 			selected := AttrsToMap(TraceAttributesSelector(span, defaultAttrs))
 
-			operation, ok := selected.Get(string(semconv.GenAIOperationNameKey))
+			operation, ok := selected.Get(string(semconvgenai.GenAIOperationNameKey))
 			require.True(t, ok)
 
 			fromAttributes := operation.Str()

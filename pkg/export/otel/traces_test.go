@@ -22,7 +22,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
@@ -30,6 +30,7 @@ import (
 	ebpfhttp "go.opentelemetry.io/obi/pkg/ebpf/common/http"
 	"go.opentelemetry.io/obi/pkg/export/attributes"
 	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/attributes/semconvgenai"
 	"go.opentelemetry.io/obi/pkg/export/instrumentations"
 	"go.opentelemetry.io/obi/pkg/export/otel/idgen"
 	"go.opentelemetry.io/obi/pkg/export/otel/otelcfg"
@@ -799,8 +800,8 @@ func TestGenerateTracesAttributes(t *testing.T) {
 
 		spans := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans()
 		attrs := spans.At(0).Attributes()
-		ensureTraceStrAttr(t, attrs, semconv.GenAIProviderNameKey, "openai")
-		ensureTraceStrAttr(t, attrs, semconv.GenAIOperationNameKey, request.OtherOperationName)
+		ensureTraceStrAttr(t, attrs, semconvgenai.GenAIProviderNameKey, "openai")
+		ensureTraceStrAttr(t, attrs, semconvgenai.GenAIOperationNameKey, request.OtherOperationName)
 	})
 
 	t.Run("test OpenAI ChatKit trace generation", func(t *testing.T) {
@@ -821,8 +822,8 @@ func TestGenerateTracesAttributes(t *testing.T) {
 
 		spans := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans()
 		attrs := spans.At(0).Attributes()
-		ensureTraceStrAttr(t, attrs, semconv.GenAIOperationNameKey, request.ChatKitSessionOperationName)
-		ensureTraceStrAttr(t, attrs, semconv.GenAIConversationIDKey, "cksess_68")
+		ensureTraceStrAttr(t, attrs, semconvgenai.GenAIOperationNameKey, request.ChatKitSessionOperationName)
+		ensureTraceStrAttr(t, attrs, semconvgenai.GenAIConversationIDKey, "cksess_68")
 	})
 
 	t.Run("test Mongo trace generation", func(t *testing.T) {
@@ -1302,14 +1303,14 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		require.Equal(t, 1, traces.ResourceSpans().Len())
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
 
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "openai")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "response")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "resp_abc123")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "gpt-5-mini")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "gpt-5-mini-2025-08-07")
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "openai")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "response")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "resp_abc123")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "gpt-5-mini")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "gpt-5-mini-2025-08-07")
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("OpenAI Decisions questions are opt-in", func(t *testing.T) {
@@ -1392,20 +1393,20 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		withoutOptIn := tracesgen.TraceAttributesSelector(&span, map[attr.Name]struct{}{})
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, withoutOptIn), reporterName)
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("openai.request.questions"))
 
 		withOptIn := tracesgen.TraceAttributesSelector(&span, map[attr.Name]struct{}{attr.GenAIInput: {}})
 		traces = tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, withOptIn), reporterName)
 		spanAttrs = traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"developer","parts":[{"type":"text","content":"Assess the customer report."}]},{"role":"user","parts":[{"type":"text","content":"Check the charges."},{"type":"input_json","data":{"order":{"charges":[49,49]}}},{"type":"text","content":"Are they duplicates?"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"developer","parts":[{"type":"text","content":"Assess the customer report."}]},{"role":"user","parts":[{"type":"text","content":"Check the charges."},{"type":"input_json","data":{"order":{"charges":[49,49]}}},{"type":"text","content":"Are they duplicates?"}]}]`)
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("openai.request.questions"))
 
 		span.GenAI = nil
 		withoutCapture := tracesgen.TraceAttributesSelector(&span, map[attr.Name]struct{}{attr.GenAIInput: {}})
 		traces = tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, withoutCapture), reporterName)
 		spanAttrs = traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
 	})
 
 	t.Run("OpenAI questions are not emitted for unrelated operations", func(t *testing.T) {
@@ -1452,9 +1453,9 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"How do I check if a Python object is an instance of a class?"}]}]`)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"How do I check if a Python object is an instance of a class?"}]}]`)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("OpenAI span - optional GenAIOutput enabled", func(t *testing.T) {
@@ -1470,9 +1471,9 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"Arrr!"}],"finish_reason":"completed"}]`)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"Arrr!"}],"finish_reason":"completed"}]`)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("OpenAI span - optional GenAIInstructions enabled", func(t *testing.T) {
@@ -1490,9 +1491,9 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"You are a coding assistant that talks like a pirate."}]`)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"You are a coding assistant that talks like a pirate."}]`)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
 	})
 
 	t.Run("OpenAI span - instructions not emitted when empty even if attr enabled", func(t *testing.T) {
@@ -1507,7 +1508,7 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("OpenAI span - all optional attributes enabled", func(t *testing.T) {
@@ -1537,9 +1538,9 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"How do I check if a Python object is an instance of a class?"}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"Arrr!"}],"finish_reason":"completed"}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"You are a coding assistant that talks like a pirate."}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"How do I check if a Python object is an instance of a class?"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"Arrr!"}],"finish_reason":"completed"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"You are a coding assistant that talks like a pirate."}]`)
 	})
 
 	t.Run("OpenAI span - optional GenAIMetadata enabled", func(t *testing.T) {
@@ -1635,13 +1636,13 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "openai")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "chat")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "chatcmpl-DBTg5Ms2mJhaAhZ56Wq8QSf2djw3S")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "gpt-4o-mini")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "gpt-4o-mini-2024-07-18")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "openai")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "chat")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "chatcmpl-DBTg5Ms2mJhaAhZ56Wq8QSf2djw3S")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "gpt-4o-mini")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "gpt-4o-mini-2024-07-18")
 		// input/output messages come through the optional attrs
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"I now can give a great answer"}],"finish_reason":"stop"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"I now can give a great answer"}],"finish_reason":"stop"}]`)
 	})
 
 	t.Run("OpenAI span - temperature from request when response temperature is zero", func(t *testing.T) {
@@ -1659,7 +1660,7 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		v, ok := spanAttrs.Get(string(semconv.GenAIRequestTemperatureKey))
+		v, ok := spanAttrs.Get(string(semconvgenai.GenAIRequestTemperatureKey))
 		require.True(t, ok, "gen_ai.request.temperature should be present")
 		assert.InDelta(t, 0.7, v.Double(), 0.001)
 	})
@@ -1681,9 +1682,9 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIProviderNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOperationNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIProviderNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOperationNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
 	})
 
 	t.Run("OpenAI span - finish_reasons, max_tokens, presence_penalty, n, stream, reasoning", func(t *testing.T) {
@@ -1713,10 +1714,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrSliceAttr(t, spanAttrs, semconv.GenAIResponseFinishReasonsKey, []string{"stop"})
-		ensureTraceIntAttr(t, spanAttrs, semconv.GenAIRequestMaxTokensKey, 2048)
-		ensureTraceFloatAttr(t, spanAttrs, semconv.GenAIRequestPresencePenaltyKey, 0.5)
-		ensureTraceIntAttr(t, spanAttrs, semconv.GenAIRequestChoiceCountKey, 3)
+		ensureTraceStrSliceAttr(t, spanAttrs, semconvgenai.GenAIResponseFinishReasonsKey, []string{"stop"})
+		ensureTraceIntAttr(t, spanAttrs, semconvgenai.GenAIRequestMaxTokensKey, 2048)
+		ensureTraceFloatAttr(t, spanAttrs, semconvgenai.GenAIRequestPresencePenaltyKey, 0.5)
+		ensureTraceIntAttr(t, spanAttrs, semconvgenai.GenAIRequestChoiceCountKey, 3)
 		ensureTraceBoolAttr(t, spanAttrs, attribute.Key("gen_ai.request.stream"), true)
 		ensureTraceIntAttr(t, spanAttrs, attribute.Key("gen_ai.usage.reasoning.output_tokens"), 20)
 	})
@@ -1738,8 +1739,8 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceIntAttr(t, spanAttrs, semconv.GenAIEmbeddingsDimensionCountKey, 256)
-		ensureTraceStrSliceAttr(t, spanAttrs, semconv.GenAIRequestEncodingFormatsKey, []string{"float"})
+		ensureTraceIntAttr(t, spanAttrs, semconvgenai.GenAIEmbeddingsDimensionCountKey, 256)
+		ensureTraceStrSliceAttr(t, spanAttrs, semconvgenai.GenAIRequestEncodingFormatsKey, []string{"float"})
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("gen_ai.request.embedding.dimensions"))
 	})
 
@@ -1773,23 +1774,23 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "anthropic")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "message")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "msg_01QCj5VkxPS3NQUtrt5Npjcr")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "claude-sonnet-4-6")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "claude-sonnet-4-6")
-		ensureTraceIntAttr(t, spanAttrs, semconv.GenAIRequestMaxTokensKey, 1024)
-		ensureTraceFloatAttr(t, spanAttrs, semconv.GenAIRequestTemperatureKey, 0.7)
-		ensureTraceFloatAttr(t, spanAttrs, semconv.GenAIRequestTopPKey, 0.9)
-		ensureTraceFloatAttr(t, spanAttrs, semconv.GenAIRequestTopKKey, 40.0)
-		ensureTraceStrSliceAttr(t, spanAttrs, semconv.GenAIRequestStopSequencesKey, []string{"\n\nHuman:"})
-		ensureTraceStrSliceAttr(t, spanAttrs, semconv.GenAIResponseFinishReasonsKey, []string{"end_turn"})
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "anthropic")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "message")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "msg_01QCj5VkxPS3NQUtrt5Npjcr")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "claude-sonnet-4-6")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "claude-sonnet-4-6")
+		ensureTraceIntAttr(t, spanAttrs, semconvgenai.GenAIRequestMaxTokensKey, 1024)
+		ensureTraceFloatAttr(t, spanAttrs, semconvgenai.GenAIRequestTemperatureKey, 0.7)
+		ensureTraceFloatAttr(t, spanAttrs, semconvgenai.GenAIRequestTopPKey, 0.9)
+		ensureTraceFloatAttr(t, spanAttrs, semconvgenai.GenAIRequestTopKKey, 40.0)
+		ensureTraceStrSliceAttr(t, spanAttrs, semconvgenai.GenAIRequestStopSequencesKey, []string{"\n\nHuman:"})
+		ensureTraceStrSliceAttr(t, spanAttrs, semconvgenai.GenAIResponseFinishReasonsKey, []string{"end_turn"})
 		ensureTraceBoolAttr(t, spanAttrs, attribute.Key("gen_ai.request.stream"), false)
 		ensureTraceIntAttr(t, spanAttrs, attribute.Key("gen_ai.usage.cache_creation.input_tokens"), 100)
 		ensureTraceIntAttr(t, spanAttrs, attribute.Key("gen_ai.usage.cache_read.input_tokens"), 50)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("Anthropic span - optional attributes and error request id", func(t *testing.T) {
@@ -1827,12 +1828,12 @@ func TestGenerateTracesAttributes(t *testing.T) {
 
 		topSpan := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 		spanAttrs := topSpan.Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "anthropic")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "req_011CZLkWqu2dABS8vFB9G6Lz")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain quantum computing in simple terms"}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"","parts":[{"type":"text","content":"Quantum computing uses superposition."}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIToolDefinitionsKey, `[{"type":"function","name":"calculator","description":"Performs arithmetic"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "anthropic")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "req_011CZLkWqu2dABS8vFB9G6Lz")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain quantum computing in simple terms"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"","parts":[{"type":"text","content":"Quantum computing uses superposition."}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIToolDefinitionsKey, `[{"type":"function","name":"calculator","description":"Performs arithmetic"}]`)
 		ensureTraceStrAttr(t, spanAttrs, semconv.ErrorTypeKey, "authentication_error")
 		assert.Empty(t, topSpan.Status().Message())
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("error.message"))
@@ -1857,10 +1858,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIProviderNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOperationNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIProviderNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOperationNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
 	})
 
 	makeGeminiSpan := func(ai *request.VendorGemini) request.Span {
@@ -1894,14 +1895,14 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "gcp.gemini")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "generate_content")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "resp_abc123def456")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "gemini-2.0-flash")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "gemini-2.0-flash")
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "gcp.gemini")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "generate_content")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "resp_abc123def456")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "gemini-2.0-flash")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "gemini-2.0-flash")
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("Gemini span - dynamic operation name", func(t *testing.T) {
@@ -1921,8 +1922,8 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "embed_content")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "text-embedding-004")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "embed_content")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "text-embedding-004")
 	})
 
 	t.Run("Gemini span - optional attributes and error", func(t *testing.T) {
@@ -1971,13 +1972,13 @@ func TestGenerateTracesAttributes(t *testing.T) {
 
 		topSpan := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 		spanAttrs := topSpan.Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "gcp.gemini")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "generate_content")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "resp_sys789")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"model","parts":[{"type":"text","content":"eBPF runs sandboxed programs in the kernel."}],"finish_reason":"STOP"}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIToolDefinitionsKey, `[{"type":"function","name":"get_weather"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "gcp.gemini")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "generate_content")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "resp_sys789")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"model","parts":[{"type":"text","content":"eBPF runs sandboxed programs in the kernel."}],"finish_reason":"STOP"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIToolDefinitionsKey, `[{"type":"function","name":"get_weather"}]`)
 		ensureTraceStrAttr(t, spanAttrs, semconv.ErrorTypeKey, "NOT_FOUND")
 		assert.Empty(t, topSpan.Status().Message())
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("error.message"))
@@ -2002,10 +2003,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIProviderNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOperationNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIProviderNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOperationNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
 	})
 
 	makeQwenSpan := func(ai *request.VendorOpenAI) request.Span {
@@ -2037,11 +2038,11 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "qwen")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "chat")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseIDKey, "chatcmpl-qwen123")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "qwen-plus")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "qwen-plus")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "qwen")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "chat")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseIDKey, "chatcmpl-qwen123")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "qwen-plus")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "qwen-plus")
 	})
 
 	t.Run("Qwen span - optional attributes", func(t *testing.T) {
@@ -2069,10 +2070,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "qwen")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `{"text":"eBPF runs in the kernel."}`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "qwen")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `{"text":"eBPF runs in the kernel."}`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise"}]`)
 	})
 
 	t.Run("Qwen span - nil Qwen means no GenAI attrs", func(t *testing.T) {
@@ -2093,10 +2094,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIProviderNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOperationNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIProviderNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOperationNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
 	})
 
 	makeBedrockSpan := func(ai *request.VendorBedrock) request.Span {
@@ -2124,13 +2125,13 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "aws.bedrock")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "invoke_model")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIRequestModelKey, "anthropic.claude-3-5-sonnet-20241022-v1:0")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIResponseModelKey, "anthropic.claude-3-5-sonnet-20241022-v1:0")
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAISystemInstructionsKey)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "aws.bedrock")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "invoke_model")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIRequestModelKey, "anthropic.claude-3-5-sonnet-20241022-v1:0")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIResponseModelKey, "anthropic.claude-3-5-sonnet-20241022-v1:0")
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey)
 	})
 
 	t.Run("Bedrock span - optional attributes and error", func(t *testing.T) {
@@ -2165,12 +2166,12 @@ func TestGenerateTracesAttributes(t *testing.T) {
 
 		topSpan := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0)
 		spanAttrs := topSpan.Attributes()
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIProviderNameKey, "aws.bedrock")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOperationNameKey, "invoke_model")
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"eBPF runs sandboxed programs in the kernel."}],"finish_reason":"end_turn"}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
-		ensureTraceStrAttr(t, spanAttrs, semconv.GenAIToolDefinitionsKey, `[{"type":"function","name":"get_weather","description":"Get weather"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIProviderNameKey, "aws.bedrock")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOperationNameKey, "invoke_model")
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIInputMessagesKey, `[{"role":"user","parts":[{"type":"text","content":"Explain eBPF"}]}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey, `[{"role":"assistant","parts":[{"type":"text","content":"eBPF runs sandboxed programs in the kernel."}],"finish_reason":"end_turn"}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAISystemInstructionsKey, `[{"type":"text","content":"Be concise."}]`)
+		ensureTraceStrAttr(t, spanAttrs, semconvgenai.GenAIToolDefinitionsKey, `[{"type":"function","name":"get_weather","description":"Get weather"}]`)
 		ensureTraceStrAttr(t, spanAttrs, semconv.ErrorTypeKey, "ValidationException")
 		assert.Empty(t, topSpan.Status().Message())
 		ensureTraceAttrNotExists(t, spanAttrs, attribute.Key("error.message"))
@@ -2195,10 +2196,10 @@ func TestGenerateTracesAttributes(t *testing.T) {
 		traces := tracesgen.GenerateTracesWithAttributes(cache, &span.Service, []attribute.KeyValue{}, hostID, groupFromSpanAndAttributes(&span, tAttrs), reporterName)
 
 		spanAttrs := traces.ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Attributes()
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIProviderNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOperationNameKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIInputMessagesKey)
-		ensureTraceAttrNotExists(t, spanAttrs, semconv.GenAIOutputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIProviderNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOperationNameKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIInputMessagesKey)
+		ensureTraceAttrNotExists(t, spanAttrs, semconvgenai.GenAIOutputMessagesKey)
 	})
 
 	t.Run("test HTTP server span with extracted headers", func(t *testing.T) {
