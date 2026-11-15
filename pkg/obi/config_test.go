@@ -437,6 +437,9 @@ discovery:
 			Enabled: true,
 			Timeout: 10 * time.Second,
 		},
+		Rust: RustConfig{
+			Enabled: true,
+		},
 		JVMRuntimeMetrics: JVMRuntimeMetricsConfig{
 			SamplingInterval: time.Second,
 		},
