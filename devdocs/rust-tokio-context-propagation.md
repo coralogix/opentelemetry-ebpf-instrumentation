@@ -384,7 +384,9 @@ path.
   still carries a previous occupant's entry (its dealloc unobserved) keeps that stale
   lineage until the version or epoch guard refuses it, as every reused Header did before
   the hooks; `bind_inner` and `spawn_task` re-initialize it, `Shared::schedule` cannot
-  tell a spawn from a wake and does not.
+  tell a spawn from a wake and does not. The baseline covers cargo's default `release`
+  and `dev` profiles; a custom profile that inlines more aggressively (`lto = "fat"`,
+  `codegen-units = 1`) can drop further copies and is not measured.
 
 - **Shared tasks: the in-flight window.** A long-lived task spawned under request N (a
   channel worker in an actor pattern, a pooled client's connection driver) records N's
