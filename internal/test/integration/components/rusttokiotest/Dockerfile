@@ -32,10 +32,15 @@ ARG CARGO_PROFILE=release
 # image as ./server either way, so the service name is the same in every suite.
 ARG SERVER_BIN=server
 
+# TOKIO_VERSION, when set, re-pins tokio in the lock before the build (a one-off sweep leg;
+# the regular matrix builds the committed lock). The lock stays consistent, so --locked holds.
+ARG TOKIO_VERSION=""
+
 WORKDIR /build
 COPY internal/test/integration/components/rusttokiotest .
 
-RUN if [ "$CARGO_PROFILE" = "debug" ]; then \
+RUN if [ -n "$TOKIO_VERSION" ]; then cargo update -p tokio --precise "$TOKIO_VERSION"; fi && \
+    if [ "$CARGO_PROFILE" = "debug" ]; then \
         cargo build --locked -p "$SERVER_BIN" -p backend; \
     else \
         cargo build --locked --release -p "$SERVER_BIN" -p backend; \

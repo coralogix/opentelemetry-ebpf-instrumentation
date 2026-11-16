@@ -12,6 +12,7 @@ services:
       args:
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
         RUST_LEG: ${RUST_LEG:-v0}
+        TOKIO_VERSION: ${TOKIO_VERSION:-}
     image: hatest-rust-tokio
     environment:
       START_DELAY: "15"

@@ -501,7 +501,7 @@ and network namespaces). The Rust app is built four ways, `CARGO_PROFILE={releas
 Rust 1.97, and rust 1.96.0, the last toolchain emitting the legacy `_ZN…E` scheme by
 default; legacy cannot be selected by flag on stable 1.97+), because the probes depend on
 how rustc emits tokio and on which scheme names the copies; a change is green only on all
-four.
+four. `TOKIO_VERSION` re-pins tokio for a one-off leg on another release.
 
 - `TestRustTokioContextPropagation` drives sequential requests and asserts at least one
   complete `server → client → backend` chain per pattern, then reads OBI's debug log and

@@ -10,6 +10,7 @@ services:
       args:
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
         RUST_LEG: ${RUST_LEG:-v0}
+        TOKIO_VERSION: ${TOKIO_VERSION:-}
         SERVER_BIN: server-actix
     image: hatest-rust-tokio-actix
     ports:
