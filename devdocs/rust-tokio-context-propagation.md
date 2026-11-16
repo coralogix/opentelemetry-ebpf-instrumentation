@@ -195,7 +195,8 @@ Measured on the integration servers and their backend (tokio 1.52.3, axum 0.7.9,
 1.10.1, reqwest 0.13.4, actix-web 4.18.1 with actix-rt 2.15.0, rust 1.99.0), arm64, Linux
 6.8. Copies = monomorphized symbol copies the instrumenter attached after exact-path
 matching, as the `rust path resolved` log lines report them, on the rust 1.99.0 (v0)
-build; the rust 1.96.0 legacy leg is not in this table yet. "Fires" = the probe is
+build. The rust 1.96.0 (legacy mangling) build gives the same counts except one more
+`Cell::new` copy in the axum release server and backend (31 / 9). "Fires" = the probe is
 observed at runtime.
 
 | Probe | Release: axum server / backend | Release: actix server / backend | Debug: axum server / backend | Debug: actix server / backend | Fires in release | Fires in debug |
@@ -205,7 +206,7 @@ observed at runtime.
 | `OwnedTasks::bind_inner` | 2 / 1 | 4 / 1 | 2 / 2 | 4 / 2 | yes | yes |
 | `Spawner::spawn_task` | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 | yes | yes |
 | `Shared::schedule` | absent / absent | 1 / absent | absent / absent | 1 / absent | yes, actix | yes, actix |
-| `Harness::complete` (added after this measurement) | 37 / 10 by `nm` | not measured yet | not measured yet | not measured yet | yes | yes |
+| `Harness::complete` | 37 / 10 | 44 / 10 | 74 / 20 | 88 / 20 | yes | yes |
 | `raw::dealloc` | 28 / 10 | 34 / 10 | 74 / 20 | 88 / 20 | only for a handle-drop last reference | same |
 | `set_current_task_id` | 1 / 1, call sites inlined | 1 / 1 | 1 / 1 | 1 / 1 | never | yes |
 | `Id::next` (return) | no usable copy | no usable copy | 1 / 1 | 1 / 1 | never | yes |
@@ -215,14 +216,25 @@ release inlines part of the poll and creation paths, hence the uneven ones.
 `Shared::schedule` exists only in a binary with a `LocalSet` (the actix server),
 `Spawner::spawn_task` only in one that links the blocking pool.
 
-Program sizes at this baseline, identical on arm64 and x86 (instructions; the branch offset
-limit is 32,767 per program): `obi_uprobe_tokio_poll` 619, `obi_uretprobe_tokio_poll` 442,
-`obi_uretprobe_tokio_cell_new` 399, `obi_uprobe_tokio_bind` 399, `obi_uprobe_tokio_schedule`
-426, `obi_uprobe_tokio_dealloc` 339, `obi_uprobe_tokio_set_task_id` 239,
-`obi_uretprobe_tokio_id_next` 374, and `obi_protocol_tcp`, which inlines the parent lookup,
-19,563.
+Program sizes at this baseline (x86 object; arm64 was equal when both were measured;
+instructions, the branch offset limit is 32,767 per program): `obi_uprobe_tokio_poll` 624,
+`obi_uretprobe_tokio_poll` 442, `obi_uretprobe_tokio_cell_new` 399, `obi_uprobe_tokio_bind`
+399, `obi_uprobe_tokio_schedule` 426, `obi_uprobe_tokio_complete` 339,
+`obi_uprobe_tokio_dealloc` 339, `obi_uprobe_tokio_set_task_id` 239,
+`obi_uretprobe_tokio_id_next` 374; `obi_protocol_tcp`, which inlines the parent lookup,
+19,890, and `obi_continue_protocol_http_tp_commit`, which inlines the inbound anchor,
+5,365. The Tokio programs and `obi_continue_protocol_http_tp_commit` pass the verifier on
+5.10.0 and 5.8; `obi_protocol_tcp` fails on 5.8 with the same error as main's object.
 
-The x86 matrix has not been measured yet; re-check this table on every toolchain bump
+Cost, measured with `hey` at 500 requests/s for 60 s per endpoint on a 4-vCPU Lima VM
+(Linux 6.8, arm64; app alone, OBI from `main`, this branch with the probes on, this
+branch with `capture.runtimes.rust.enabled: false`): on `/ws-spawn` the server's CPU is
+175 % alone, 167 % under `main`, 166 % with the probes and 169 % with them off; p99
+23.1 / 23.4 / 22.1 / 23.5 ms; OBI's own CPU 2.9 % in every OBI leg. On `/blocking` the
+four legs are within noise of each other. Per probe (`bpf_stats`): poll entry 323 ns,
+poll return 127 ns, `bind_inner` 197 ns, `complete` 237 ns, `Cell::new` 375 ns.
+
+The x86 integration matrix has not run yet; re-check this table on every toolchain bump
 (see the inlining limitation below).
 
 ## Probe Points
@@ -400,7 +412,7 @@ path.
   cross-side. Measured across the 2026-10 runs: a few same-side piles per run at most
   (pooled client), none for the channel worker. Irreducible for lineage-based resolution;
   the designed fix is a channel send/recv bridge (pairing the sender's task identity with
-  the received message), tracked as follow-up work. `TestRustTokioProbeDiscrimination`'s
+  the received message), the first follow-up to this feature. `TestRustTokioProbeDiscrimination`'s
   `pooled_reuse` and `channel_handoff` subtests exercise both shapes adversarially, gate
   `contaminated == 0` strictly and log the same-side residual.
 
@@ -467,7 +479,9 @@ path.
   preallocated when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
   false` skips the probes and leaves the maps allocated.
 
-- **Validated on arm64 only** until the x86 integration matrix runs.
+- **Validated on arm64 only** until the x86 integration matrix runs: Linux 6.8 for the
+  suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3; rust 1.99.0 (v0 mangling) and
+  1.96.0 (legacy mangling); cargo's default `release` and `dev` profiles.
 
 - **Requires Tokio symbols in the binary (fully-stripped binaries are unsupported, and
   degrade to pre-Tokio behavior, not to fail-closed).** The probes attach to internal
