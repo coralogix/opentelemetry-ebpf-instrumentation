@@ -6,6 +6,7 @@ package integration // import "go.opentelemetry.io/obi/internal/test/integration
 import (
 	"net/http"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,11 @@ import (
 
 	"go.opentelemetry.io/obi/internal/test/integration/components/docker"
 )
+
+// tokioMailboxEvictFills bounds how many fills mailbox_evicted runs before it calls a
+// surviving mailbox a defect. One fill misses when the mailbox's LRU node is pending in the
+// local list of the CPU that registered it (one run in about seventeen).
+const tokioMailboxEvictFills = 3
 
 // TestRustTokioCurrentThread drives the actix-web server: one current-thread Tokio runtime
 // per worker, so no task ever migrates. OBI still resolves a Tokio process only through the
@@ -119,10 +125,19 @@ func TestRustTokioCurrentThread(t *testing.T) {
 				// CPU's local LRU list until that CPU allocates 128 more nodes, so a second
 				// fill evicts it only by chance, and its log lines would push this one past
 				// the slice LogsTail reads.
-				obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
-				require.NoError(t, err)
-				require.Contains(t, obiLog, "origin=3",
-					"no task was re-registered at a wake without a parent: the fill did not evict the mailbox")
+				// A fill run after the worker thread moved CPU evicts nothing: the node waits in
+				// the old CPU's local list. Fill and wake again, a few times, before giving up.
+				for attempt := 1; ; attempt++ {
+					obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+					require.NoError(t, err)
+					if strings.Contains(obiLog, "origin=3") {
+						break
+					}
+					require.Less(t, attempt, tokioMailboxEvictFills,
+						"no task was re-registered at a wake without a parent: %d fills did not evict the mailbox", attempt)
+					fill(t)
+					driveTokioAB(tokioServerURL, "/mbox-a", "/mbox-b", 1) // wake the mailbox
+				}
 				fill(t) // evict the mailbox again before the burst
 			},
 		})
