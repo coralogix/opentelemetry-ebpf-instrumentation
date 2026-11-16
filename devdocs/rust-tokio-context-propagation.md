@@ -142,6 +142,11 @@ OBI normally assumes that work running on the same OS thread belongs to the same
 - a task created on the handler's thread can be **stolen and resumed on a different worker** before it makes its outgoing call,
 - `spawn_blocking` moves work onto a blocking-pool thread that never ran the handler at all.
 
+Measured with the discrimination suite (`TestRustTokioProbeDiscrimination`, 150 requests per
+side, release build, Linux 6.8 arm64): OBI from `main` links 40–46 outbound spans per supported
+shape (`spawn_blocking`, direct egress, `tokio::spawn`) to the other side's request and 15–19
+to the right one; this branch links 71–150 to the right one and none wrongly on the same build.
+
 To recover the correct parent trace, the tracer needs the current logical Tokio **task** rather than only the current OS thread.
 
 ### Two complementary task-identity mechanisms
@@ -196,8 +201,12 @@ Measured on the integration servers and their backend (tokio 1.52.3, axum 0.7.9,
 6.8. Copies = monomorphized symbol copies the instrumenter attached after exact-path
 matching, as the `rust path resolved` log lines report them, on the rust 1.99.0 (v0)
 build. The rust 1.96.0 (legacy mangling) build gives the same counts except one more
-`Cell::new` copy in the axum release server and backend (31 / 9). "Fires" = the probe is
-observed at runtime.
+`Cell::new` copy in the axum release server and backend (31 / 9). tokio 1.54.1 keeps the
+release counts within one copy of this table on both toolchains (except the backend built
+next to the actix server, which resolves one `Cell::new` copy instead of 8 on rust 1.99.0)
+and reports half the debug counts (37 / 10 for the axum pair, 44 / 10 for the actix pair),
+still equal across the four task probes; the suites pass on all three builds. "Fires" = the
+probe is observed at runtime.
 
 | Probe | Release: axum server / backend | Release: actix server / backend | Debug: axum server / backend | Debug: actix server / backend | Fires in release | Fires in debug |
 |---|---|---|---|---|---|---|
@@ -480,8 +489,8 @@ path.
   false` skips the probes and leaves the maps allocated.
 
 - **Validated on arm64 only** until the x86 integration matrix runs: Linux 6.8 for the
-  suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3; rust 1.99.0 (v0 mangling) and
-  1.96.0 (legacy mangling); cargo's default `release` and `dev` profiles.
+  suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3 and 1.54.1; rust 1.99.0 (v0 mangling)
+  and 1.96.0 (legacy mangling); cargo's default `release` and `dev` profiles.
 
 - **Requires Tokio symbols in the binary (fully-stripped binaries are unsupported, and
   degrade to pre-Tokio behavior, not to fail-closed).** The probes attach to internal
@@ -501,7 +510,9 @@ and network namespaces). The Rust app is built four ways, `CARGO_PROFILE={releas
 Rust 1.97, and rust 1.96.0, the last toolchain emitting the legacy `_ZN…E` scheme by
 default; legacy cannot be selected by flag on stable 1.97+), because the probes depend on
 how rustc emits tokio and on which scheme names the copies; a change is green only on all
-four. `TOKIO_VERSION` re-pins tokio for a one-off leg on another release.
+four. `TOKIO_VERSION` re-pins tokio for a one-off leg on another release, within what the
+other locked crates accept (the actix stack in `Cargo.lock` needs tokio 1.51 or newer; a lower
+release needs a lock resolved for it).
 
 - `TestRustTokioContextPropagation` drives sequential requests and asserts at least one
   complete `server → client → backend` chain per pattern, then reads OBI's debug log and
