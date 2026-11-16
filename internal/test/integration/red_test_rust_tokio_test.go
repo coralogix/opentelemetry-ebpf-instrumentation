@@ -38,6 +38,11 @@ const (
 // context-propagation suite emits a few thousand lines, so this is the whole log.
 const tokioOBILogLines = 200_000
 
+// tokioExecutables is how many executables the suites expect OBI to resolve the Tokio
+// poll path for: the server and the backend. The second backend process shares the
+// executable, and uprobes attach per file.
+const tokioExecutables = 2
+
 // tokioAnchorCounts are the kernel debug lines OBI emits when a task is anchored to an
 // inbound request (SET) and released at its response (CLEAR), on the Header path
 // ("task") and on the id path ("id"), plus the Header-path SETs seen after the id setter
@@ -148,6 +153,20 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() { _ = compose.Close() })
 
+	if obiFirst {
+		// OBI runs before the app (START_DELAY): hold the first request until it has resolved
+		// the poll path for both executables, or the order assertion below races the
+		// backend's attach. The server attaches first and answers the health poll while the
+		// backend's symbols are still being scanned, 2 ms apart in one run of eight.
+		require.EventuallyWithT(t, func(ct *assert.CollectT) {
+			obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
+			require.NoError(ct, err)
+			resolved, _ := tokioPollPathResolutions(obiLog)
+			require.GreaterOrEqual(ct, resolved, tokioExecutables,
+				"the poll path is not resolved for both executables yet")
+		}, testTimeout, time.Second)
+	}
+
 	// Wait until the server is accepting requests.
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		resp, err := http.Get(tokioServerURL + "/health")
@@ -190,25 +209,35 @@ func assertTokioAttachedBeforeFirstRequest(t *testing.T, compose *docker.Compose
 	obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
 	require.NoError(t, err)
 
-	const tokioProcesses = 2 // server + backend
-	resolved, bothResolved, firstSave := 0, -1, -1
+	resolved, bothResolved := tokioPollPathResolutions(obiLog)
+	firstSave := -1
 	for i, line := range strings.Split(obiLog, "\n") {
-		switch {
-		case strings.Contains(line, `msg="rust path resolved"`) &&
-			strings.Contains(line, "path=tokio::runtime::task::harness::Harness::poll"):
-			resolved++
-			if resolved == tokioProcesses {
-				bothResolved = i
-			}
-		case firstSave < 0 && strings.Contains(line, "Saving connection server span"):
+		if strings.Contains(line, "Saving connection server span") {
 			firstSave = i
+			break
 		}
 	}
 
-	require.GreaterOrEqual(t, resolved, tokioProcesses, "the poll path was not resolved for both tokio processes")
+	require.GreaterOrEqual(t, resolved, tokioExecutables, "the poll path was not resolved for both tokio processes")
 	require.NotEqual(t, -1, firstSave, "no server span was saved")
 	assert.Less(t, bothResolved, firstSave,
 		"a server span was saved before both processes had their tokio probes attached (OBI-first order not achieved)")
+}
+
+// tokioPollPathResolutions counts the executables whose Harness::poll path OBI resolved in
+// obiLog and returns the line at which the count reached tokioExecutables (-1 if never).
+func tokioPollPathResolutions(obiLog string) (resolved, completedAt int) {
+	completedAt = -1
+	for i, line := range strings.Split(obiLog, "\n") {
+		if strings.Contains(line, `msg="rust path resolved"`) &&
+			strings.Contains(line, "path=tokio::runtime::task::harness::Harness::poll") {
+			resolved++
+			if resolved == tokioExecutables {
+				completedAt = i
+			}
+		}
+	}
+	return resolved, completedAt
 }
 
 // assertTokioCrossServiceTrace drives sequential requests to urlPath until one trace shows
