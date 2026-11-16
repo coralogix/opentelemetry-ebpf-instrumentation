@@ -11,7 +11,17 @@
 # server hard-codes localhost). See docker-compose-rust-tokio.yml.
 #
 # Build context must be the repo root.
-FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rustbuilder
+#
+# RUST_LEG selects the toolchain, and with it the symbol mangling scheme the probes must
+# resolve: v0 (rust 1.99.0; the _R… scheme is the stable default since Rust 1.97) or
+# legacy (rust 1.96.0, the last toolchain emitting _ZN…E by default: what a binary built
+# before Rust 1.97 carries). Legacy cannot be selected by flag on stable 1.97+, so it is a
+# second pinned image. Both are tested. Declared before the first FROM: only such ARGs
+# can be used by a FROM.
+ARG RUST_LEG=v0
+FROM rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460 AS rust-legacy
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-v0
+FROM rust-${RUST_LEG} AS rustbuilder
 
 # CARGO_PROFILE selects release (default, what users ship) or debug. Both are tested:
 # tokio's task-id setter stays out of line only in debug, so the id walk runs only
@@ -22,20 +32,13 @@ ARG CARGO_PROFILE=release
 # image as ./server either way, so the service name is the same in every suite.
 ARG SERVER_BIN=server
 
-# RUSTFLAGS is threaded through so tests can select the symbol mangling scheme,
-# e.g. RUSTFLAGS="-C symbol-mangling-version=v0" to build the v0 (_R…) scheme
-# instead of the legacy (_ZN…E) default. Empty by default (legacy), so existing
-# builds are unchanged. It applies to every crate in the build, including tokio,
-# so its monomorphized symbols are emitted under the chosen scheme.
-ARG RUSTFLAGS=""
-
 WORKDIR /build
 COPY internal/test/integration/components/rusttokiotest .
 
 RUN if [ "$CARGO_PROFILE" = "debug" ]; then \
-        RUSTFLAGS="${RUSTFLAGS}" cargo build --locked -p "$SERVER_BIN" -p backend; \
+        cargo build --locked -p "$SERVER_BIN" -p backend; \
     else \
-        RUSTFLAGS="${RUSTFLAGS}" cargo build --locked --release -p "$SERVER_BIN" -p backend; \
+        cargo build --locked --release -p "$SERVER_BIN" -p backend; \
     fi
 
 FROM debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421

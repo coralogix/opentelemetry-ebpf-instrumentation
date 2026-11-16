@@ -194,8 +194,9 @@ The design depends on these Tokio behaviors (all verified by disassembly, source
 Measured on the integration servers and their backend (tokio 1.52.3, axum 0.7.9, hyper
 1.10.1, reqwest 0.13.4, actix-web 4.18.1 with actix-rt 2.15.0, rust 1.99.0), arm64, Linux
 6.8. Copies = monomorphized symbol copies the instrumenter attached after exact-path
-matching, as the `rust path resolved` log lines report them; the legacy and v0 mangling
-builds give identical counts. "Fires" = the probe is observed at runtime.
+matching, as the `rust path resolved` log lines report them, on the rust 1.99.0 (v0)
+build; the rust 1.96.0 legacy leg is not in this table yet. "Fires" = the probe is
+observed at runtime.
 
 | Probe | Release: axum server / backend | Release: actix server / backend | Debug: axum server / backend | Debug: actix server / backend | Fires in release | Fires in debug |
 |---|---|---|---|---|---|---|
@@ -482,8 +483,11 @@ path.
 The integration tests live in `internal/test/integration/red_test_rust_tokio_test.go` and
 run against one container holding both the Rust server and its backend (OBI shares its pid
 and network namespaces). The Rust app is built four ways, `CARGO_PROFILE={release,debug}`
-× `RUSTFLAGS={"", "-C symbol-mangling-version=v0"}`, because the probes depend on how
-rustc emits tokio; a change is green only on all four.
+× `RUST_LEG={v0,legacy}` (rust 1.99.0, whose stable default is the v0 `_R…` scheme since
+Rust 1.97, and rust 1.96.0, the last toolchain emitting the legacy `_ZN…E` scheme by
+default; legacy cannot be selected by flag on stable 1.97+), because the probes depend on
+how rustc emits tokio and on which scheme names the copies; a change is green only on all
+four.
 
 - `TestRustTokioContextPropagation` drives sequential requests and asserts at least one
   complete `server → client → backend` chain per pattern, then reads OBI's debug log and
