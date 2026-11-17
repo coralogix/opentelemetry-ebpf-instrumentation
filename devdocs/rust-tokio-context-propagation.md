@@ -407,8 +407,8 @@ path.
   37 copies in the axum server and 27 of 44 in the actix server, and an egress on a thread
   whose running task has no probed poll copy sees no current task and fails closed: the
   `tokio::spawn` shapes orphan, direct egress, `spawn_blocking`, `spawn_local` and sync
-  threads stay correlated, and no span gets a wrong parent. The lowest release that keeps
-  the full baseline lies between 1.30.0 and 1.52.3 and has not been bisected. A `LocalSet` task whose `Cell::new` was inlined and whose Header address
+  threads stay correlated, and no span gets a wrong parent. 1.52.3 is the lowest release
+  verified with the full baseline; releases between 1.30.0 and 1.52.3 are not measured. A `LocalSet` task whose `Cell::new` was inlined and whose Header address
   still carries a previous occupant's entry (its dealloc unobserved) keeps that stale
   lineage until the version or epoch guard refuses it, as every reused Header did before
   the hooks; `bind_inner` and `spawn_task` re-initialize it, `Shared::schedule` cannot
