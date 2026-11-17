@@ -115,19 +115,21 @@ The contract holds everywhere except the following, all documented in
 1. **The in-flight window of a shared task.** A long-lived task (a channel worker, a
    pooled connection driver) spawned under request N serves another request's job while N
    is still open. The lineage lookup is exact but its premise (lineage = ownership) is
-   false for handed-off work, and the runtime carries no signal for whose job it is. Same
-   endpoint, same side only: a shared task serving two inbound connections fails closed on
-   the epoch guard. Measured across the 2026-10 runs: a few same-side piles per run at
-   most (pooled client), zero cross-side everywhere.
+   false for handed-off work, and the runtime carries no signal for whose job it is. The
+   leak is bounded by the in-flight window of the request whose connection task the shared
+   task hangs from, not by the side: once that connection serves its next request the epoch
+   guard fails the lineage closed. Measured across the 2026-10 runs: a few same-side piles
+   per run at most (pooled client), zero cross-side everywhere.
 2. **Fully-stripped binaries** (the one true contract violation): no symbols → no probes
    → the process gate is never set → the process degrades to the GENERIC thread-keyed
    resolvers, which can misattribute under work-stealing. Undetectable at runtime (the
    Rust-detection symbol is stripped too); ship Rust binaries with symbols retained.
 
 The test suite enforces the contract in both observable directions: `contaminated == 0`
-(cross-endpoint joins) is gated on every case, and `piled == 0` (same-endpoint temporal
+(cross-endpoint joins) is gated on every case except `channel_handoff`, where both counts are
+logged and neither is gated (`tolerateInFlightLeak`), and `piled == 0` (same-endpoint temporal
 joins, the form cross-A/B testing is blind to) is gated everywhere except the two shared-task
-suites, where the residual is logged and watched instead. `contaminated` counts the cross-side
+cases, where the residual is logged and watched instead. `contaminated` counts the cross-side
 **client** span, the walk's own output; a cross-side backend span without its client span is
 `stray`, OBI's generic same-host correlation colliding on a shared ephemeral port (see
 [Known Limitations](#known-limitations)), logged and not gated.
@@ -192,7 +194,7 @@ The design depends on these Tokio behaviors (all verified by disassembly, source
 3. Task creation calls `tokio::runtime::task::id::Id::next` (a monotone `u64` counter; **ids are never reused**) immediately before the task's `Cell::new` on the spawning thread. This adjacency is what pairs a task's Id with its Header.
 4. The runtime maintains the TLS current-task id via `tokio::runtime::context::set_current_task_id`, called on poll enter (set) and exit (restore), including around **blocking-pool** task polls, which is why the id walk can correlate `spawn_blocking` in debug.
 5. Tokio is **statically linked** into the application binary, so all probes target the executable itself (`SEC("uprobe/self:...")`).
-6. Every task whose future finishes or is cancelled passes through `tokio::runtime::task::harness::Harness::<T,S>::complete`, inside the poll that finished it and before its memory is freed, whoever drops the last reference afterwards. A completed task frees itself through `Harness::dealloc` inlined into `complete` and `drop_reference`; the vtable thunk `raw::dealloc` runs only when a `Task` or `Notified` handle is the last reference dropped, so it is not a task-end signal (0 of 128,000 tasks in the integration suites reached it). `complete` keeps one out-of-line copy per `<T,S>` pair in release, the same count as `Harness::poll` (37 in the test server, 10 in the backend), as a local symbol with an `.llvm.` suffix that both demanglers ignore.
+6. Every task whose future finishes or is cancelled passes through `tokio::runtime::task::harness::Harness::<T,S>::complete`, inside the poll that finished it and before its memory is freed, whoever drops the last reference afterwards. A completed task frees itself through `Harness::dealloc` inlined into `complete` and `drop_reference`; the vtable thunk `raw::dealloc` runs only when a `Task` or `Notified` handle is the last reference dropped, so it is not a task-end signal (0 of 128,000 tasks in the integration suites reached it). `complete` keeps one out-of-line copy per `<T,S>` pair in release, the same count as `Harness::poll` in the axum pair (37 in the test server, 10 in the backend; 44 against 42 in the actix server), as a local symbol with an `.llvm.` suffix that both demanglers ignore.
 
 ### Symbol baseline
 
@@ -254,14 +256,14 @@ Because Tokio's internal symbols are generic and monomorphized, and are emitted 
 
 `tokio::runtime::task::harness::Harness::<T,S>::poll` runs a task poll. PARM1 is the task `Header*`.
 
-- **Entry** (`obi_uprobe_tokio_poll`): records `current_task = PARM1` in `tokio_thread_state`, **resets `current_id` and `pending_new_id` to 0** (see [the trust guard](#the-current_id-poll-scoped-trust-guard)), marks the process in `tokio_process`, and refreshes `obi_ctx` for the task now running here.
-- **Exit** (`obi_uretprobe_tokio_poll`): zeroes the thread's task fields so a stale task is never visible between polls; the entry stays, its `polled` flag marking the thread as a runtime thread.
+- **Entry** (`obi_uprobe_tokio_poll`): records `current_task = PARM1` in `tokio_thread_state`, **resets `current_id` and `pending_new_id` to 0** (see [the trust guard](#the-current_id-poll-scoped-trust-guard)), marks the process in `tokio_process`, registers a root entry (no parent, its own slot count) for a task that has none (older than the attach, spawn hooks inlined, or evicted), and refreshes `obi_ctx` for the task now running here.
+- **Exit** (`obi_uretprobe_tokio_poll`): restores the enclosing task when polls nest (a runtime driven inside `spawn_blocking`), otherwise zeroes the thread's task fields so a stale task is never visible between polls; the entry stays, its `polled` flag marking the thread as a runtime thread.
 
 Why `Harness::poll` and not `raw::poll` or `RawTask::poll`: `RawTask::poll` is inlined into the scheduler in release; `raw::poll` is a one-instruction thunk that tail-calls `Harness::poll` with no `RET`, so a uretprobe on it is silently skipped in release, leaving `current_task` stale between polls. `Harness::poll` retains its `RET` in release (verified on every copy). It is out-of-line only by the optimiser's choice: the instrumenter warns when any copy of a path attaches without return offsets, so a toolchain that changes this is visible in the logs.
 
 ### `Cell::new` (task creation) — `tokio_cell_new`
 
-Uretprobe; `PT_REGS_RC` is the new task's `Header*` (`Cell` is `#[repr(C)]`, header first). Records the Header-keyed lineage entry (`tokio_register_task`): parent = the thread's `current_task`, the parent's current `version` (pointer-reuse guard) and `anchor_epoch` (re-anchor guard), and a `version` of its own. No connection is copied from the parent: the walk climbs to the anchor. Additionally **consumes `pending_new_id`**, the Id generated by the immediately-preceding `Id::next` on this thread, storing it as `tokio_task_state.task_id`, which pairs the task's Id with its Header for lifecycle cleanup. Consume-once: should a creation path ever produce a second return, the extra entry gets `task_id = 0`, which can only degrade to a missing id lineage (orphan), never a wrong one.
+Uretprobe; `PT_REGS_RC` is the new task's `Header*` (`Cell` is `#[repr(C)]`, header first). Records the Header-keyed lineage entry (`tokio_register_task`): parent = the thread's `current_task`, the parent's current `version` (pointer-reuse guard) and `anchor_epoch` (re-anchor guard), and a `version` of its own. No connection is copied from the parent: the walk climbs to the anchor. Additionally **consumes `pending_new_id`**, the Id generated by the immediately-preceding `Id::next` on this thread, storing it as `tokio_task_state.task_id`, which pairs the task's Id with its Header for lifecycle cleanup. Consume-once: a registration that finds no pending id keeps the `task_id` of the entry already at that Header (the spawn-hook rewrite after an out-of-line `Cell::new`, or a reused Header whose dealloc was missed) and otherwise gets `task_id = 0`, which can only degrade to a missing id lineage (orphan), never a wrong one.
 
 ### `OwnedTasks::bind_inner`, `Spawner::spawn_task` (spawn-time registration) — `tokio_bind`
 
@@ -282,7 +284,7 @@ Resolves no usable copy in release (inlined), so the id map stays empty there by
 
 ### `set_current_task_id` (TLS current-task id) — `tokio_set_task_id`
 
-`tokio::runtime::context::set_current_task_id(Option<Id>)`: entry uprobe; PARM1 is the id being made current (niche-optimized `Option<NonZeroU64>`: `None == 0`). Updates `tokio_thread_state.current_id`, only on an entry created by poll entry (the trust guard). Fires only in debug builds (call sites inlined in release). A belt-and-braces `id > u32::MAX` skip guards against any unexpected shim passing a pointer; skipping a genuine huge id could only orphan.
+`tokio::runtime::context::set_current_task_id(Option<Id>)`: entry uprobe; PARM1 is the id being made current (niche-optimized `Option<NonZeroU64>`: `None == 0`). Updates `tokio_thread_state.current_id`, only on an entry created by poll entry (the trust guard). Fires only in debug builds (call sites inlined in release).
 
 ### `Harness::complete` (task completion) — `tokio_complete`
 
@@ -319,11 +321,11 @@ If an anchored task is re-anchored to a **different** connection key, it is a sh
 
 ### Anchored entries snapshot the trace at anchor time (both paths)
 
-`server_traces_aux[conn]` is last-write-wins per connection key. A slightly-late egress could resolve the key AFTER a later request remapped it: two requests on a keep-alive inbound connection share the key (measured ~1/300 per endpoint before the snapshot), a blocking-pool call can outlive the key's owner, and a new connection can reuse a just-closed connection's client ephemeral port. The anchored entry therefore stores a **snapshot** of the owning trace, taken at anchor time, and the walks resolve from the snapshot only. Every anchor carries one: the tag sets `tp_valid` together with `conn_valid`, and the only writes that clear `tp_valid` also set `conn_shared` or clear `conn_valid`. A Header-keyed snapshot is safe because `Cell::new` re-initializes a reused entry, `raw::dealloc` deletes freed entries, anchor writes are copy-modify-publish and a `conn_shared` flip invalidates it; task Ids are never reused, so the id-side snapshot has no reuse surface at all. The walks return a per-CPU copy of the snapshot, not a pointer into the map: a preallocated LRU element that a concurrent re-anchor replaces goes back to the free list with no grace period and can be rewritten under a reader still holding it, so the copy is discarded when the anchor epoch, or the incarnation stamp on the Header path, changed across it. The consumer's in-place staleness write lands on the copy.
+`server_traces_aux[conn]` is last-write-wins per connection key. A slightly-late egress could resolve the key AFTER a later request remapped it: two requests on a keep-alive inbound connection share the key (measured ~1/300 per endpoint before the snapshot), a blocking-pool call can outlive the key's owner, and a new connection can reuse a just-closed connection's client ephemeral port. The anchored entry therefore stores a **snapshot** of the owning trace, taken at anchor time, and the walks resolve from the snapshot only. Every anchor carries one: the tag sets `tp_valid` together with `conn_valid`, and the only writes that clear `tp_valid` also set `conn_shared` or clear `conn_valid`. A Header-keyed snapshot is safe because `Cell::new` re-initializes a reused entry, `Harness::complete` (or `raw::dealloc`) deletes freed entries, anchor writes are copy-modify-publish and a `conn_shared` flip invalidates it; task Ids are never reused, so the id-side snapshot has no reuse surface at all. The walks return a per-CPU copy of the snapshot, not a pointer into the map: a preallocated LRU element that a concurrent re-anchor replaces goes back to the free list with no grace period and can be rewritten under a reader still holding it, so the copy is discarded when the anchor epoch, or the incarnation stamp on the Header path, changed across it. The consumer's in-place staleness write lands on the copy.
 
 ### Keys are (OBI-view pid, identity) and state dies with the process
 
-Header pointers and task ids are process-local: two Tokio processes on one host produce colliding pointers and overlapping id counters. Every task entry is keyed by `tokio_task_key_t {tgid, id}`, where `tgid` is the pid as OBI sees it (`valid_pid()`, the same value the process gate uses, so the two always agree). `tokio_thread_state` records that pid too; a thread's entry is deleted at its exit (the `sys_exit` kprobe, where `clone_map` is cleaned too), so a reused tid starts unmarked. When OBI stops instrumenting a process (`BlockPID`), the Go side deletes its `tokio_process` flag and, only if that delete succeeds (so a non-Tokio exit costs one failed delete and nothing more), scans the three task maps and removes every entry of that pid. Without the purge a new process reusing the pid would inherit anchored entries from the dead one; LRU eviction alone would not clear them in time. `BlockPID` follows the discovery's removal event, raised when a pid is absent from the next `/proc` scan (`discovery.poll_interval`): a pid reused inside one interval raises none, and the new process inherits the dead one's mark and entries until its own polls, registrations and anchors rewrite them. Only a task the new process never registered (a `spawn_local` task whose Header address still carries a stale anchored entry, which the schedule hook leaves alone) could resolve the dead request's trace in that window, and only until that entry's dealloc or re-anchor. With the BPF pid filter off the maps are keyed by the host pid and the purge, keyed by the OBI-view pid, misses: those entries live until LRU eviction.
+Header pointers and task ids are process-local: two Tokio processes on one host produce colliding pointers and overlapping id counters. Every task entry is keyed by `tokio_task_key_t {tgid, id}`, where `tgid` is the pid as OBI sees it (`valid_pid()`, the same value the process gate uses, so the two always agree). `tokio_thread_state` records that pid too; a thread's entry is deleted at its exit (the `sys_exit` kprobe, where `clone_map` is cleaned too), so a reused tid starts unmarked. When OBI stops instrumenting a process (`BlockPID`), the Go side deletes its `tokio_process` flag and, only if that delete succeeds (so a non-Tokio exit costs one failed delete and nothing more), scans the three task maps and removes every entry of that pid. Without the purge a new process reusing the pid would inherit anchored entries from the dead one; LRU eviction alone would not clear them in time. `BlockPID` follows the discovery's removal event, raised when a pid is absent from the next `/proc` scan (`capture.policy.poll_interval` in Config v2, `discovery.poll_interval` in v1): a pid reused inside one interval raises none, and the new process inherits the dead one's mark and entries until its own polls, registrations and anchors rewrite them. Only a task the new process never registered (a `spawn_local` task whose Header address still carries a stale anchored entry, which the schedule hook leaves alone) could resolve the dead request's trace in that window, and only until that entry's dealloc or re-anchor. With the BPF pid filter off the maps are keyed by the host pid and the purge, keyed by the OBI-view pid, misses: those entries live until LRU eviction.
 
 ### The `current_id` poll-scoped trust guard
 
@@ -382,7 +384,7 @@ The server-span-save path writes the Tokio maps only when `tokio_thread_state` i
 
 ### Probe attachment is mangling-aware
 
-Symbols are resolved from the executable's `.symtab` by **demangled path**: Tokio's functions are generic (many monomorphized copies, all probed) and emitted under two mangling schemes, legacy (`_ZN…E`, `rustDemangle`) and v0 (`_R…`, `rustDemangleV0`; macOS adds `__R`). Both demanglers drop the generic arguments, so every copy demangles to the same path and a symbol matches only when its whole path equals the probe's. Nested helper functions (`Cell::new::new_header`, `Cell::new::check`, `Harness::poll_inner`) start with the parent's path but are different functions, inlined in release and out-of-line in debug builds; a prefix match attached the parent's probes to them in debug, which is why the match is exact. The scan runs only for executables detected as Rust; it streams the symbol tables the way the other uprobes are resolved (`FindExeSymbols`) and demangles only the symbols that name the `tokio` crate, so a large Rust binary without Tokio costs one walk of its symbol table. Two warnings guard the attachment: a path that resolves on some copies but not others ("partially resolved": a demangler gap or a stripped symbol), and copies that wanted a uretprobe but have no decodable return offsets (a toolchain change in the function epilogue or an instruction the decoder cannot read: the entry probe still attaches, the exit probe does not). Paths flagged `MayBeInlined` (`Id::next`) are exempt from both, since losing their copies in release is expected.
+Symbols are resolved from the executable's `.symtab` by **demangled path**: Tokio's functions are generic (many monomorphized copies, all probed) and emitted under two mangling schemes, legacy (`_ZN…E`, `rustDemangle`) and v0 (`_R…`, `rustDemangleV0`; macOS adds `__R`). Both demanglers drop the generic arguments, so every copy demangles to the same path and a symbol matches only when its whole path equals the probe's. Nested helper functions (`Cell::new::new_header`, `Cell::new::check`, `Harness::poll_inner`) start with the parent's path but are different functions, inlined in release and out-of-line in debug builds; a prefix match attached the parent's probes to them in debug, which is why the match is exact. The scan runs only for executables detected as Rust; it streams the symbol tables the way the other uprobes are resolved (`FindExeSymbols`) and demangles only the symbols that name the `tokio` crate, so a large Rust binary without Tokio costs one walk of its symbol table. Two warnings guard the attachment: a path that resolves on some copies but not others ("partially resolved": a demangler gap or a stripped symbol), and copies that wanted a uretprobe but have no decodable return offsets (a toolchain change in the function epilogue or an instruction the decoder cannot read: the entry probe still attaches, the exit probe does not). Paths flagged `MayBeInlined` (`Id::next`, `Spawner::spawn_task`, `Shared::schedule`) are exempt from both, since losing their copies in release is expected.
 
 ## Configuration
 
@@ -404,7 +406,7 @@ path.
   the 4-build integration matrix are the tripwires; the debug id layer is the structural
   backstop. Measured on tokio 1.30.0 (release, rust 1.99.0 and 1.96.0): `Cell::new`
   resolves no copy and the partial-resolution warning fires, `Harness::poll` keeps 35 of
-  37 copies in the axum server and 27 of 44 in the actix server, and an egress on a thread
+  37 copies in the axum server and 27 of 42 in the actix server, and an egress on a thread
   whose running task has no probed poll copy sees no current task and fails closed: the
   `tokio::spawn` shapes orphan, direct egress, `spawn_blocking`, `spawn_local` and sync
   threads stay correlated, and no span gets a wrong parent. 1.52.3 is the lowest release
@@ -423,13 +425,14 @@ path.
   flight** the epoch legitimately matches (N's own handed-off job must resolve) and the
   runtime carries no signal distinguishing WHOSE job the task is serving: that information
   exists only inside the channel message or the pooled request. Jobs from other concurrent
-  requests processed in that window inherit N's trace: same endpoint, same side, never
-  cross-side. Measured across the 2026-10 runs: a few same-side piles per run at most
+  requests processed in that window inherit N's trace, whichever endpoint they came from.
+  Measured across the 2026-10 runs: a few same-side piles per run at most
   (pooled client), none for the channel worker. Irreducible for lineage-based resolution;
   the designed fix is a channel send/recv bridge (pairing the sender's task identity with
   the received message), the first follow-up to this feature. `TestRustTokioProbeDiscrimination`'s
-  `pooled_reuse` and `channel_handoff` subtests exercise both shapes adversarially, gate
-  `contaminated == 0` strictly and log the same-side residual.
+  `pooled_reuse` and `channel_handoff` subtests exercise both shapes adversarially:
+  `pooled_reuse` gates `contaminated == 0` strictly and logs the same-side residual,
+  `channel_handoff` logs both counts and gates neither.
 
 - **Outside the walk: OBI's same-host backend link is keyed by the client port alone.** A
   backend's inbound span takes the server's client context from `trace_map`, whose key drops
@@ -511,8 +514,8 @@ path.
 ## Tests
 
 The integration tests live in `internal/test/integration/red_test_rust_tokio_test.go` and
-run against one container holding both the Rust server and its backend (OBI shares its pid
-and network namespaces). The Rust app is built four ways, `CARGO_PROFILE={release,debug}`
+`red_test_rust_tokio_current_thread_test.go`, and run against one container holding both the
+Rust server and its backend (OBI shares its pid and network namespaces). The Rust app is built four ways, `CARGO_PROFILE={release,debug}`
 × `RUST_LEG={v0,legacy}` (rust 1.99.0, whose stable default is the v0 `_R…` scheme since
 Rust 1.97, and rust 1.96.0, the last toolchain emitting the legacy `_ZN…E` scheme by
 default; legacy cannot be selected by flag on stable 1.97+), because the probes depend on
@@ -524,8 +527,9 @@ release needs a lock resolved for it).
 - `TestRustTokioContextPropagation` drives sequential requests and asserts at least one
   complete `server → client → backend` chain per pattern, then reads OBI's debug log and
   asserts the trust-window contract: anchors opened equal anchors closed (within the
-  requests in flight), and in debug builds every anchor after the setter attached went
-  through the id path.
+  requests in flight), in debug builds every anchor after the setter attached went
+  through the id path, and at least a third of the registered tasks were released (the
+  completion probe fires).
 - `TestRustTokioContextPropagationOBIFirst` runs the same checks with OBI attached before
   the app starts (the production order for an agent watching a new pod), and asserts from
   the log that both processes had their probes resolved before the first server span was
