@@ -17,7 +17,6 @@
 // deep in the server-span-save kprobe and the two structs are ~250 of the 512 stack bytes.
 SCRATCH_MEM_TYPED(tokio_task_anchor, tokio_task_state_t)
 SCRATCH_MEM_TYPED(tokio_task_id_anchor, tokio_task_id_state_t)
-// The resolved snapshot, copied out of the map entry for the caller.
 SCRATCH_MEM_TYPED(tokio_parent_snapshot, tp_info_pid_t)
 
 // Incarnation stamp: two occupants of one Header address cannot share a creation time, so
@@ -59,9 +58,8 @@ static __always_inline tp_info_pid_t *tokio_snapshot_out(const tp_info_pid_t *tp
     return snapshot;
 }
 
-// Climbs the Header-keyed parent chain to an anchored task and returns a copy of its trace
-// snapshot, or NULL; every hop is checked (devdoc "Parent Lookup"). egress selects the
-// debug lines; the poll-entry refresh walks silently.
+// Every hop is checked (devdoc "Parent Lookup"). egress selects the debug lines; the poll-entry
+// refresh walks silently.
 static __always_inline tp_info_pid_t *
 find_tokio_parent_trace(u32 tgid, u64 task_id, const u8 egress) {
     enum { k_max_tokio_task_depth = 8 };
@@ -126,8 +124,7 @@ find_tokio_parent_trace(u32 tgid, u64 task_id, const u8 egress) {
             }
             return NULL;
         }
-        // parent_version == 0: the parent was not registered when this child was spawned,
-        // so the link cannot be verified and is not followed.
+        // parent_version 0: the parent was unregistered at spawn, the link cannot be verified.
         if (!task_state->parent_version || parent_state->version != task_state->parent_version) {
             if (egress) {
                 bpf_dbg_printk("tokio walk END stale-parent pv=%llu cur=%llu",
@@ -162,7 +159,7 @@ find_tokio_parent_trace_by_id(u32 tgid, u64 task_id, const u8 egress) {
         tokio_task_id_state_t *state =
             (tokio_task_id_state_t *)bpf_map_lookup_elem(&tokio_task_id_state, &key);
         if (!state) {
-            // Unseen, evicted, or deleted at dealloc (what fails a reused pooled driver closed).
+            // Unseen, evicted, or released at task end (fails a reused pooled driver closed).
             if (egress) {
                 bpf_dbg_printk("tokio idwalk END no-state i=%d id=%llu", i, task_id);
             }
@@ -201,8 +198,7 @@ find_tokio_parent_trace_by_id(u32 tgid, u64 task_id, const u8 egress) {
     return NULL;
 }
 
-// Anchors the inbound request on the task polled right now, at server-span save (devdoc
-// "Request ownership is captured at the server-span save"). tp is never NULL.
+// Devdoc "Request ownership is captured at the server-span save". tp is never NULL.
 static __always_inline void
 tokio_tag_inbound_conn(u64 id, const connection_info_part_t *conn_part, const tp_info_pid_t *tp) {
     const tokio_thread_state_t *ts =
@@ -262,7 +258,7 @@ tokio_tag_inbound_conn(u64 id, const connection_info_part_t *conn_part, const tp
 
     if (updated->conn_valid && !tokio_conn_part_equal(&updated->conn, conn_part)) {
         updated->conn_shared = 1;
-        updated->tp_valid = 0; // an ambiguous task must not keep a trusted snapshot
+        updated->tp_valid = 0;
     }
     if (!updated->conn_shared) {
         updated->conn = *conn_part;
@@ -281,9 +277,8 @@ tokio_tag_inbound_conn(u64 id, const connection_info_part_t *conn_part, const tp
                    updated->anchor_epoch);
 }
 
-// Closes the trust window at the response, so a missed save cannot leave this request's
-// snapshot for the next one (devdoc "The trust window closes at the response"). Cleared in
-// place, conn_valid first: a reader mid-clear resolves nothing.
+// Devdoc "The trust window closes at the response". Cleared in place, conn_valid first: a
+// reader mid-clear resolves nothing.
 static __always_inline void tokio_untag_inbound_conn(u64 id) {
     const tokio_thread_state_t *ts =
         (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);

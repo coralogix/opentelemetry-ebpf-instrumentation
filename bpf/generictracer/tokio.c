@@ -22,10 +22,8 @@
 
 #include <pid/pid.h>
 
-// ABI assumptions shared by every probe in this file. The Rust calling convention is
-// unstable, but for scalar arguments and return values (a two-scalar struct is passed as
-// two scalars) rustc uses the platform C convention on x86-64 and aarch64, which is what
-// PT_REGS_PARMn / PT_REGS_RC read:
+// Register conventions: rustc uses the platform C ABI for scalars (a two-scalar struct is
+// two scalars) on x86-64 and aarch64, which is what PT_REGS_PARMn / PT_REGS_RC read:
 //
 //   Harness::poll(self: NonNull<Header>)             PARM1 = Header pointer
 //   raw::dealloc(ptr: NonNull<Header>)               PARM1 = Header pointer
@@ -38,14 +36,11 @@
 //                                                            header first)
 //   Id::next() -> Id                                 RC    = the new Id
 //
-// A toolchain that changes any of these breaks attribution silently (fail-closed at best),
-// which is why the symbol baseline in the devdoc is re-checked on toolchain bumps.
+// A toolchain change breaks attribution silently; devdoc "Symbol baseline" is re-checked on bumps.
 
-// Same convention as the Python runtime: 0 means "no active task".
 enum { k_tokio_task_none = 0 };
 
-// Re-establishes obi_ctx for the task now polled on this thread. At entry only: a delete at
-// exit would drop the context at the first await of an in-flight request.
+// Entry only: a delete at exit would drop the context at the first await of an in-flight request.
 static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u32 tgid, u64 task_id) {
     if (!task_id) {
         obi_ctx__del(pid_tgid);
@@ -59,7 +54,6 @@ static __always_inline void tokio_refresh_obi_ctx(u64 pid_tgid, u32 tgid, u64 ta
     obi_ctx__del(pid_tgid);
 }
 
-// Which probe registered a task, and whether it saw a spawn at all.
 enum tokio_task_origin {
     k_tokio_origin_cell_new = 0,
     k_tokio_origin_bind = 1,
@@ -71,8 +65,7 @@ enum tokio_task_origin {
     k_tokio_origin_poll = 4,
 };
 
-// Registers new_task_ptr under the task the spawning thread is polling, lineage only: no
-// connection is inherited, an egress climbs to the anchor (devdoc "Parent Lookup").
+// Lineage only, no connection inherited: an egress climbs to the anchor (devdoc "Parent Lookup").
 static __always_inline void
 tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin origin) {
     tokio_thread_state_t *thread_state =
@@ -126,8 +119,7 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     bpf_map_update_elem(&tokio_task_state, &new_task_key, &new_state, BPF_ANY);
 }
 
-// Poll entry: every poll of every scheduler passes through Harness::<T,S>::poll (why this
-// symbol: devdoc "Probe Points"). "self" because Tokio is statically linked.
+// Every poll of every scheduler passes here (devdoc "Probe Points"); "self": Tokio is static.
 SEC("uprobe/self:tokio_poll")
 int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -144,11 +136,9 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
 
     bpf_dbg_printk("tokio poll_future entry: tid=%d task=%llx", (u32)id, task_ptr);
 
-    // current_id starts at 0 on every poll: trusted only once the TLS setter re-sets it
-    // within this poll, which keeps the id path inert in release.
+    // current_id restarts at 0: trusted only once the TLS setter re-sets it within this poll.
     tokio_thread_state_t new_state = {.current_task = task_ptr, .tgid = tgid, .polled = 1};
-    // Nested poll (a runtime driven inside spawn_blocking): the exit probe restores the
-    // outer task.
+    // Nested poll (a runtime inside spawn_blocking): the exit probe restores the outer task.
     const tokio_thread_state_t *outer =
         (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
     if (outer) {
@@ -156,29 +146,25 @@ int GUARDED_PROG(obi_uprobe_tokio_poll, struct pt_regs *, ctx) {
     }
     bpf_map_update_elem(&tokio_thread_state, &id, &new_state, BPF_ANY);
 
-    // No entry (older than the attach, spawn hooks inlined, or evicted): a root entry with
-    // a slot count of its own, so a later eviction cannot turn its wake into an adoption.
+    // Unknown task (pre-attach, inlined spawn hooks, evicted): a root with its own slot count.
     const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
     if (!bpf_map_lookup_elem(&tokio_task_state, &task_key)) {
         tokio_register_task(id, tgid, task_ptr, k_tokio_origin_poll);
     }
 
-    // Marks the process as Tokio (find_parent_trace then uses the task walks only). Lookup
-    // first: an update of a present LRU key recycles its node on every poll.
+    // Lookup first: updating a present LRU key recycles its node on every poll.
     if (!bpf_map_lookup_elem(&tokio_process, &tgid)) {
         const u8 is_tokio = 1;
         bpf_map_update_elem(&tokio_process, &tgid, &is_tokio, BPF_ANY);
     }
 
-    // No connection from the polling thread: under work stealing the task polled here may
-    // belong to another request. Connections come from the anchor through the walk.
     tokio_refresh_obi_ctx(id, tgid, task_ptr);
 
     return 0;
 }
 
-// Poll exit: clears the task fields so a probe firing between polls takes no stale parent.
-// The entry stays, its polled flag marks a runtime thread. obi_ctx is left alone.
+// Clears the task fields so nothing between polls sees a stale parent; the entry stays (polled
+// marks a runtime thread) and obi_ctx is left alone.
 SEC("uretprobe/self:tokio_poll")
 int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     (void)ctx;
@@ -211,8 +197,7 @@ int GUARDED_PROG(obi_uretprobe_tokio_poll, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Task creation: Cell::<T,S>::new, the constructor of every task-creation path. Release
-// inlines the copies of small futures away, which the two spawn hooks below cover.
+// Cell::<T,S>::new; release inlines small futures' copies, which the two spawn hooks below cover.
 SEC("uretprobe/self:tokio_cell_new")
 int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -232,9 +217,8 @@ int GUARDED_PROG(obi_uretprobe_tokio_cell_new, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Spawn-time registration: bind_inner (every tokio::spawn) and spawn_task (every
-// spawn_blocking) are generic over the scheduler only, so they stay out of line when
-// Cell::new is inlined. Spawn-only, so unconditional like Cell::new.
+// bind_inner (every tokio::spawn) and spawn_task (every spawn_blocking) are generic over the
+// scheduler only, so they stay out of line when Cell::new is inlined. Spawn-only: unconditional.
 SEC("uprobe/self:tokio_bind")
 int GUARDED_PROG(obi_uprobe_tokio_bind, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -283,8 +267,7 @@ int GUARDED_PROG(obi_uprobe_tokio_schedule, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Task end: deletes both identity entries, so a reused Header starts clean and a pooled
-// driver's stale id lineage resolves nothing, and releases the slot count.
+// A reused Header starts clean and a pooled driver's stale id lineage resolves nothing.
 static __always_inline void tokio_release_task(u64 id, u32 tgid, u64 task_ptr) {
     const tokio_task_key_t task_key = tokio_task_key(tgid, task_ptr);
     const tokio_task_state_t *dying =
@@ -304,8 +287,7 @@ static __always_inline void tokio_release_task(u64 id, u32 tgid, u64 task_ptr) {
     bpf_map_delete_elem(&tokio_task_state, &task_key);
 }
 
-// Task completion: Harness::<T,S>::complete, every finished or cancelled task, inside the
-// poll that finished it. The task is never polled again, so its entries go now.
+// Harness::<T,S>::complete, inside the finishing poll: the task is never polled again.
 SEC("uprobe/self:tokio_complete")
 int GUARDED_PROG(obi_uprobe_tokio_complete, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -325,8 +307,7 @@ int GUARDED_PROG(obi_uprobe_tokio_complete, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Task destruction: the vtable dealloc slot, the second chance for a task that never
-// completed (devdoc "Probe Points").
+// raw::dealloc: the second chance for a task that never completed (devdoc "Probe Points").
 SEC("uprobe/self:tokio_dealloc")
 int GUARDED_PROG(obi_uprobe_tokio_dealloc, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -369,9 +350,8 @@ int GUARDED_PROG(obi_uprobe_tokio_set_task_id, struct pt_regs *, ctx) {
     return 0;
 }
 
-// Id::next, right before Cell::new on the spawning thread; RC is the new id. Creates the
-// id-keyed lineage entry and leaves the id pending for the Cell::new pairing. Inlined in
-// release.
+// Right before Cell::new on the spawning thread: the id stays pending for the pairing. Inlined
+// in release.
 SEC("uretprobe/self:tokio_id_next")
 int GUARDED_PROG(obi_uretprobe_tokio_id_next, struct pt_regs *, ctx) {
     const u64 id = bpf_get_current_pid_tgid();
@@ -410,7 +390,6 @@ int GUARDED_PROG(obi_uretprobe_tokio_id_next, struct pt_regs *, ctx) {
     bpf_map_update_elem(&tokio_task_id_state, &new_id_key, &new_state, BPF_ANY);
     bpf_dbg_printk("tokio id_next: tid=%d id=%llu parent_id=%llu", (u32)id, new_id, parent_id);
 
-    // A spawn from a non-poll thread has no entry yet: create one with the pending id only.
     if (thread_state) {
         thread_state->pending_new_id = new_id;
     } else {

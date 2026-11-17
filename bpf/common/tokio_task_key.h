@@ -6,11 +6,8 @@
 #include <bpfcore/vmlinux.h>
 #include <bpfcore/bpf_helpers.h>
 
-// Key of the per-task Tokio maps. A task identity only means something inside one
-// process: a Header pointer is a heap address that can coincide across address spaces,
-// and tokio::task::Id is a per-process counter that starts at 1 in every process. Without
-// the tgid, two instrumented Tokio processes would share entries and resolve each other's
-// inbound requests as parents.
+// Header addresses and tokio::task::Id both repeat across processes (devdoc "Keys are
+// (OBI-view pid, identity) and state dies with the process").
 typedef struct tokio_task_key {
     u32 tgid; // OBI-view pid (tokio_thread_state_t.tgid), not the host tgid
     u32 _pad;

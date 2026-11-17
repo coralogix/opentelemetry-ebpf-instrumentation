@@ -227,8 +227,6 @@ resolve_python_current_task(const trace_key_t *t_key, u64 pid_tgid, python_task_
     return resolution;
 }
 
-// Called only on the egress path (find_parent_trace), so the walks run with egress=1 and
-// log their outcome; the poll-entry refresh in tokio.c walks the same chain silently.
 static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(u64 pid_tgid) {
     const tokio_thread_state_t *thread_state =
         (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
@@ -237,10 +235,8 @@ static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(u64 pid
         return NULL;
     }
 
-    // Fail closed: no owning request found means no parent, never a guess from thread or
-    // process state. The id walk is authoritative when current_id is set (the setter fired
-    // within this poll: debug builds), because the Header-derived current_task is then a
-    // per-worker root shared by every request on the worker.
+    // Fail closed: no owning request, no parent. With current_id set (debug builds) the id
+    // walk is authoritative: the Header-derived current_task is then a per-worker root.
     if (thread_state->current_id) {
         tp_info_pid_t *tp =
             find_tokio_parent_trace_by_id(thread_state->tgid, thread_state->current_id, 1);
@@ -387,16 +383,9 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
                                                         trace_key_t *t_key,
                                                         u16 orig_dport,
                                                         const tp_info_t *wire_tp) {
-    // A thread of a Tokio process that has polled a task resolves parents only through the
-    // task walks: every resolver below is for another runtime or keyed by the handling OS
-    // thread, which on a work-stealing runtime often belongs to a different in-flight
-    // request, and a wrong parent propagates downstream. A thread of that process that never
-    // polled a task (a sync listener's thread next to the runtime) keeps its own thread-keyed
-    // server span, which is exact, and nothing else: the clone ancestry can end at a runtime
-    // thread whose span belongs to another request, and it cannot be checked against the
-    // thread map, which is keyed by the host pid_tgid while clone_map holds namespaced keys.
-    // Keyed with valid_pid() like the tokio probes, so the two agree in pod mode with the pid
-    // filter off.
+    // Tokio process: a thread that has polled a task resolves only through the task walks, any
+    // other thread only through its own thread-keyed server span (devdoc "Parent Lookup").
+    // Keyed with valid_pid() like the tokio probes: the two agree in pod mode with the filter off.
     const u32 tgid = valid_pid(pid_tgid);
     if (bpf_map_lookup_elem(&tokio_process, &tgid)) {
         const tokio_thread_state_t *thread_state =

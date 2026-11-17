@@ -12,9 +12,8 @@
 
 typedef struct tokio_thread_state {
     u64 current_task;   // Header of the task being polled, 0 = none
-    u64 current_id;     // tokio task id from set_current_task_id, debug builds only; reset to
-                        // 0 at every poll entry so it is trusted only when set within the
-                        // current poll (a stale id under partial inlining never resolves)
+    u64 current_id;     // tokio task id from set_current_task_id (debug builds), reset to 0 at
+                        // every poll entry: a stale id under partial inlining never resolves
     u64 pending_new_id; // Id::next result awaiting its Cell::new on this thread, 0 = none;
                         // consumed once, so a mispairing degrades to a missing id
     u64 prev_task;      // enclosing task when polls nest (one level), restored at exit
@@ -33,10 +32,8 @@ struct {
     __uint(pinning, OBI_PIN_INTERNAL);
 } tokio_thread_state SEC(".maps");
 
-// Set once per process on its first task poll. In a marked process, find_parent_trace
-// resolves a thread that has polled a task only through the task walks (worker and
-// blocking-pool threads are shared across requests, so the thread-keyed resolvers would
-// misattribute), and any other thread through its own thread-keyed server span alone.
+// Set at a process's first task poll: find_parent_trace then resolves its polling threads
+// only through the task walks (devdoc "Parent Lookup").
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, u32);  // tgid

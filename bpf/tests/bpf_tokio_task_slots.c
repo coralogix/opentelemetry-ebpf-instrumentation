@@ -1,10 +1,6 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Live-task slot counts: the slot hash stays inside the map, a count round-trips through
-// increment, test and decrement, a neighbour's decrement does not erase a live task, the
-// count saturates, and both the process and the address take part in the slot.
-
 #include <stdio.h>
 #include <string.h>
 

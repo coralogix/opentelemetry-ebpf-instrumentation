@@ -12,22 +12,16 @@
 #include <common/tokio_task_key.h>
 #include <common/tp_info.h>
 
-// Per-task state keyed by the tokio task id, the debug-build complement of the
-// Header-keyed tokio_task_state: in debug builds the current task at an egress is a
-// per-worker root, but tokio's TLS setter (out of line only there) still carries the exact
-// task id. Release never populates this map. Ids are never reused, so there is no
-// incarnation stamp; entries die with their paired Header at dealloc, which is what fails
-// a reused pooled driver closed.
+// Debug-build twin of tokio_task_state keyed by tokio task id (devdoc "Two complementary
+// task-identity mechanisms"); release never populates it. Ids are never reused, so there is
+// no incarnation stamp; an entry dies with its paired Header at task end.
 typedef struct tokio_task_id_state {
     u64 parent_id;               // spawning task's id, 0 = root or unknown
-    u64 parent_epoch;            // parent's anchor_epoch at spawn; the link is followed only
-                                 // while it still matches (a lineage created during request
-                                 // N must die when its anchor serves request N+1)
+    u64 parent_epoch;            // parent's anchor_epoch at spawn; followed only while it matches
     u64 anchor_epoch;            // bumped at every (re-)anchor; 0 = never anchored
     connection_info_part_t conn; // inbound connection this task was anchored to
-    tp_info_pid_t tp;            // owning server trace, snapshotted at anchor time; set only
-                                 // on the anchored task, never copied to descendants, and
-                                 // the walks resolve from nothing else
+    tp_info_pid_t tp;            // owning server trace, snapshotted at anchor time; never copied
+                                 // to descendants, the walks resolve from nothing else
     u8 tp_valid;                 // 1 if tp holds a snapshot
     u8 conn_valid;               // 1 if conn was set by an inbound request
     u8 conn_shared;              // 1 if anchored to more than one connection: never trusted

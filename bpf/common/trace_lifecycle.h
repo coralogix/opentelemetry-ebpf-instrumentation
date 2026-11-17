@@ -166,9 +166,8 @@ static __always_inline void server_or_client_trace(const u8 type,
 
         bpf_map_update_elem(&server_traces_aux, &conn_part, tp_p, BPF_ANY);
 
-        // Anchors the inbound request on the running Tokio task, with tp_p snapshotted so a
-        // late egress is immune to this connection key being remapped; a no-op for
-        // non-Tokio threads. See tokio_tag_inbound_conn().
+        // Anchors the request on the running Tokio task with tp_p snapshotted: a late egress is
+        // immune to this connection key being remapped. A no-op for non-Tokio threads.
         tokio_tag_inbound_conn(id, &conn_part, tp_p);
 
         tp_info_pid_t *existing = bpf_map_lookup_elem(&server_traces, &t_key);
