@@ -402,7 +402,13 @@ path.
   compiler behavior, not an ABI guarantee: re-verify the symbol baseline above on
   toolchain bumps. The instrumenter's partial-resolution and return-offset warnings and
   the 4-build integration matrix are the tripwires; the debug id layer is the structural
-  backstop. A `LocalSet` task whose `Cell::new` was inlined and whose Header address
+  backstop. Measured on tokio 1.30.0 (release, rust 1.99.0 and 1.96.0): `Cell::new`
+  resolves no copy and the partial-resolution warning fires, `Harness::poll` keeps 35 of
+  37 copies in the axum server and 27 of 44 in the actix server, and an egress on a thread
+  whose running task has no probed poll copy sees no current task and fails closed: the
+  `tokio::spawn` shapes orphan, direct egress, `spawn_blocking`, `spawn_local` and sync
+  threads stay correlated, and no span gets a wrong parent. The lowest release that keeps
+  the full baseline lies between 1.30.0 and 1.52.3 and has not been bisected. A `LocalSet` task whose `Cell::new` was inlined and whose Header address
   still carries a previous occupant's entry (its dealloc unobserved) keeps that stale
   lineage until the version or epoch guard refuses it, as every reused Header did before
   the hooks; `bind_inner` and `spawn_task` re-initialize it, `Shared::schedule` cannot
@@ -489,8 +495,9 @@ path.
   false` skips the probes and leaves the maps allocated.
 
 - **Validated on arm64 only** until the x86 integration matrix runs: Linux 6.8 for the
-  suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3 and 1.54.1; rust 1.99.0 (v0 mangling)
-  and 1.96.0 (legacy mangling); cargo's default `release` and `dev` profiles.
+  suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3 and 1.54.1 (1.30.0 only as the
+  degraded case above); rust 1.99.0 (v0 mangling) and 1.96.0 (legacy mangling); cargo's
+  default `release` and `dev` profiles.
 
 - **Requires Tokio symbols in the binary (fully-stripped binaries are unsupported, and
   degrade to pre-Tokio behavior, not to fail-closed).** The probes attach to internal
