@@ -13,11 +13,14 @@
 
 // The task that was being polled when this thread was cloned, or the cloning thread's own
 // birth when it was polling none (devdoc "Threads born inside a task inherit its lineage").
+// Both identities, as the id path is the one anchored in debug builds.
 typedef struct tokio_thread_birth {
-    u64 task;    // Header of the task
-    u64 version; // its incarnation stamp at the clone: a reused Header never matches
-    u64 epoch;   // its anchor_epoch at the clone: a re-anchored task never matches
-    u32 tgid;    // OBI-view pid, the process half of the task key
+    u64 task;     // Header of the task, 0 = none
+    u64 version;  // its incarnation stamp at the clone: a reused Header never matches
+    u64 epoch;    // its anchor_epoch at the clone: a re-anchored task never matches
+    u64 id;       // its tokio id (debug builds), 0 = none
+    u64 id_epoch; // the id entry's anchor_epoch at the clone
+    u32 tgid;     // OBI-view pid, the process half of the task key
     u8 _pad[4];
 } tokio_thread_birth_t;
 

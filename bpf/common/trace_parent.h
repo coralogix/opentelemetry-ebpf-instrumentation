@@ -232,23 +232,25 @@ resolve_python_current_task(const trace_key_t *t_key, u64 pid_tgid, python_task_
 static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(
     u64 pid_tgid, u32 tgid, const tokio_thread_state_t *thread_state, const pid_key_t *thread_key) {
     u64 task = 0;
+    u64 id = 0;
     if (thread_state && thread_state->polled) {
-        // Fail closed: no owning request, no parent. With current_id set (debug builds) the id
-        // walk is authoritative: the Header-derived current_task is then a per-worker root.
-        if (thread_state->current_id) {
-            tp_info_pid_t *tp = find_tokio_parent_trace_by_id(tgid, thread_state->current_id, 1);
-            if (tp) {
-                bpf_dbg_printk(
-                    "found tp by id tid=%d id=%llu", (u32)pid_tgid, thread_state->current_id);
-                bpf_dbg_printk("tokio egress IDWALK-HIT");
-                return tp;
-            }
-            bpf_dbg_printk("tokio egress IDWALK-MISS");
-            return NULL;
-        }
         task = thread_state->current_task;
+        id = thread_state->current_id;
     } else {
-        task = tokio_birth_task(tgid, thread_key);
+        tokio_birth_lookup(tgid, thread_key, &task, &id);
+    }
+
+    // Fail closed: no owning request, no parent. With an id (debug builds) the id walk is
+    // authoritative: the Header-derived task is then a per-worker root.
+    if (id) {
+        tp_info_pid_t *tp = find_tokio_parent_trace_by_id(tgid, id, 1);
+        if (tp) {
+            bpf_dbg_printk("found tp by id tid=%d id=%llu", (u32)pid_tgid, id);
+            bpf_dbg_printk("tokio egress IDWALK-HIT");
+            return tp;
+        }
+        bpf_dbg_printk("tokio egress IDWALK-MISS");
+        return NULL;
     }
 
     if (!task) {

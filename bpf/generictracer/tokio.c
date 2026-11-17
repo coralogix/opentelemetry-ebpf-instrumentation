@@ -79,7 +79,8 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     if (spawner_known && parent_task == k_tokio_task_none) {
         pid_key_t thread_key = {0};
         task_tid(&thread_key);
-        parent_task = tokio_birth_task(tgid, &thread_key);
+        u64 birth_id = 0;
+        tokio_birth_lookup(tgid, &thread_key, &parent_task, &birth_id);
     }
 
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
@@ -372,10 +373,17 @@ int GUARDED_PROG(obi_uretprobe_tokio_id_next, struct pt_regs *, ctx) {
         return 0;
     }
 
-    // Spawns from outside any task (the accept loop, main) have no parent: root.
+    // Spawns from outside any task (the accept loop, main) have no parent: root, unless the
+    // thread was cloned inside a task.
     tokio_thread_state_t *thread_state =
         (tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &id);
-    const u64 parent_id = thread_state ? thread_state->current_id : 0;
+    u64 parent_id = thread_state ? thread_state->current_id : 0;
+    if (!parent_id) {
+        pid_key_t thread_key = {0};
+        task_tid(&thread_key);
+        u64 birth_task = 0;
+        tokio_birth_lookup(tgid, &thread_key, &birth_task, &parent_id);
+    }
 
     tokio_task_id_state_t new_state = {
         .parent_id = parent_id,

@@ -27,22 +27,34 @@ static __always_inline u64 tokio_task_incarnation(void) {
     return bpf_ktime_get_ns();
 }
 
-// The task a thread was cloned under, while that incarnation of it still exists; 0 otherwise
-// (devdoc "Threads born inside a task inherit its lineage").
-static __always_inline u64 tokio_birth_task(u32 tgid, const pid_key_t *thread_key) {
+// Both identities of the task a thread was cloned under, each only while its entry still
+// matches the record; 0 otherwise (devdoc "Threads born inside a task inherit its lineage").
+static __always_inline void
+tokio_birth_lookup(u32 tgid, const pid_key_t *thread_key, u64 *task, u64 *id) {
+    *task = 0;
+    *id = 0;
     const tokio_thread_birth_t *birth =
         (const tokio_thread_birth_t *)bpf_map_lookup_elem(&tokio_thread_birth, thread_key);
     if (!birth || birth->tgid != tgid) {
-        return 0;
+        return;
     }
-    const tokio_task_key_t key = tokio_task_key(tgid, birth->task);
-    const tokio_task_state_t *task_state =
-        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
-    if (!task_state || task_state->version != birth->version ||
-        task_state->anchor_epoch != birth->epoch) {
-        return 0;
+    if (birth->task) {
+        const tokio_task_key_t key = tokio_task_key(tgid, birth->task);
+        const tokio_task_state_t *task_state =
+            (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
+        if (task_state && task_state->version == birth->version &&
+            task_state->anchor_epoch == birth->epoch) {
+            *task = birth->task;
+        }
     }
-    return birth->task;
+    if (birth->id) {
+        const tokio_task_key_t key = tokio_task_key(tgid, birth->id);
+        const tokio_task_id_state_t *id_state =
+            (const tokio_task_id_state_t *)bpf_map_lookup_elem(&tokio_task_id_state, &key);
+        if (id_state && id_state->anchor_epoch == birth->id_epoch) {
+            *id = birth->id;
+        }
+    }
 }
 
 // At sys_clone return on the cloning thread: the child inherits the task being polled, or
@@ -51,20 +63,32 @@ static __always_inline void
 tokio_record_thread_birth(u64 pid_tgid, const pid_key_t *parent_key, const pid_key_t *child_key) {
     const tokio_thread_state_t *thread_state =
         (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
-    if (thread_state && thread_state->current_task) {
-        const tokio_task_key_t key = tokio_task_key(thread_state->tgid, thread_state->current_task);
-        const tokio_task_state_t *task_state =
-            (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
-        if (!task_state) {
-            return;
+    if (thread_state && (thread_state->current_task || thread_state->current_id)) {
+        tokio_thread_birth_t birth = {.tgid = thread_state->tgid};
+        if (thread_state->current_task) {
+            const tokio_task_key_t key =
+                tokio_task_key(thread_state->tgid, thread_state->current_task);
+            const tokio_task_state_t *task_state =
+                (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
+            if (task_state) {
+                birth.task = thread_state->current_task;
+                birth.version = task_state->version;
+                birth.epoch = task_state->anchor_epoch;
+            }
         }
-        const tokio_thread_birth_t birth = {
-            .task = thread_state->current_task,
-            .version = task_state->version,
-            .epoch = task_state->anchor_epoch,
-            .tgid = thread_state->tgid,
-        };
-        bpf_map_update_elem(&tokio_thread_birth, child_key, &birth, BPF_ANY);
+        if (thread_state->current_id) {
+            const tokio_task_key_t key =
+                tokio_task_key(thread_state->tgid, thread_state->current_id);
+            const tokio_task_id_state_t *id_state =
+                (const tokio_task_id_state_t *)bpf_map_lookup_elem(&tokio_task_id_state, &key);
+            if (id_state) {
+                birth.id = thread_state->current_id;
+                birth.id_epoch = id_state->anchor_epoch;
+            }
+        }
+        if (birth.task || birth.id) {
+            bpf_map_update_elem(&tokio_thread_birth, child_key, &birth, BPF_ANY);
+        }
         return;
     }
     const tokio_thread_birth_t *inherited =
