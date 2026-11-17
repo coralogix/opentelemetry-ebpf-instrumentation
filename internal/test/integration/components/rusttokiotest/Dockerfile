@@ -12,12 +12,9 @@
 #
 # Build context must be the repo root.
 #
-# RUST_LEG selects the toolchain, and with it the symbol mangling scheme the probes must
-# resolve: v0 (rust 1.99.0; the _R… scheme is the stable default since Rust 1.97) or
-# legacy (rust 1.96.0, the last toolchain emitting _ZN…E by default: what a binary built
-# before Rust 1.97 carries). Legacy cannot be selected by flag on stable 1.97+, so it is a
-# second pinned image. Both are tested. Declared before the first FROM: only such ARGs
-# can be used by a FROM.
+# RUST_LEG selects the mangling scheme the probes must resolve: v0 (rust 1.99.0, the stable
+# default since Rust 1.97) or legacy (rust 1.96.0, the last toolchain emitting _ZN…E; no flag
+# selects it on stable 1.97+). Declared before the first FROM so the FROM below can use it.
 ARG RUST_LEG=v0
 FROM rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460 AS rust-legacy
 FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-v0
