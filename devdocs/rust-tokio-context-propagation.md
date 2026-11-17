@@ -27,6 +27,8 @@ It extends the existing context propagation mechanisms documented in [context-pr
 | Async client (reqwest/hyper), **fresh client per call** | hyper spawns a connection-driver task per new connection, under the request's task | Correlated (the driver task is a child of the request task) | Correlated |
 | Async client, **shared client / connection reuse** | One long-lived driver task serves MANY requests over a reused keep-alive connection | **First request per connection correlates; reuse fails closed** (orphan), with the in-flight residual described below | Same |
 | `tokio::task::spawn_blocking` | The closure runs on a dedicated **blocking-pool OS thread** | Correlated (the blocking task is registered at `Spawner::spawn_task` under the request task; the Header walk climbs through it) | Correlated via the id walk |
+| `std::thread::spawn` inside a handler, the thread making the call itself | Not a task: the thread never polls, but it was cloned while the request's task was being polled | Correlated (the birth task recorded at `sys_clone`, verified by incarnation stamp and anchor epoch) | Same |
+| `reqwest::blocking` inside `spawn_blocking` (upstream `greetings`): a runtime thread per client | The client runs a current-thread runtime on a thread cloned under the blocking task; its request tasks are spawned from `block_on`, outside any task | Correlated (the spawned tasks take the thread's birth task as parent; the Header walk climbs through the blocking task) | Correlated via the Header walk (the birth link is Header-keyed) |
 | `tokio::task::spawn_local` on a `LocalSet` (actix-web: one current-thread runtime per worker) | The task never migrates; the handler future is polled inside the per-connection dispatcher task, which anchors | Correlated (registered at `Shared::schedule`, since the spawn's `Cell::new` copy is inlined) | Correlated (id walk) |
 | Channel handoff to a long-lived worker task (actor/queue pattern) | A worker task that outlives every request performs the egress | **Fails closed** (orphan) once the spawning request has completed; the job handed off by the request still in flight resolves | Same |
 | HTTP/2 inbound or egress | One connection task multiplexes many requests | Not supported; egress fails closed by design (untested) | Same |
@@ -113,8 +115,8 @@ The contract holds everywhere except the following, all documented in
 [Known Limitations](#known-limitations); nothing else can produce a wrong parent:
 
 1. **The in-flight window of a shared task.** A long-lived task (a channel worker, a
-   pooled connection driver) spawned under request N serves another request's job while N
-   is still open. The lineage lookup is exact but its premise (lineage = ownership) is
+   pooled connection driver) or thread spawned under request N serves another request's
+   job while N is still open. The lineage lookup is exact but its premise (lineage = ownership) is
    false for handed-off work, and the runtime carries no signal for whose job it is. The
    leak is bounded by the in-flight window of the request whose connection task the shared
    task hangs from, not by the side: once that connection serves its next request the epoch
@@ -303,7 +305,7 @@ When a Tokio client request needs a trace parent (at egress, via `find_tokio_par
 
 Both walks climb the recorded parent chain for at most 8 hops. At every hop the entry must exist (a deleted or evicted entry ends the walk), and from the second hop on the entry's `anchor_epoch` must equal the `parent_epoch` the child recorded at spawn. The first entry that is anchored (`conn_valid`), not shared (`conn_shared == 0`) and inside its trust window resolves from its **anchor-time trace snapshot**; there is no other source. To follow a link, the Header walk needs a non-zero `parent_version` that still matches the parent's `version` (pointer reuse), the id walk needs `parent_id < id` (monotone ids, never reused). Anything else returns NULL: orphan, never a guess.
 
-For a Tokio process (marked in `tokio_process` on first poll), `find_parent_trace` resolves a thread that has polled a task **only** via these walks; every generic resolver (`clone_map`/process ancestry, `cp_support`, nginx/puma/java) is skipped, because each is either for another runtime or keyed by the handling OS thread, which under work-stealing belongs to a different in-flight request. A thread of that process that never polled a task keeps its own `server_traces[t_key]` entry as the only source, with no clone ancestry: the ancestry can end at a runtime thread whose span belongs to another request, and it cannot be checked against the thread map, which is keyed by the host `pid_tgid` while `clone_map` holds namespaced keys. A sync listener's threads next to the runtime stay correlated as before the probes.
+For a Tokio process (marked in `tokio_process` on first poll), `find_parent_trace` resolves a thread that has polled a task **only** via these walks; every generic resolver (`clone_map`/process ancestry, `cp_support`, nginx/puma/java) is skipped, because each is either for another runtime or keyed by the handling OS thread, which under work-stealing belongs to a different in-flight request. A thread of that process that never polled a task resolves its own `server_traces[t_key]` entry first (a sync listener's threads next to the runtime stay correlated as before the probes), then the task it was cloned under, see [Threads born inside a task inherit its lineage](#threads-born-inside-a-task-inherit-its-lineage). No clone ancestry of threads is followed: the ancestry can end at a runtime thread whose span belongs to another request, and it cannot be checked against the thread map, which is keyed by the host `pid_tgid` while `clone_map` holds namespaced keys.
 
 ## Implementation Details
 
@@ -381,6 +383,10 @@ In the v0 mangling scheme a closure demangles to the SAME path as its parent fun
 ### The Tokio maps are gated to Tokio processes
 
 The server-span-save path writes the Tokio maps only when `tokio_thread_state` is set for the thread. Non-Tokio servers hit this path constantly and must not pay for the extra writes or LRU churn. On the egress side a non-Tokio process pays exactly one `tokio_process` lookup, and a non-runtime thread of a Tokio process one `tokio_thread_state` lookup more.
+
+### Threads born inside a task inherit its lineage
+
+A handler that clones an OS thread moves the egress away from the request's task: `std::thread::spawn` makes the call on a thread that never polls, and `reqwest::blocking` (inside `spawn_blocking`, as upstream's `greetings` server does) runs its client on a thread of its own with a current-thread runtime, where the request tasks are spawned from `block_on`, outside any task. The `sys_clone` return hook in `k_tracer.c` records in `tokio_thread_birth`, keyed like `clone_map` by the child's namespaced tid, the task the cloning thread was polling with its incarnation stamp and anchor epoch, or the cloning thread's own birth when it was polling none, so a chain of threads started inside a task keeps that task. Two readers: `tokio_register_task` takes the birth task as the parent of a task spawned on a thread with no current task (the `reqwest::blocking` runtime thread spawning its request tasks), and `find_parent_trace` walks from the birth task for a thread that never polled and holds no thread-keyed server span (the `std::thread::spawn` thread making the call itself). Both check the stamp and the epoch first (`tokio_birth_task`), the same guards a spawned child carries: once the birth task is released, its Header reused, or its connection re-anchored for the next request, the link resolves nothing. A thread born under request N and kept alive carries N's trace only while N is in flight, the residual of [Known Limitations](#known-limitations). The entry dies with the thread (`sys_exit`); the map is an LRU like `clone_map`, and a stale entry cannot resolve.
 
 ### Probe attachment is mangling-aware
 
@@ -480,7 +486,8 @@ path.
   unanswered request on one such thread invalidates the first, so connections interleaved
   inside one thread orphan rather than mis-parent, while a request answered before the
   next arrives keeps the thread-keyed parent main would give it. No clone ancestry is
-  followed for them.
+  followed for them; a thread cloned inside a task resolves from that task instead, see
+  [Threads born inside a task inherit its lineage](#threads-born-inside-a-task-inherit-its-lineage).
 
 - **`traces_ctx_v1` (`obi_ctx`) is not maintained for Tokio tasks in debug builds**, see
   [Context is refreshed at poll entry](#context-is-refreshed-at-poll-entry-not-poll-exit).
@@ -490,10 +497,11 @@ path.
   evicted live task orphans its egresses, never misattributes: an evicted `LocalSet` task
   re-registers at its next wake with no parent, see
   [Evicted tasks are not adopted at their wake](#evicted-tasks-are-not-adopted-at-their-wake).
-  With the 2 MiB slot array the five maps hold about 11.5 MiB of keys and values (4.4 MiB
+  With the 2 MiB slot array the six maps hold about 12.8 MiB of keys and values (4.4 MiB
   `tokio_task_state` at 152 B per entry, 3.7 MiB `tokio_task_id_state` at 128 B, 1.4 MiB
-  `tokio_thread_state`, 0.1 MiB `tokio_process`), for which the kernel charges 19.3 MiB of
-  memlock with its per-element headers and buckets (`bpftool map show`, Linux 6.8),
+  `tokio_thread_state`, 1.3 MiB `tokio_thread_birth` at 44 B, 0.1 MiB `tokio_process`), for
+  which the kernel charged 19.3 MiB of memlock before `tokio_thread_birth` was added, with its
+  per-element headers and buckets (`bpftool map show`, Linux 6.8),
   preallocated when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
   false` skips the probes and leaves the maps allocated.
 
@@ -542,7 +550,8 @@ release needs a lock resolved for it).
   kernel span id (recovered from the "processing" child when OBI exported sub-spans), so a
   record OBI exported twice is not mistaken for a pile. Its `sync_threads` case drives the
   server's std-thread listener on port 8095, whose threads never poll a task, and requires
-  the thread-keyed floor.
+  the thread-keyed floor; its `thread_spawn` case clones a std thread inside the handler
+  that makes the call itself, and requires the birth-task floor.
 - `TestRustTokioCurrentThread` runs the same A/B discrimination against an actix-web server
   (`server-actix`): one current-thread runtime per worker with a `LocalSet`, the handler
   polled inside the per-connection dispatcher task, so tasks never migrate. Six shapes:
@@ -553,6 +562,9 @@ release needs a lock resolved for it).
 - `TestRustTokioRuntimeDisabled` runs the app with `capture.runtimes.rust.enabled: false`
   (Config v2) and checks that no Tokio path is resolved and no poll probe fires while the
   generic tracer still exports the server spans.
+- The upstream `TestMultiProcess*` suites run the prebuilt `greetings` server, whose `/dist`
+  handler calls `reqwest::blocking::get` inside `spawn_blocking`: the egress runs in a task
+  of a runtime thread cloned under the request, correlated through its birth task.
 
 Every suite but the knob-off one also runs weaver's registry `live-check` on the exported
 telemetry against OBI's schema registry and fails on a violation-level advisory.
