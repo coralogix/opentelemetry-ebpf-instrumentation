@@ -88,11 +88,9 @@ func TestRustTokioCurrentThread(t *testing.T) {
 		})
 	})
 	t.Run("mailbox_evicted", func(t *testing.T) {
-		// A long-lived LocalSet mailbox task whose map entry the fill evicts: its next wake
-		// comes from inside a request's handler, and the schedule hook must not record that
-		// request as its parent, or every job it then runs resolves that request. The slot
-		// count makes the wake re-register the mailbox with no parent, so its jobs orphan
-		// (release) or miss the evicted id entry (debug): fail closed both ways.
+		// A long-lived LocalSet mailbox whose map entry the fill evicts: its next wake comes from
+		// inside a request's handler and must not adopt that request as parent, or every later job
+		// resolves it. Its jobs orphan (release) or miss the id entry (debug): fail closed both ways.
 		fill := func(t *testing.T) {
 			resp, err := http.Get(tokioServerURL + "/evict-fill")
 			require.NoError(t, err)
@@ -116,17 +114,12 @@ func TestRustTokioCurrentThread(t *testing.T) {
 			backendA: "/ping-k", backendB: "/ping-l",
 			failClosed: true,
 			beforeBurst: func(t *testing.T) {
-				// Zero misattribution alone also holds when nothing was evicted, so require
-				// the guard to have fired: the schedule hook logs origin=3 when it
-				// re-registers a task whose slot count survived the eviction of its entry.
-				// Checked here, after the warm-up woke the mailbox and before the second
-				// fill: the mailbox was the oldest unreferenced entry when the first fill
-				// overflowed the map, while its re-registered entry sits in the registering
-				// CPU's local LRU list until that CPU allocates 128 more nodes, so a second
-				// fill evicts it only by chance, and its log lines would push this one past
-				// the slice LogsTail reads.
-				// A fill run after the worker thread moved CPU evicts nothing: the node waits in
-				// the old CPU's local list. Fill and wake again, a few times, before giving up.
+				// Require the guard to have fired (origin=3: a task re-registered at a wake with no
+				// parent), since zero misattribution also holds when nothing was evicted. Checked
+				// before the second fill: the re-registered entry sits in the registering CPU's local
+				// LRU list until that CPU allocates 128 more nodes, so a later fill evicts it only by
+				// chance, and a fill after the worker moved CPU evicts nothing. Fill and wake again a
+				// few times before giving up.
 				for attempt := 1; ; attempt++ {
 					obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
 					require.NoError(t, err)

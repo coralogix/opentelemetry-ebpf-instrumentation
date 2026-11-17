@@ -21,10 +21,8 @@ import (
 	"go.opentelemetry.io/obi/internal/test/integration/components/jaeger"
 )
 
-// tokioDebugBuild reports whether the Rust app was built with CARGO_PROFILE=debug, the env
-// var the compose build consumes. Release correlates through the Header walk, debug through
-// the id walk; the suites assert the same floors in both and use this flag only where the
-// builds differ. See devdocs/rust-tokio-context-propagation.md.
+// tokioDebugBuild reports whether the compose built the Rust app with CARGO_PROFILE=debug:
+// release correlates through the Header walk, debug through the id walk.
 func tokioDebugBuild() bool {
 	return os.Getenv("CARGO_PROFILE") == "debug"
 }
@@ -34,8 +32,7 @@ const (
 	tokioSyncServerURL = "http://localhost:8095" // the axum server's std-thread listener
 )
 
-// tokioOBILogLines bounds the OBI log slice the trust-window check reads. The
-// context-propagation suite emits a few thousand lines, so this is the whole log.
+// tokioOBILogLines covers the whole OBI log of a suite (a few thousand lines).
 const tokioOBILogLines = 200_000
 
 // tokioExecutables is how many executables the suites expect OBI to resolve the Tokio
@@ -43,10 +40,8 @@ const tokioOBILogLines = 200_000
 // executable, and uprobes attach per file.
 const tokioExecutables = 2
 
-// tokioAnchorCounts are the kernel debug lines OBI emits when a task is anchored to an
-// inbound request (SET) and released at its response (CLEAR), on the Header path
-// ("task") and on the id path ("id"), plus the Header-path SETs seen after the id setter
-// probe was attached, and the task registrations and releases (task end) seen.
+// tokioAnchorCounts counts the trust-window debug lines: anchors SET/CLEAR on the Header
+// ("task") and id paths, Header SETs after the setter attached, registrations, releases.
 type tokioAnchorCounts struct {
 	taskSet, taskClear, idSet, idClear, taskSetAfterAttach int
 	registered, released                                   int
@@ -167,7 +162,6 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 		}, testTimeout, time.Second)
 	}
 
-	// Wait until the server is accepting requests.
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		resp, err := http.Get(tokioServerURL + "/health")
 		require.NoError(ct, err)
@@ -201,9 +195,8 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 	runWeaverValidation(t)
 }
 
-// assertTokioAttachedBeforeFirstRequest checks, from OBI's log, that the tokio probes of
-// both processes (server and backend) were resolved before OBI saved its first server
-// span: the order the OBI-first suite exists to exercise.
+// assertTokioAttachedBeforeFirstRequest asserts from OBI's log that both executables
+// resolved the poll path before the first server span was saved.
 func assertTokioAttachedBeforeFirstRequest(t *testing.T, compose *docker.Compose) {
 	t.Helper()
 	obiLog, err := compose.LogsTail(tokioOBILogLines, "obi")
@@ -267,12 +260,8 @@ func assertTokioCrossServiceTrace(t *testing.T, urlPath string) {
 	}, testTimeout, time.Second)
 }
 
-// anyCompleteTokioChain returns true if some trace contains:
-//
-//	server server span (url.path=urlPath)  ->  server client span (url.path=/ping)
-//	                                        ->  backend server span (url.path=/ping)
-//
-// with the backend span CHILD_OF the client span (proving end-to-end propagation).
+// anyCompleteTokioChain reports whether some trace holds the server span of urlPath, a
+// client span to /ping and a backend server span to /ping that is CHILD_OF that client span.
 func anyCompleteTokioChain(traces []jaeger.Trace, urlPath string) bool {
 	for i := range traces {
 		tr, _ := tokioUniqueSpans(traces[i])
@@ -294,8 +283,7 @@ func anyCompleteTokioChain(traces []jaeger.Trace, urlPath string) bool {
 	return false
 }
 
-// tokioFindSpans returns the SERVER spans in tr matching the given OBI service name
-// and url.path tag (url.path is ignored when empty).
+// tokioFindSpans returns the SERVER spans of service in tr, filtered by url.path when non-empty.
 func tokioFindSpans(tr jaeger.Trace, service, urlPath string) []jaeger.Span {
 	var out []jaeger.Span
 	for _, s := range tr.Spans {
@@ -313,8 +301,8 @@ func tokioFindSpans(tr jaeger.Trace, service, urlPath string) []jaeger.Span {
 	return out
 }
 
-// tokioFindClientSpans returns the CLIENT spans of the server service in tr whose
-// url.full ends with pathSuffix (client spans use url.full, not url.path).
+// tokioFindClientSpans returns the server service's CLIENT spans whose url.full ends with
+// pathSuffix.
 func tokioFindClientSpans(tr jaeger.Trace, pathSuffix string) []jaeger.Span {
 	var out []jaeger.Span
 	for _, s := range tr.Spans {
@@ -361,15 +349,11 @@ type tokioABCase struct {
 	// failClosed is for a shape OBI does not correlate: no clean-chain floor, zero
 	// misattribution required instead (orphans are expected, a wrong span is a defect).
 	failClosed bool
-	// tolerateInFlightLeak drops the misattribution assertions (counts still logged). Only
-	// for the channel-handoff worker: while its spawning request is in flight it serves
-	// other requests' jobs under a legitimately matching epoch, and the runtime carries no
-	// signal for whose job it is. See the devdoc Known Limitations.
+	// tolerateInFlightLeak drops the misattribution assertions (counts still logged): the
+	// channel-handoff worker's in-flight residual, devdoc "Known Limitations".
 	tolerateInFlightLeak bool
-	// tolerateSameSidePile drops only the same-side piled assertion (cross-side stays
-	// strict). For the shared pooled client: a driver whose establishing inbound connection
-	// went idle keeps that request's anchor epoch and resolves it for later requests of the
-	// same endpoint. See the devdoc Known Limitations.
+	// tolerateSameSidePile drops only the same-side piled assertion: the shared pooled
+	// client's idle-connection residual, devdoc "Known Limitations".
 	tolerateSameSidePile bool
 	// beforeBurst runs between the warm-up and the concurrent burst, for a case that must
 	// disturb the server first (the evicted-mailbox case refills the task map).
@@ -388,12 +372,9 @@ const (
 )
 
 // TestRustTokioProbeDiscrimination drives concurrent A/B load across distinct backends and
-// counts cleanly attributed chains per side. It asserts both halves of the contract: a
-// clean-chain floor where correlation is supported, and zero misattribution everywhere,
-// cross-side (contaminated) and same-side (piled). Without the Tokio probes the generic
-// path cannot follow a cross-thread egress and the clean chains collapse. A cross-side
-// backend span without its client span (stray) is OBI's same-host correlation colliding on
-// a shared ephemeral port, not the walk: logged, not gated (tokioClassifyAB).
+// asserts a clean-chain floor where correlation is supported and zero misattribution
+// everywhere. A cross-side backend span without its client span is the shared-ephemeral-
+// port collision, logged not gated (tokioClassifyAB).
 func TestRustTokioProbeDiscrimination(t *testing.T) {
 	compose, err := docker.ComposeSuite("docker-compose-rust-tokio-discrim.yml",
 		path.Join(pathOutput, "test-suite-rust-tokio-discrim.log"))
@@ -408,14 +389,11 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		require.Equal(ct, http.StatusOK, resp.StatusCode)
 	}, testTimeout, time.Second)
 
-	// Logged so a failure report says which build it was.
 	t.Logf("rust app built with CARGO_PROFILE debug=%v", tokioDebugBuild())
 
 	t.Run("spawn_blocking", func(t *testing.T) {
-		// The egress runs on a blocking-pool thread that never handled the request, so a
-		// floor here proves the lineage: in release the blocking task is registered at
-		// Spawner::spawn_task under the request task (its Cell::new copy is inlined), in
-		// debug the id walk resolves it.
+		// The egress runs on a blocking-pool thread that never handled the request: release
+		// registers the blocking task at Spawner::spawn_task, debug walks the ids.
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/blocking-a", serverB: "/blocking-b",
 			backendA: "/ping-a", backendB: "/ping-b",
@@ -435,9 +413,7 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/ws-spawn-a", serverB: "/ws-spawn-b",
 			backendA: "/ping-c", backendB: "/ping-d",
-			// Fresh reqwest client per call: every connection-driver task is first-use and
-			// a child of the request task, so both builds correlate it. The floor sits far
-			// below the measured counts.
+			// Fresh reqwest client per call: every connection driver is a child of the request task.
 			minClean: 20,
 		})
 	})
@@ -453,10 +429,8 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		})
 	})
 	t.Run("pooled_reuse", func(t *testing.T) {
-		// One process-wide reqwest client: concurrent A/B requests reuse keep-alive
-		// connections and their long-lived driver tasks. A driver's lineage points at the
-		// request that first used it; resolving through it later must fail closed, so only
-		// the safety half is asserted and coverage is logged.
+		// One process-wide reqwest client: a reused driver's lineage points at the request that
+		// first used it, so only the safety half is asserted; coverage is logged.
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/ws-pool-a", serverB: "/ws-pool-b",
 			backendA: "/ping-g", backendB: "/ping-h",
@@ -465,10 +439,8 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		})
 	})
 	t.Run("sync_threads", func(t *testing.T) {
-		// The server's std-thread listener on 8095: the request is read and the backend
-		// called on a thread that never polls a task. The process runs Tokio, so the task
-		// walks own its runtime threads, but this thread must keep its own thread-keyed
-		// server span as the parent, as it did before the Tokio probes existed.
+		// The std-thread listener on 8095: a thread that never polls a task must keep its own
+		// thread-keyed server span as the parent, in a process that also runs Tokio.
 		tokioABDiscrimination(t, tokioABCase{
 			serverURL: tokioSyncServerURL,
 			serverA:   "/sync-a", serverB: "/sync-b",
@@ -479,17 +451,14 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 	runWeaverValidation(t)
 }
 
-// tokioABDiscrimination drives case c and asserts ≥ c.minClean cleanly-attributed
-// chains on each side. It always logs the full breakdown so probes-on and
-// probes-off runs can be compared.
+// tokioABDiscrimination drives case c and asserts its contract; the breakdown is always logged.
 func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	serverURL := c.serverURL
 	if serverURL == "" {
 		serverURL = tokioServerURL
 	}
 
-	// Phase 1: drive light load until server traces are flowing (do NOT require
-	// clean chains — probes-off must reach Phase 3 so it logs its breakdown).
+	// Warm-up: light load until server traces flow.
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		driveTokioAB(serverURL, c.serverA, c.serverB, 2)
 		require.GreaterOrEqual(ct, len(tokioQueryServerTraces(ct, 400)), 10,
@@ -560,7 +529,6 @@ func tokioABDiscrimination(t *testing.T, c tokioABCase) {
 	}, testTimeout, time.Second)
 }
 
-// driveTokioAB fires n sequential requests to each of serverA and serverB.
 func driveTokioAB(serverURL, serverA, serverB string, n int) {
 	for range n {
 		for _, p := range []string{serverA, serverB} {
@@ -571,8 +539,6 @@ func driveTokioAB(serverURL, serverA, serverB string, n int) {
 	}
 }
 
-// driveTokioABConcurrent fires perEndpoint requests to each of serverA and serverB,
-// interleaved, with at most `concurrency` in flight at once.
 func driveTokioABConcurrent(t *testing.T, serverURL, serverA, serverB string, perEndpoint, concurrency int) {
 	t.Helper()
 	sem := make(chan struct{}, concurrency)
@@ -593,8 +559,7 @@ func driveTokioABConcurrent(t *testing.T, serverURL, serverA, serverB string, pe
 	wg.Wait()
 }
 
-// tokioQueryServerTraces returns all traces that contain a `server` span (CollectT
-// variant, for use inside EventuallyWithT).
+// tokioQueryServerTraces returns up to limit traces holding a server span.
 func tokioQueryServerTraces(ct *assert.CollectT, limit int) []jaeger.Trace {
 	jr, err := http.Get(fmt.Sprintf("%s?service=server&lookback=1h&limit=%d", jaegerQueryURL, limit))
 	require.NoError(ct, err)
@@ -606,25 +571,13 @@ func tokioQueryServerTraces(ct *assert.CollectT, limit int) []jaeger.Trace {
 	return tq.Data
 }
 
-// tokioClassifyAB buckets each trace for case c: clean A, clean B, contaminated (a server
-// span of one side with the other side's CLIENT span: the walk resolved the wrong request),
-// stray (a server span of one side with only the other side's BACKEND span: not the walk,
-// see below), piled, grouped (two server endpoints in one trace with no cross backend:
-// inbound keep-alive grouping, not an egress error) or other (incomplete, or another
-// subtest's endpoints).
-//
-// The walk's output is the client span's trace. The backend span joins through OBI's
-// same-host correlation, keyed by the client address and port alone (trace_key_from_conn),
-// and Linux hands one ephemeral port to concurrent connections toward different
-// destinations: a backend reading first takes the other connection's context. That is a
-// generic OBI residual (devdoc Known Limitations), counted as stray and logged, not gated.
-//
-// piled is the same-side temporal misattribution the A/B split is blind to: a trace that
-// holds a same-side server span and more same-side backend spans than server spans. Each
-// endpoint makes one backend call per request, so a surplus backend span is another
-// request's egress resolved into this trace. The same-side server span is required: a
-// fail-closed egress is an orphan trace (a backend span with no owning server span) and
-// must land in other, not piled.
+// tokioClassifyAB buckets each trace for case c: clean A, clean B, contaminated (one side's
+// server span with the other side's CLIENT span: the walk resolved the wrong request), stray
+// (the other side's BACKEND span only: OBI's same-host correlation colliding on a shared
+// ephemeral port, devdoc "Known Limitations", logged not gated), piled (a same-side server
+// span with more same-side backend spans than server spans: another request's egress
+// resolved into this trace; an orphan with no server span lands in other), grouped (two
+// endpoints in one trace with no cross backend: inbound keep-alive grouping) or other.
 func tokioClassifyAB(traces []jaeger.Trace, c tokioABCase) (cleanA, cleanB, contaminated, stray, piled, grouped, other, duplicates int) {
 	for i := range traces {
 		tr, dups := tokioUniqueSpans(traces[i])
@@ -700,13 +653,10 @@ func tokioLogCrossSide(t *testing.T, traces []jaeger.Trace, c tokioABCase) {
 	}
 }
 
-// tokioUniqueSpans drops duplicate exports of one kernel record (first kept) and OBI's
-// internal sub-spans, returning the number dropped. OBI can export one record twice under
-// load (the kernel's submitted check is not atomic across the close and delayed-finish
-// paths); counted per side, a duplicated backend span would read as a pile. The copies do
-// not share a span ID when the request had queue time: the exporter gives the top-level
-// span a random ID and puts the kernel ID on its "processing" child, so identity is the
-// kernel ID recovered from that child, or the span's own ID.
+// tokioUniqueSpans drops OBI's internal sub-spans and duplicate exports of one kernel record
+// (OBI can export a record twice under load), returning the number dropped. A duplicate
+// shares the kernel span ID, carried by the "processing" child when the request had queue
+// time, else by the span itself.
 func tokioUniqueSpans(tr jaeger.Trace) (jaeger.Trace, int) {
 	kernelID := make(map[string]string, len(tr.Spans)) // top-level span ID -> kernel span ID
 	for _, s := range tr.Spans {
@@ -747,7 +697,6 @@ func TestRustTokioRuntimeDisabled(t *testing.T) {
 	require.NoError(t, compose.Up())
 	t.Cleanup(func() { _ = compose.Close() })
 
-	// Wait until the server is accepting requests.
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		resp, err := http.Get(tokioServerURL + "/health")
 		require.NoError(ct, err)
