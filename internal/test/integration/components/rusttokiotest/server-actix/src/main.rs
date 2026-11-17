@@ -4,9 +4,6 @@
 // process only through the task walks, so this binary proves they carry the shapes a
 // current-thread app uses. Same backend as the axum server; every B side targets port 8094
 // as well as its own path, so the sides differ at the transport level (orig_dport) too.
-//
-// Start backend first:  cargo run -p backend
-// Then:                  cargo run -p server-actix
 
 use std::sync::OnceLock;
 
@@ -159,13 +156,11 @@ async fn pool_b() -> HttpResponse {
     respond(call_backend_pooled("pool-b", "http://127.0.0.1:8094/ping-j").await)
 }
 
-// One mailbox task for the whole process, a long-lived LocalSet task: /evict-fill spawns it
-// under its own request (whose window closes with that response, so nothing resolves
-// through it afterwards), then spawns FILL_TASKS parked tasks so OBI's task map evicts the
-// mailbox's entry. /mbox-a and /mbox-b hand their backend call to the mailbox over a
-// channel from any worker; it runs each job on a spawn_local child. A wake that
-// re-registered the evicted mailbox under the waking request would make every job it then
-// runs resolve that request, cross-side.
+// One long-lived LocalSet mailbox task for the process: /evict-fill spawns it under its own
+// request, then FILL_TASKS parked tasks so OBI's task map evicts its entry. /mbox-a and
+// /mbox-b hand their backend call to it over a channel; each job runs on a spawn_local child.
+// A wake that re-registered the mailbox under the waking request would make every later
+// job resolve that request.
 const FILL_TASKS: usize = 50_000;
 
 struct MailboxJob {

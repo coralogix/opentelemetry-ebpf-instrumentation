@@ -1,5 +1,4 @@
-// backend: downstream service for server (work-stealing test).
-// Echoes the traceparent header so the test can verify propagation from logs.
+// backend: echoes the traceparent header on every /ping* route.
 use axum::{Router, routing::get, http::HeaderMap, response::IntoResponse};
 
 async fn ping(headers: HeaderMap) -> impl IntoResponse {
@@ -11,10 +10,8 @@ async fn ping(headers: HeaderMap) -> impl IntoResponse {
     format!("pong traceparent={}", traceparent)
 }
 
-// /ping-a and /ping-b are the A/B endpoints for the probe-discrimination test.
-// They are distinct url.path values so OBI emits distinct backend server spans;
-// the test uses that as ground truth (a /ping-b span appearing under an
-// /blocking-a server span is a definite cross-service misattribution).
+// One route pair per discrimination subtest (red_test_rust_tokio_test.go); distinct paths
+// keep the subtests from classifying each other's traces.
 async fn ping_a(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -33,9 +30,6 @@ async fn ping_b(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-b traceparent={}", traceparent)
 }
 
-// /ping-c and /ping-d are the async A/B discriminator's backends (kept distinct
-// from /ping-a and /ping-b so the async and spawn_blocking subtests never
-// cross-classify each other's traces).
 async fn ping_c(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -54,9 +48,6 @@ async fn ping_d(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-d traceparent={}", traceparent)
 }
 
-// /ping-e and /ping-f are the DIRECT-I/O (Shape B) A/B discriminator's backends,
-// kept distinct from the reqwest paths (/ping-c, /ping-d) so the shapes never
-// cross-classify.
 async fn ping_e(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -75,10 +66,6 @@ async fn ping_f(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-f traceparent={}", traceparent)
 }
 
-// /ping-g and /ping-h are the SHARED-CLIENT (pooled keep-alive reuse) A/B
-// discriminator's backends. Kept distinct from every other pair so pool-reuse
-// misattribution (a request resolving a PREVIOUS request's trace through a reused
-// hyper connection-driver task) is classified on its own.
 async fn ping_g(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -97,9 +84,6 @@ async fn ping_h(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-h traceparent={}", traceparent)
 }
 
-// /ping-i and /ping-j are the CHANNEL-HANDOFF (long-lived worker task) A/B
-// discriminator's backends: one worker task serves BOTH sides, so a stale lineage
-// on it would cross the A/B boundary and surface as contamination.
 async fn ping_i(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -118,9 +102,8 @@ async fn ping_j(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-j traceparent={}", traceparent)
 }
 
-// /ping-k and /ping-l are the EVICTED-MAILBOX A/B discriminator's backends: a lineage the
-// mailbox's wake adopted from one request would cross the A/B boundary. The response is
-// held for MAILBOX_HOLD so one request's window spans several of the mailbox's jobs.
+// /ping-k and /ping-l hold the response for MAILBOX_HOLD so one request's window spans
+// several mailbox jobs.
 const MAILBOX_HOLD: std::time::Duration = std::time::Duration::from_millis(20);
 
 async fn ping_k(headers: HeaderMap) -> impl IntoResponse {
@@ -143,8 +126,6 @@ async fn ping_l(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-l traceparent={}", traceparent)
 }
 
-// /ping-m and /ping-n are the SYNC-THREAD A/B discriminator's backends: the server's std
-// threads call them, and their parent must be the calling thread's own server span.
 async fn ping_m(headers: HeaderMap) -> impl IntoResponse {
     let traceparent = headers
         .get("traceparent")
@@ -187,13 +168,8 @@ async fn main() {
         .route("/ping-m", get(ping_m))
         .route("/ping-n", get(ping_n));
 
-    // 8094 is a second listener for the A/B discriminators: every B side targets it, so
-    // the sides differ by port (orig_dport) as well as by HTTP path. With a port argument
-    // the process serves that port alone: OBI keys a server's inbound trace by the client's
-    // address and port plus the server's pid, so one process holding both listeners merges
-    // the traces of two connections a client opens from one ephemeral port to each of
-    // them, which the A/B bursts do a few times per run. The image starts one backend per
-    // port; no argument keeps both listeners in this process for local use.
+    // With a port argument the process serves that port alone (the image runs one backend per
+    // port; see the Dockerfile for why). No argument keeps both listeners for local use.
     if let Some(port) = std::env::args().nth(1) {
         println!("backend listening on http://0.0.0.0:{}", port);
         let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))

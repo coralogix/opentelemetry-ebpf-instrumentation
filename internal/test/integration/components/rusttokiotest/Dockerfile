@@ -1,9 +1,7 @@
 # Integration-test image for Rust/Tokio context propagation.
 #
 # Builds the backend and one server, selected by SERVER_BIN:
-#   server       — Axum on a multi-thread work-stealing runtime, with endpoints that
-#                  exercise tokio::spawn (async ancestry walk + cross-thread migration)
-#                  and spawn_blocking (blocking-pool bridge).
+#   server       — axum on a multi-thread work-stealing runtime
 #   server-actix — actix-web, one current-thread runtime per worker thread.
 #   backend      — downstream service that echoes the traceparent on /ping.
 #
@@ -55,11 +53,8 @@ WORKDIR /app
 COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/${SERVER_BIN} ./server
 COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/backend ./backend
 
-# Run one backend process per port in the background and the server in the foreground
-# (one container, shared localhost). Two backend processes, not one with two listeners:
-# OBI keys a server's inbound trace by the client's address and port plus the server's
-# pid, and the A/B bursts open connections from one ephemeral port to both backend ports
-# a few times per run. The server stays in the foreground so the container's lifecycle
-# tracks it. START_DELAY (seconds, default 0) holds all three back so a suite can have OBI
-# attached before the app exists (docker-compose-rust-tokio-obi-first.yml).
+# One backend process per port and the server in the foreground. Two processes, not one with
+# two listeners: OBI keys a server's inbound trace by the client address and port plus the
+# server pid, and the A/B bursts reuse one ephemeral port toward both backend ports.
+# START_DELAY (seconds) holds all three back for docker-compose-rust-tokio-obi-first.yml.
 CMD ["sh", "-c", "sleep ${START_DELAY:-0}; ./backend 8093 & ./backend 8094 & exec ./server"]

@@ -1,10 +1,7 @@
 services:
-  # OBI-first variant of docker-compose-rust-tokio.yml for
-  # TestRustTokioContextPropagationOBIFirst: identical stack, but START_DELAY holds the
-  # Rust processes back so OBI (started right after the container) is already running
-  # and attaches as soon as they appear, well before the first request. This is the
-  # production order (an agent watching a new pod); the default suite is the opposite
-  # (app first, OBI attaches to a running runtime).
+  # TestRustTokioContextPropagationOBIFirst: docker-compose-rust-tokio.yml with START_DELAY
+  # holding the Rust processes back so OBI attaches before the first request (the production
+  # order); the default suite starts the app first.
   tokioserver:
     build:
       context: ../../..
@@ -40,9 +37,7 @@ services:
     privileged: true # in some environments you can drop this and use cap_add: [ SYS_ADMIN ]
     network_mode: "service:tokioserver"
     pid: "service:tokioserver"
-    # eBPF settings (open_port, context_propagation, track_request_headers, bpf_debug,
-    # trace_printer) live in obi-config-rust-tokio.yml — mirroring the hand-validated
-    # config — so there is a single authoritative source. Only operational knobs here.
+    # eBPF settings live in obi-config-rust-tokio.yml; only operational knobs here.
     environment:
       GOCOVERDIR: "/coverage"
       OTEL_EBPF_DISCOVERY_POLL_INTERVAL: 500ms

@@ -1,8 +1,6 @@
 services:
-  # Probe-discrimination stack for TestRustTokioProbeDiscrimination. Identical to
-  # docker-compose-rust-tokio.yml except the Rust server/backend build profile is
-  # selectable: release (default, what users ship) or debug, with CARGO_PROFILE=debug
-  # set in the environment before `go test`.
+  # TestRustTokioProbeDiscrimination: docker-compose-rust-tokio.yml plus the server's
+  # std-thread listener on 8095.
   tokioserver:
     build:
       context: ../../..
