@@ -11,6 +11,7 @@
 
 #include <maps/tokio_task_id_state.h>
 #include <maps/tokio_task_state.h>
+#include <maps/tokio_thread_birth.h>
 #include <maps/tokio_thread_state.h>
 
 // Working copies for the anchor updates. Per-CPU scratch, not the stack: the caller sits
@@ -24,6 +25,53 @@ SCRATCH_MEM_TYPED(tokio_parent_snapshot, tp_info_pid_t)
 // means "parent not registered at spawn".
 static __always_inline u64 tokio_task_incarnation(void) {
     return bpf_ktime_get_ns();
+}
+
+// The task a thread was cloned under, while that incarnation of it still exists; 0 otherwise
+// (devdoc "Threads born inside a task inherit its lineage").
+static __always_inline u64 tokio_birth_task(u32 tgid, const pid_key_t *thread_key) {
+    const tokio_thread_birth_t *birth =
+        (const tokio_thread_birth_t *)bpf_map_lookup_elem(&tokio_thread_birth, thread_key);
+    if (!birth || birth->tgid != tgid) {
+        return 0;
+    }
+    const tokio_task_key_t key = tokio_task_key(tgid, birth->task);
+    const tokio_task_state_t *task_state =
+        (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
+    if (!task_state || task_state->version != birth->version ||
+        task_state->anchor_epoch != birth->epoch) {
+        return 0;
+    }
+    return birth->task;
+}
+
+// At sys_clone return on the cloning thread: the child inherits the task being polled, or
+// the cloning thread's own birth when it polls none (a thread chain started inside a task).
+static __always_inline void
+tokio_record_thread_birth(u64 pid_tgid, const pid_key_t *parent_key, const pid_key_t *child_key) {
+    const tokio_thread_state_t *thread_state =
+        (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
+    if (thread_state && thread_state->current_task) {
+        const tokio_task_key_t key = tokio_task_key(thread_state->tgid, thread_state->current_task);
+        const tokio_task_state_t *task_state =
+            (const tokio_task_state_t *)bpf_map_lookup_elem(&tokio_task_state, &key);
+        if (!task_state) {
+            return;
+        }
+        const tokio_thread_birth_t birth = {
+            .task = thread_state->current_task,
+            .version = task_state->version,
+            .epoch = task_state->anchor_epoch,
+            .tgid = thread_state->tgid,
+        };
+        bpf_map_update_elem(&tokio_thread_birth, child_key, &birth, BPF_ANY);
+        return;
+    }
+    const tokio_thread_birth_t *inherited =
+        (const tokio_thread_birth_t *)bpf_map_lookup_elem(&tokio_thread_birth, parent_key);
+    if (inherited) {
+        bpf_map_update_elem(&tokio_thread_birth, child_key, inherited, BPF_ANY);
+    }
 }
 
 // Full key: two clients can share an ephemeral source port on different addresses.

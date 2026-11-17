@@ -227,37 +227,38 @@ resolve_python_current_task(const trace_key_t *t_key, u64 pid_tgid, python_task_
     return resolution;
 }
 
-static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(u64 pid_tgid) {
-    const tokio_thread_state_t *thread_state =
-        (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
-    if (!thread_state) {
-        bpf_dbg_printk("tokio egress NO-CURRENT-TASK tid=%d", (u32)pid_tgid);
-        return NULL;
-    }
-
-    // Fail closed: no owning request, no parent. With current_id set (debug builds) the id
-    // walk is authoritative: the Header-derived current_task is then a per-worker root.
-    if (thread_state->current_id) {
-        tp_info_pid_t *tp =
-            find_tokio_parent_trace_by_id(thread_state->tgid, thread_state->current_id, 1);
-        if (tp) {
-            bpf_dbg_printk(
-                "found tp by id tid=%d id=%llu", (u32)pid_tgid, thread_state->current_id);
-            bpf_dbg_printk("tokio egress IDWALK-HIT");
-            return tp;
+// A polled thread walks from its current task (or id); a thread that never polled from the
+// task it was cloned under, if any (devdoc "Parent Lookup").
+static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(
+    u64 pid_tgid, u32 tgid, const tokio_thread_state_t *thread_state, const pid_key_t *thread_key) {
+    u64 task = 0;
+    if (thread_state && thread_state->polled) {
+        // Fail closed: no owning request, no parent. With current_id set (debug builds) the id
+        // walk is authoritative: the Header-derived current_task is then a per-worker root.
+        if (thread_state->current_id) {
+            tp_info_pid_t *tp = find_tokio_parent_trace_by_id(tgid, thread_state->current_id, 1);
+            if (tp) {
+                bpf_dbg_printk(
+                    "found tp by id tid=%d id=%llu", (u32)pid_tgid, thread_state->current_id);
+                bpf_dbg_printk("tokio egress IDWALK-HIT");
+                return tp;
+            }
+            bpf_dbg_printk("tokio egress IDWALK-MISS");
+            return NULL;
         }
-        bpf_dbg_printk("tokio egress IDWALK-MISS");
-        return NULL;
+        task = thread_state->current_task;
+    } else {
+        task = tokio_birth_task(tgid, thread_key);
     }
 
-    if (!thread_state->current_task) {
+    if (!task) {
         bpf_dbg_printk("tokio egress NO-CURRENT-TASK tid=%d", (u32)pid_tgid);
         return NULL;
     }
 
-    tp_info_pid_t *tp = find_tokio_parent_trace(thread_state->tgid, thread_state->current_task, 1);
+    tp_info_pid_t *tp = find_tokio_parent_trace(tgid, task, 1);
     if (tp) {
-        bpf_dbg_printk("found tp tid=%d task=%llx", (u32)pid_tgid, thread_state->current_task);
+        bpf_dbg_printk("found tp tid=%d task=%llx", (u32)pid_tgid, task);
         bpf_dbg_printk("tokio egress WALK-HIT");
         return tp;
     }
@@ -384,17 +385,21 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
                                                         u16 orig_dport,
                                                         const tp_info_t *wire_tp) {
     // Tokio process: a thread that has polled a task resolves only through the task walks, any
-    // other thread only through its own thread-keyed server span (devdoc "Parent Lookup").
-    // Keyed with valid_pid() like the tokio probes: the two agree in pod mode with the filter off.
+    // other thread through its own thread-keyed server span, then the task it was cloned under
+    // (devdoc "Parent Lookup"). Keyed with valid_pid() like the tokio probes: the two agree in
+    // pod mode with the filter off.
     const u32 tgid = valid_pid(pid_tgid);
     if (bpf_map_lookup_elem(&tokio_process, &tgid)) {
         const tokio_thread_state_t *thread_state =
             (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
         if (!thread_state || !thread_state->polled) {
             tp_info_pid_t *thread_parent = bpf_map_lookup_elem(&server_traces, t_key);
-            return parent_trace_matches(thread_parent, wire_tp) ? thread_parent : NULL;
+            if (parent_trace_matches(thread_parent, wire_tp)) {
+                return thread_parent;
+            }
         }
-        tp_info_pid_t *tokio_parent = find_tokio_parent_trace_for_thread(pid_tgid);
+        tp_info_pid_t *tokio_parent =
+            find_tokio_parent_trace_for_thread(pid_tgid, tgid, thread_state, &t_key->p_key);
         if (tokio_parent && tokio_parent->valid && parent_trace_matches(tokio_parent, wire_tp)) {
             return tokio_parent;
         }

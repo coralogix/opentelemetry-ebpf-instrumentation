@@ -73,8 +73,14 @@ tokio_register_task(u64 id, u32 tgid, u64 new_task_ptr, enum tokio_task_origin o
     // At a wake or a first poll the current task is the waker or the task itself.
     const u8 spawner_known =
         origin != k_tokio_origin_schedule_known && origin != k_tokio_origin_poll;
-    const u64 parent_task =
+    u64 parent_task =
         (spawner_known && thread_state) ? thread_state->current_task : k_tokio_task_none;
+    // Spawned outside any task on a thread cloned inside one: that task is the spawner.
+    if (spawner_known && parent_task == k_tokio_task_none) {
+        pid_key_t thread_key = {0};
+        task_tid(&thread_key);
+        parent_task = tokio_birth_task(tgid, &thread_key);
+    }
 
     const tokio_task_key_t new_task_key = tokio_task_key(tgid, new_task_ptr);
     const tokio_task_state_t *existing =
