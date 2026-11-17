@@ -184,6 +184,11 @@ func runTokioContextPropagation(t *testing.T, composeFile, logFile string, obiFi
 	t.Run("spawn + spawn_blocking", func(t *testing.T) {
 		assertTokioCrossServiceTrace(t, "/blocking-nested")
 	})
+	// The std thread never polls a task: the chain holds through the task recorded when the
+	// handler's thread cloned it.
+	t.Run("std thread", func(t *testing.T) {
+		assertTokioCrossServiceTrace(t, "/thread")
+	})
 	if obiFirst {
 		t.Run("OBI attached before the first request", func(t *testing.T) {
 			assertTokioAttachedBeforeFirstRequest(t, compose)
@@ -397,6 +402,15 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 		tokioABDiscrimination(t, tokioABCase{
 			serverA: "/blocking-a", serverB: "/blocking-b",
 			backendA: "/ping-a", backendB: "/ping-b",
+			minClean: 20,
+		})
+	})
+	t.Run("thread_spawn", func(t *testing.T) {
+		// A std thread cloned inside the handler's poll does the egress itself: it never polls
+		// a task, so the parent is the task recorded at its birth, checked by incarnation.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/thread-a", serverB: "/thread-b",
+			backendA: "/ping-o", backendB: "/ping-p",
 			minClean: 20,
 		})
 	})

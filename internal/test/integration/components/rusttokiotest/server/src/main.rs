@@ -322,6 +322,32 @@ async fn blocking_nested() -> impl IntoResponse {
     respond(handle.await.unwrap_or_else(|e| Err(e.to_string())))
 }
 
+// /thread, /thread-a, /thread-b: the handler clones a std thread that calls the backend
+// itself and hands the result back over a oneshot. The thread never polls a task, so the
+// parent is the task that was being polled when it was cloned.
+async fn call_backend_on_thread(url: &'static str) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(call_backend_blocking_url(url));
+    });
+    rx.await.unwrap_or_else(|e| Err(e.to_string()))
+}
+
+const BACKEND_O: &str = "http://127.0.0.1:8093/ping-o";
+const BACKEND_P: &str = "http://127.0.0.1:8093/ping-p";
+
+async fn thread_spawn() -> impl IntoResponse {
+    respond(call_backend_on_thread(BACKEND).await)
+}
+
+async fn thread_a() -> impl IntoResponse {
+    respond(call_backend_on_thread(BACKEND_O).await)
+}
+
+async fn thread_b() -> impl IntoResponse {
+    respond(call_backend_on_thread(BACKEND_P).await)
+}
+
 // A std-thread HTTP/1 listener on 8095 beside the Tokio runtime: /sync-a and /sync-b call
 // the backend on the handling thread itself, so the parent must be that thread's own server
 // span. Connection: close, so every request is read on a fresh thread.
@@ -391,6 +417,9 @@ async fn main() {
         .route("/blocking-nested", get(blocking_nested))
         .route("/blocking-a", get(blocking_a))
         .route("/blocking-b", get(blocking_b))
+        .route("/thread", get(thread_spawn))
+        .route("/thread-a", get(thread_a))
+        .route("/thread-b", get(thread_b))
         .route("/ws-spawn-a", get(ws_spawn_a))
         .route("/ws-spawn-b", get(ws_spawn_b))
         .route("/ws-direct-a", get(ws_direct_a))
@@ -410,6 +439,9 @@ async fn main() {
     println!("  GET /blocking-nested — spawn -> spawn_blocking -> ureq");
     println!("  GET /blocking-a      — spawn_blocking -> ureq /ping-a (blocking discrimination A)");
     println!("  GET /blocking-b      — spawn_blocking -> ureq /ping-b (blocking discrimination B)");
+    println!("  GET /thread          — std::thread::spawn -> ureq (thread cloned in the handler)");
+    println!("  GET /thread-a        — std::thread::spawn -> ureq /ping-o (thread discrimination A)");
+    println!("  GET /thread-b        — std::thread::spawn -> ureq /ping-p (thread discrimination B)");
     println!("  GET /ws-spawn-a      — tokio::spawn -> reqwest /ping-c (async discrimination A)");
     println!("  GET /ws-spawn-b      — tokio::spawn -> reqwest /ping-d (async discrimination B)");
     println!(
