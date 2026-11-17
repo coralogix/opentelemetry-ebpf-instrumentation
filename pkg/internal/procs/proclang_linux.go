@@ -19,22 +19,11 @@ import (
 	"go.opentelemetry.io/obi/pkg/internal/fastelf"
 )
 
-// rustDemangle converts a Rust legacy-mangled _ZN…E symbol to a simplified
-// demangled path (e.g. "tokio::runtime::task::raw::poll").
-//
-// Rust legacy mangling only ever has length-prefixed identifiers or the closing
-// 'E' at a path position — it never emits a bare Itanium template list (I…E) or
-// nested-name (N…E) there, so those are not handled; a stray non-digit simply
-// terminates the scan and returns the prefix collected so far.
-//
-// Rust also encodes generic type parameters directly inside length-prefixed
-// identifiers using $LT$...$GT$ escapes (e.g. "LocalOwnedTasks$LT$S$GT$").
-// These are stripped so that "LocalOwnedTasks$LT$S$GT$" becomes "LocalOwnedTasks".
-//
-// The Rust build-hash component (17h<16 lowercase hex chars>) is also dropped.
-//
-// Returns "" for symbols that do not start with "_ZN" (e.g. v0-scheme _R
-// symbols, C symbols) — callers fall back to exact-name matching for those.
+// rustDemangle converts a legacy-mangled _ZN…E symbol to its path with the $LT$…$GT$
+// generic arguments and the 17h<hash> build hash dropped, e.g.
+// "tokio::runtime::task::harness::Harness::poll". Legacy mangling only puts
+// length-prefixed identifiers or the closing 'E' at a path position; a stray byte ends
+// the scan with the prefix collected so far. Returns "" for any other scheme.
 func rustDemangle(name string) string {
 	if !strings.HasPrefix(name, "_ZN") {
 		return ""
@@ -43,7 +32,6 @@ func rustDemangle(name string) string {
 	var parts []string
 	for len(rest) > 0 {
 		if rest[0] == 'E' {
-			// End of the outer nested name — we are done.
 			goto done
 		}
 		// Read a length-prefixed identifier. Digits past the symbol's own length cannot
@@ -71,7 +59,6 @@ func rustDemangle(name string) string {
 				break
 			}
 		}
-		// Strip $LT$...$GT$ generic type parameters embedded in the identifier.
 		part = stripDollarBrackets(part)
 		parts = append(parts, part)
 	}
@@ -79,11 +66,7 @@ done:
 	return strings.Join(parts, "::")
 }
 
-// stripDollarBrackets removes $LT$...$GT$ encoded angle brackets from a Rust
-// legacy-mangled identifier segment.  Rust encodes generic type parameters
-// directly inside length-prefixed identifiers using dollar-escaped brackets
-// (e.g. "LocalOwnedTasks$LT$S$GT$" -> "LocalOwnedTasks").  Nesting is handled
-// by tracking depth so that "Foo$LT$Bar$LT$X$GT$$GT$" -> "Foo".
+// stripDollarBrackets drops $LT$…$GT$ generic arguments from a legacy identifier, nested ones included.
 func stripDollarBrackets(s string) string {
 	for {
 		start := strings.Index(s, "$LT$")
@@ -111,15 +94,9 @@ func stripDollarBrackets(s string) string {
 	}
 }
 
-// rustDemangleV0 converts a Rust v0-mangled _R… symbol to a simplified
-// demangled path sufficient for path matching.
-//
-// Generic arguments are dropped; back-references are resolved by caching
-// parsed results at their byte positions in the input.  Impl paths produce
-// "<Type>" which is subsequently stripped of angle brackets by the caller.
-//
-// Returns "" on any parse failure or unrecognized construct so that callers
-// can fall back silently.
+// rustDemangleV0 converts a v0-mangled _R… symbol to its path with generic arguments
+// dropped and back-references resolved from a per-position cache. Returns "" on any
+// parse failure.
 func rustDemangleV0(name string) string {
 	s := name
 	if strings.HasPrefix(s, "__R") { // macOS adds an extra leading underscore
@@ -203,10 +180,8 @@ func (p *v0Parser) path(depth int) string {
 		selfType := p.path(depth + 1)
 		result = "<" + selfType + ">"
 
-	// No probe path starts with X or Y (all are N/M/C forms), but both occur inside
-	// generic arguments, e.g. a closure defined in a trait-impl method
-	// (…NvXs5_…hyper_util…dns…). skipType hands them to path(); without these arms the
-	// scan would stop short and the enclosing Harness::poll copy would never match.
+	// X and Y never start a probe path but occur inside generic arguments (a closure defined
+	// in a trait-impl method), which skipType hands to path().
 	case 'X': // trait impl: X <disambiguator> <self-type> <trait>
 		p.pos++
 		p.skipDisambiguator()
@@ -307,9 +282,7 @@ scan:
 		case c >= 'A' && c <= 'Z':
 			d = int(c-'A') + 36
 		default:
-			// '_' terminator or any non-base62 char: stop WITHOUT consuming it.
-			// (A labeled break is required — a plain `break` here would only leave
-			// the switch and then wrongly consume the char as a 0 digit.)
+			// Stop without consuming the terminator (a plain break would only leave the switch).
 			break scan
 		}
 		hasDigit = true
@@ -731,20 +704,15 @@ func resolveSymbol(f *elf.File, s elf.Symbol) Sym {
 	return Sym{Name: s.Name, Off: address, Value: s.Value, Len: s.Size, Prog: p}
 }
 
-// isRustClosureSymbol reports whether a raw mangled Rust symbol is a closure body
-// (or lives inside one). Detected on the MANGLED form because the demangled one is
-// ambiguous: legacy encodes closures as a `$u7b$$u7b$closure$u7d$$u7d$` path segment;
-// v0 encodes them as an `NC` (closure namespace) path element, which our simplified
-// v0 demangler renders identically to the parent function.
+// isRustClosureSymbol detects a closure body on the mangled form: legacy spells it
+// $u7b$$u7b$closure$u7d$$u7d$, v0 as a root NC element that the demangler renders as
+// the parent function.
 func isRustClosureSymbol(name string) bool {
 	if strings.Contains(name, "$u7b$$u7b$closure$u7d$$u7d$") { // legacy {{closure}}
 		return true
 	}
-	// v0: a closure element is "NC<path>…". At the symbol root this is _RNC / __RNC;
-	// nested closures (e.g. a monomorphization of one) contain "NC" mid-symbol, but a
-	// bare substring check would false-positive on identifier bytes (e.g. "…3NCa…"), so
-	// only the unambiguous root forms are filtered here — the root form is what the
-	// probe paths actually collide with.
+	// Only the root NC form (_RNC / __RNC) is filtered: "NC" mid-symbol can be identifier
+	// bytes, and the root form is what collides with the probe paths.
 	rest := name
 	switch {
 	case strings.HasPrefix(rest, "__R"):
@@ -757,18 +725,11 @@ func isRustClosureSymbol(name string) bool {
 	return strings.HasPrefix(rest, "NC")
 }
 
-// FindRustSymbols resolves demangled Rust function paths to all matching ELF
-// symbols in the binary. Each key in the result maps to one Sym per monomorphized copy
-// of that function (e.g. every copy of Harness::poll). Both demanglers drop generic
-// arguments, so every copy of a generic function demangles to the same path; a symbol
-// matches only when its whole demangled path equals the key. Nested items such as
-// `Cell::new::new_header` or `Harness::poll_inner` are different paths and never match,
-// even though they start with the key (they are inlined in release and out-of-line in
-// debug builds, where a prefix match attached the parent's probes to them).
-//
-// The symbol tables are streamed as in FindExeSymbols and only the symbols that name the
-// crate of a requested path are demangled, so a large Rust binary that does not link
-// that crate costs one walk of its symbol table.
+// FindRustSymbols resolves demangled Rust function paths to every ELF symbol whose whole
+// demangled path equals one of them, one Sym per monomorphized copy (both demanglers drop
+// generic arguments). Nested items such as Cell::new::new_header are different paths and
+// never match. Only the symbols naming the crate of a requested path are demangled, so a
+// Rust binary without that crate costs one walk of its symbol table.
 func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err error) {
 	// The demanglers run on the crate's symbols of every Rust executable on the host; a
 	// panic in them must fail this scan, not the process, as in findLanguageFromElf.
@@ -796,10 +757,8 @@ func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err err
 	seen := map[uint64]struct{}{}
 
 	err = eachSymbolTableEntry(ctx, func(strtab []byte, symbol *fastelf.Elf64_Sym) {
-		// Only STT_FUNC. Rust monomorphized generics (the Tokio copies) are always
-		// STT_FUNC; STT_NOTYPE function symbols only arise from ICF/LTO folding or
-		// hand-written asm (not Rust defaults), so matching them is not worth the risk
-		// of attaching a uprobe to a non-entry symbol that merely demangles to the path.
+		// STT_FUNC only: Rust monomorphized copies always are; an STT_NOTYPE symbol that
+		// demangles to the path (ICF/LTO folding, asm) may not be a function entry.
 		if elf.ST_TYPE(symbol.Info) != elf.STT_FUNC {
 			return
 		}
@@ -807,12 +766,8 @@ func FindRustSymbols(f *elf.File, paths []string) (out map[string][]Sym, err err
 		if !namesMangledCrate(name, crates) {
 			return
 		}
-		// Closures are never the intended probe target. In v0 a closure demangles to
-		// the SAME path as its parent fn (our parser drops the NC closure namespace), so
-		// it would match the path; legacy closures demangle to a longer path
-		// ("…::{{closure}}") and are filtered too, for symmetry. Probing a closure fires
-		// the handler with the closure's ABI (e.g. PARM1 = &Context instead of the task
-		// Id), which poisons per-thread state. Filter on the RAW mangled form instead.
+		// Closures are filtered on the mangled form (isRustClosureSymbol): a v0 closure demangles
+		// to its parent's path, and probing it fires the handler with the closure's ABI.
 		if isRustClosureSymbol(name) {
 			return
 		}

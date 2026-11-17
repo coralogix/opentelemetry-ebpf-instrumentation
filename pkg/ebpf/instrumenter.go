@@ -706,10 +706,8 @@ func resolveInstrPath(
 	exePath string,
 	exeIno uint64,
 ) (string, uint64, string, bool) {
-	// "" and the explicit "self" key both mean "instrument the executable itself"
-	// (statically-linked targets, e.g. Rust/Tokio). Handle "self" here by design rather
-	// than relying on procs.LibPath("self") returning nil — which not only mislabels it
-	// as "not linked" but could mis-resolve to any mapping whose path contains "/self".
+	// "" and SelfLibKey both mean the executable itself. Resolved here, not through
+	// procs.LibPath: a mapping whose path contains "/self" would otherwise match.
 	if lib == "" || lib == ebpfcommon.SelfLibKey {
 		return exePath, exeIno, "", true
 	}
@@ -1504,11 +1502,10 @@ func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.Pro
 		resolved = append(resolved, symbolName)
 	}
 
-	// Tokio paths are universal (every poll/creation goes through raw::poll/Cell::new),
-	// so a Tokio binary resolves all of them and a non-Tokio binary resolves none.
-	// "Some but not all" means a probe was silently lost, so warn instead of just logging
-	// Debug. Paths flagged MayBeInlined are expected to vanish in some builds (e.g. the
-	// debug-only id-layer symbols in a release binary) and do not count as lost.
+	// Tokio paths are universal (every poll goes through Harness::poll, every creation
+	// through Cell::new): a Tokio binary resolves all of them, a non-Tokio binary none.
+	// "Some but not all" means a probe was lost, hence Warn. MayBeInlined paths vanish
+	// by design in some builds and do not count.
 	if len(resolved) > 0 && len(unresolved) > 0 {
 		log.Warn("rust paths only partially resolved — some Tokio probes not attached "+
 			"(demangler gap or inlined/stripped symbol?); context propagation may be degraded",
@@ -1518,15 +1515,10 @@ func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.Pro
 	return nil
 }
 
-// expandRustPathCopies expands every ProbeDesc registered under a path against every
-// monomorphized copy of the symbol. A path key may carry several ProbeDescs, so every
-// desc is expanded, not just the first.
-//
-// Copies that wanted a uretprobe but have no return offsets are reported once per path
-// at Warn: for Harness::poll the exit probe is what clears the thread's current task, so
-// an entry-only copy leaves a stale task behind after every poll of that copy (a toolchain
-// change in the epilogue, or an instruction the decoder cannot read). Paths flagged
-// MayBeInlined are expected to lose copies and stay silent.
+// expandRustPathCopies expands every ProbeDesc under a path against every monomorphized
+// copy. Copies that wanted a uretprobe but have no return offsets are warned once per
+// path: for Harness::poll the exit probe clears the thread's current task, so an
+// entry-only copy leaves a stale task after every poll. MayBeInlined paths stay silent.
 func expandRustPathCopies(symbolName string, templates []*ebpfcommon.ProbeDesc, matched []procs.Sym,
 	instrPath string, log *slog.Logger,
 ) (expanded []*ebpfcommon.ProbeDesc, anyRequired, mayBeInlined bool) {
@@ -1559,12 +1551,9 @@ func expandRustPathCopies(symbolName string, templates []*ebpfcommon.ProbeDesc, 
 	return expanded, anyRequired, mayBeInlined
 }
 
-// expandedProbeForSym builds one concrete ProbeDesc for a single monomorphized
-// copy of a path-matched Rust symbol, or nil if the copy's code can't be read,
-// or if it is a uretprobe-only probe (Start==nil) with no return offsets to attach.
-// A copy with an entry probe still attaches even when return offsets are missing.
-// The second result reports a copy that wanted a uretprobe (template.End set) but
-// has no return offsets.
+// expandedProbeForSym builds the ProbeDesc of one monomorphized copy: nil when its code
+// cannot be read or it is uretprobe-only with no return offsets. The second result
+// reports a copy that wanted a uretprobe but has none.
 func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
 	symbolName string, copyIdx int, log *slog.Logger,
 ) (*ebpfcommon.ProbeDesc, bool) {

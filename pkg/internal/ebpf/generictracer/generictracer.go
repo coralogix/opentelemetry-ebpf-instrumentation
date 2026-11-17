@@ -204,14 +204,11 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 	p.purgeTokioState(uint32(pid))
 }
 
-// purgeTokioState drops every Tokio map entry of a process that is gone. The maps are keyed
-// by the OBI-view pid, the pid BlockPID receives, and are otherwise only LRU-evicted: a
-// later process reusing the pid would inherit the tokio_process mark and stale lineage.
-// The slot counts are hashed, not keyed, and stay (see tokio_task_slots.h).
-// With the BPF pid filter off the maps are keyed by the host pid and this purge misses:
-// those entries live until LRU eviction.
-// A purge walks the three maps in full, up to 90,000 entries per Tokio process exit:
-// unnoticeable at normal churn, visible on a crash-looping Rust pod.
+// purgeTokioState drops the Tokio map entries of a process that is gone: the maps are keyed
+// by the OBI-view pid and otherwise only LRU-evicted, so a later process reusing the pid
+// would inherit the tokio_process mark and stale lineage. The slot counts are hashed, not
+// keyed, and stay (tokio_task_slots.h). With the BPF pid filter off the maps hold host pids
+// and the purge misses. Cost: a full walk of three 30,000-entry maps per Tokio exit.
 func (p *Tracer) purgeTokioState(tgid uint32) {
 	if p.bpfObjects.TokioProcess == nil {
 		return

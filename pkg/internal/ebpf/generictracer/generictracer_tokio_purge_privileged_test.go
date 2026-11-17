@@ -95,8 +95,6 @@ func countTokioTaskKeys(t *testing.T, m *ebpf.Map, tgid uint32, value any) int {
 	return n
 }
 
-// assertTokioEntries checks what each map still holds for tgid: the process flag, the
-// Header entries, the id entries and the thread entries.
 func assertTokioEntries(t *testing.T, tracer *Tracer, tgid uint32, flag, tasks, ids, threads int) {
 	t.Helper()
 	objs := &tracer.bpfObjects

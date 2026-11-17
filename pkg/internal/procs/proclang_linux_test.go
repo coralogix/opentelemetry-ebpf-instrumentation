@@ -242,14 +242,12 @@ func TestRustDemangle_Legacy(t *testing.T) {
 }
 
 func TestRustDemangle_BuildHashStripped(t *testing.T) {
-	// The trailing 17h<16 hex> component must never appear in the output.
 	got := rustDemangle("_ZN3foo3bar17h0123456789abcdefE")
 	assert.Equal(t, "foo::bar", got)
 	assert.NotContains(t, got, "h0123456789abcdef")
 }
 
 func TestRustDemangle_NonLegacyReturnsEmpty(t *testing.T) {
-	// rustDemangle only handles the legacy _ZN…E scheme; everything else returns "".
 	for _, in := range []string{
 		"",
 		"main.someGoSymbol",
@@ -267,7 +265,7 @@ func TestRustDemangleV0_Tokio(t *testing.T) {
 		raw        string
 		wantPrefix string
 	}{
-		// Real v0 samples (RUSTFLAGS="-C symbol-mangling-version=v0" build).
+		// Real v0 samples.
 		{
 			"LocalOwnedTasks::bind",
 			"_RINvMs_NtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB5_15LocalOwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtBb_4task5local6SharedEE4bindINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtB1e_5boxed3BoxDNtNtNtB2k_6future6future6Futurep6OutputuNtNtB2k_6marker4SendEL_EEECsjqY7L67gDVE_8actix_rt",
@@ -289,8 +287,7 @@ func TestRustDemangleV0_Tokio(t *testing.T) {
 			"_RNvMs4_NtNtNtCscMapNUXOuou_5tokio7runtime8blocking4poolNtB5_7Spawner10spawn_task",
 			"tokio::runtime::blocking::pool::Spawner::spawn_task",
 		},
-		// pool::spawn_blocking — Real v0 sample (free fn, instantiated with the multi-thread worker Launch closure).
-		// Generic args (I…E) and the trailing instantiation are dropped by the parser.
+		// Free fn with generic args and a trailing instantiation, both dropped.
 		{
 			"pool::spawn_blocking",
 			"_RINvNtNtNtCshFZRMeAqrSd_5tokio7runtime8blocking4pool14spawn_blockingNCNvMNtNtNtB6_9scheduler12multi_thread6workerNtB19_6Launch6launch0uEB8_",
@@ -312,14 +309,9 @@ func TestRustDemangleV0_Tokio(t *testing.T) {
 	}
 }
 
-// TestRustDemangleV0_ComplexGenericArgs locks the structural generic-arg skip.
-// These are real v0 Harness::<T,S>::poll monomorphizations whose generic args
-// contain constructs that a naive I/E byte scan miscounts — a D…E dyn bound,
-// deeply nested I…E, and type names whose bytes include capital 'I'/'E'
-// (IntoFuture, Executor, Incoming). Before the fix, skipUntilE stopped short and
-// the enclosing N mis-read the trailing method, dropping "::poll" (the whole v0
-// under-resolution: ~20/27 copies attached instead of 27). All must now resolve
-// to the full path so every monomorphization is instrumented.
+// Real Harness::poll copies whose generic arguments hold constructs a byte scan for 'E'
+// miscounts: a D…E dyn bound, nested I…E, and identifiers containing 'I' or 'E'
+// (IntoFuture, Executor, Incoming). Every copy must resolve to the full path.
 func TestRustDemangleV0_ComplexGenericArgs(t *testing.T) {
 	const wantPrefix = "tokio::runtime::task::harness::Harness::poll"
 	cases := []struct{ name, raw string }{
@@ -363,12 +355,8 @@ func TestRustDemangleV0_NonV0ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestV0Base62StopsWithoutConsuming locks the base62 terminator fix: a non-base62
-// byte must end the number WITHOUT being consumed. (A plain `break` inside the
-// switch previously only left the switch and then swallowed the byte as a 0 digit.)
-// The terminator must be a genuinely non-base62 byte — '.' here, not a letter like
-// 'x' which is itself a valid base62 digit — and the value must stay <= len(sym) so
-// the overflow clamp doesn't mask the terminator behavior we're checking.
+// A non-base62 byte ends the number without being consumed. '.' is used because a letter
+// is itself a digit, and the value stays below len(sym) so the overflow clamp does not mask it.
 func TestV0Base62StopsWithoutConsuming(t *testing.T) {
 	p := &v0Parser{sym: "1."}
 	got := p.base62()
@@ -376,13 +364,9 @@ func TestV0Base62StopsWithoutConsuming(t *testing.T) {
 	assert.Equal(t, 1, p.pos, "must stop at '.' without consuming it")
 }
 
-// TestV0Base62DoesNotOverflowNegative locks a crash fix AND its terminator
-// invariant: a base62 run long enough to overflow int must (1) never wrap n
-// negative — which would defeat the ">= len(p.sym)" bounds checks callers rely on
-// and panic on a negative index — and (2) still consume the entire digit run plus
-// the trailing '_'. The value is clamped, but scanning must NOT bail mid-number:
-// real disambiguator hashes are long base62 runs, and stranding pos inside one
-// derails all subsequent parsing (the v0 tokio demangling bug).
+// A base62 run long enough to overflow int must neither wrap negative (callers index with
+// it) nor stop mid-number: disambiguator hashes are long runs, and stranding pos inside
+// one derails every later token.
 func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
 	sym := strings.Repeat("Z", 20) + "_" // 20 base62 digits, well past int64 overflow if uncapped
 	p := &v0Parser{sym: sym}
@@ -391,10 +375,8 @@ func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
 	assert.Equal(t, len(sym), p.pos, "must consume the whole run and the trailing '_'")
 }
 
-// TestRustPath_SelectsPollNotRawTaskPoll: the probe path raw::poll must equal the
-// demangled vtable free fn raw::poll and NOT the RawTask::poll thunk (whose path has
-// "RawTask::" between "raw::" and "poll"). Matching the thunk would probe an inlinable
-// function or double-fire.
+// raw::poll (the vtable free fn) and RawTask::poll (the thunk) are different paths: a
+// request for one must not match the other.
 func TestRustPath_SelectsPollNotRawTaskPoll(t *testing.T) {
 	const path = "tokio::runtime::task::raw::poll"
 	rawPoll := rustDemangle("_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE")
@@ -405,13 +387,10 @@ func TestRustPath_SelectsPollNotRawTaskPoll(t *testing.T) {
 	assert.NotEqual(t, path, rawTaskPoll, "RawTask::poll (thunk) must NOT match the probe path")
 }
 
-// TestRustPath_NestedItemsAreNotCopies: a probe path matches a symbol only when the
-// whole demangled path is equal. The nested helpers of Cell::new (new_header, check) and
-// of Harness::poll (poll_inner) start with the parent's path but are different functions;
-// they are inlined in release and out-of-line in debug builds, where a prefix match used
-// to attach the parent's uretprobe to them (one bogus Header entry per spawn in debug).
-// Real symbols from the debug test server (v0, rust 1.96 / tokio 1.52) and legacy-mangled
-// equivalents.
+// A path matches only a whole demangled path: the nested helpers of Cell::new (new_header,
+// check) and Harness::poll (poll_inner), out of line in debug builds, start with the
+// parent's path but are different functions. Real symbols of the debug test server plus
+// legacy-mangled equivalents.
 func TestRustPath_NestedItemsAreNotCopies(t *testing.T) {
 	const cellNew = "tokio::runtime::task::core::Cell::new"
 	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
@@ -449,9 +428,7 @@ func TestRustPath_NestedItemsAreNotCopies(t *testing.T) {
 	}
 }
 
-// TestFindRustSymbols_NoFalseMatchOnNonRust confirms a Rust path matches
-// nothing in a non-Rust (Go) binary — symbols that don't demangle as Rust are
-// skipped, so the path machinery never produces spurious attachments.
+// A Rust path matches nothing in a Go binary.
 func TestFindRustSymbols_NoFalseMatchOnNonRust(t *testing.T) {
 	f := openSymbolFixtureELF(t)
 	defer f.Close()
@@ -634,10 +611,7 @@ func TestPopulateRangeIsBestEffort(t *testing.T) {
 	})
 }
 
-// Closure bodies must never be probed: legacy encodes them as a
-// $u7b$$u7b$closure$u7d$$u7d$ segment; v0 as a root NC element that our simplified
-// demangler renders identically to the parent fn (so it can only be told apart on the
-// mangled form). All samples below are real symbols from the rusttokiostudy binary.
+// Real symbols; see isRustClosureSymbol for the two encodings.
 func TestIsRustClosureSymbol(t *testing.T) {
 	closures := []string{
 		// legacy {{closure}} inside Sender::try_send

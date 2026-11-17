@@ -169,9 +169,8 @@ type ProbeDesc struct {
 	// demangled path equals it (see expandRustPathProbes) instead of by mangled name.
 	DemangledPath bool
 
-	// MayBeInlined marks a symbol that is expected to be absent or unprobeable in some
-	// builds of the target (inlined away by the optimizer). Its non-resolution is
-	// expected and is not reported as a partial resolution of the probe set.
+	// MayBeInlined marks a symbol the optimizer may inline away in some builds; its
+	// non-resolution is not reported as a partial resolution of the probe set.
 	MayBeInlined bool
 
 	// Skip is set when an optional uprobe symbol was not resolved.
