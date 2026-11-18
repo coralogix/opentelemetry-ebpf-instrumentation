@@ -170,6 +170,12 @@ section empty once drained.
   per-bucket counts for the bounds that received executions only. Bucket values grow and new
   `le` series appear, and `histogram_quantile` over this metric now returns correct values.
   The OTLP `obi.bpf.probe.latency` histogram is unchanged.
+- Client spans from Rust/Tokio processes take their parent from the Tokio task that owns the
+  request, followed through the task's spawn lineage, instead of from the thread that writes
+  the request. An egress no request owns, such as a client shared across requests, a channel
+  worker or a thread pool started outside the request, is exported as the root of its own
+  trace instead of under the request its thread served last.
+  `capture.runtimes.rust.enabled: false` restores the thread-based parent.
 
 ## Hosting notes
 

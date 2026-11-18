@@ -279,6 +279,7 @@ func validateUnsupportedV2Fields(src *schema.Extension) error {
 		{path: "capture.runtimes.go.filter", filters: src.Capture.Runtimes.Go.Filter},
 		{path: "capture.runtimes.nodejs.filter", filters: src.Capture.Runtimes.NodeJS.Filter},
 		{path: "capture.runtimes.java.filter", filters: src.Capture.Runtimes.Java.Filter},
+		{path: "capture.runtimes.rust.filter", filters: src.Capture.Runtimes.Rust.Filter},
 	}
 	for _, runtimeFilter := range runtimeFilters {
 		if len(runtimeFilter.filters) != 0 {
@@ -1965,6 +1966,7 @@ func applyFullV2Runtimes(cfg *obi.Config, runtimes schema.CaptureRuntimes) {
 	cfg.Java.Debug = runtimes.Java.Debug.Enabled
 	cfg.Java.DebugInstrumentation = runtimes.Java.Debug.BytecodeInstrumentation
 	cfg.Java.Timeout = runtimes.Java.AttachTimeout.TimeDuration()
+	cfg.Rust.Enabled = runtimes.Rust.Enabled
 }
 
 func applyPartialV2Runtimes(cfg *obi.Config, runtimes schema.CaptureRuntimes) {
@@ -1985,6 +1987,9 @@ func applyPartialV2Runtimes(cfg *obi.Config, runtimes schema.CaptureRuntimes) {
 	}
 	if !zeroValue(runtimes.Java.AttachTimeout) {
 		cfg.Java.Timeout = runtimes.Java.AttachTimeout.TimeDuration()
+	}
+	if runtimes.Rust.Enabled {
+		cfg.Rust.Enabled = true
 	}
 }
 
@@ -2554,6 +2559,7 @@ func completeRuntimes(runtimes schema.CaptureRuntimes) bool {
 		(runtimes.Go.Enabled ||
 			runtimes.NodeJS.Enabled ||
 			runtimes.Java.Enabled ||
+			runtimes.Rust.Enabled ||
 			!zeroValue(runtimes.Java.Debug))
 }
 

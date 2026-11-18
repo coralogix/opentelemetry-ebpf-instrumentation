@@ -370,6 +370,9 @@ var DefaultConfig = Config{
 		Enabled: true,
 		Timeout: 10 * time.Second,
 	},
+	Rust: RustConfig{
+		Enabled: true,
+	},
 	JVMRuntimeMetrics: JVMRuntimeMetricsConfig{
 		SamplingInterval: time.Second,
 	},
@@ -477,6 +480,7 @@ type Config struct {
 
 	NodeJS NodeJSConfig `yaml:"nodejs"`
 	Java   JavaConfig   `yaml:"javaagent"`
+	Rust   RustConfig   `yaml:"-" env:"-"`
 
 	JVMRuntimeMetrics    JVMRuntimeMetricsConfig    `yaml:"jvm_runtime_metrics"`
 	DotnetRuntimeMetrics DotnetRuntimeMetricsConfig `yaml:"dotnet_runtime_metrics"`
@@ -749,6 +753,16 @@ type NodeJSConfig struct {
 	// processes, capturing spans the application creates through the
 	// OpenTelemetry API when no OpenTelemetry SDK is registered.
 	ManualSpans bool `yaml:"manual_spans" env:"OTEL_EBPF_NODEJS_MANUAL_SPANS"`
+}
+
+// RustConfig controls the Rust runtime probes. Config v2 only
+// (capture.runtimes.rust.enabled): Config v1 is frozen.
+type RustConfig struct {
+	// Enabled attaches the Tokio task-lineage probes that carry the trace context across
+	// the tasks and threads of a Tokio runtime. Off, a Rust process is traced like any
+	// other native binary: parents are resolved by thread identity, which a work-stealing
+	// runtime can misattribute.
+	Enabled bool
 }
 
 type JavaConfig struct {

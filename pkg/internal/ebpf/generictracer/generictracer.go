@@ -200,6 +200,67 @@ func (p *Tracer) BlockPID(pid app.PID, ns uint32) {
 	if err := p.rebuildValidPids(); err != nil {
 		p.log.Error("rebuilding the BPF PID filter", "error", err)
 	}
+
+	p.purgeTokioState(uint32(pid))
+}
+
+// purgeTokioState drops the Tokio map entries of a process that is gone: the maps are keyed
+// by the OBI-view pid and otherwise only LRU-evicted, so a later process reusing the pid
+// would inherit the tokio_process mark and stale lineage. The slot counts are hashed, not
+// keyed, and stay (tokio_task_slots.h). With the BPF pid filter off the maps hold host pids
+// and the purge misses. Cost: a full walk of three 30,000-entry maps per Tokio exit.
+func (p *Tracer) purgeTokioState(tgid uint32) {
+	if p.bpfObjects.TokioProcess == nil {
+		return
+	}
+	// Deleting the flag tells a Tokio process from any other without scanning: a non-Tokio
+	// exit costs one failed delete. The flag map holds one entry per process, so it is not
+	// LRU-evicted ahead of the task entries.
+	if err := p.bpfObjects.TokioProcess.Delete(tgid); err != nil {
+		return
+	}
+	purgeTokioTaskMap(p.bpfObjects.TokioTaskState, tgid, &BpfTokioTaskStateT{})
+	purgeTokioTaskMap(p.bpfObjects.TokioTaskIdState, tgid, &BpfTokioTaskIdStateT{})
+
+	m := p.bpfObjects.TokioThreadState
+	if m == nil {
+		return
+	}
+	// Keyed by the host pid_tgid, which the Go side does not know in pod mode: match on
+	// the value's tgid instead.
+	var keys []uint64
+	var key uint64
+	var value BpfTokioThreadStateT
+	it := m.Iterate()
+	for it.Next(&key, &value) {
+		if value.Tgid == tgid {
+			keys = append(keys, key)
+		}
+	}
+	// Best effort: an entry may have been LRU-evicted since it was listed.
+	for _, k := range keys {
+		_ = m.Delete(k)
+	}
+}
+
+// purgeTokioTaskMap deletes one process's entries from a map keyed by tokio_task_key_t.
+// Keys are collected first: deleting while iterating a hash map can skip or repeat entries.
+func purgeTokioTaskMap(m *ebpf.Map, tgid uint32, value any) {
+	if m == nil {
+		return
+	}
+	var keys []BpfTokioTaskKeyT
+	var key BpfTokioTaskKeyT
+	it := m.Iterate()
+	for it.Next(&key, value) {
+		if key.Tgid == tgid {
+			keys = append(keys, key)
+		}
+	}
+	// Best effort: an entry may have been LRU-evicted since it was listed.
+	for _, k := range keys {
+		_ = m.Delete(k)
+	}
 }
 
 // BlockPIDLifecycle removes Python state only for the matching process lifecycle.
@@ -622,6 +683,76 @@ func (p *Tracer) UProbes() map[string]map[string][]*ebpfcommon.ProbeDesc {
 				End:      p.bpfObjects.ObiUprobeTaskStepRet,
 			}},
 		},
+		// Tokio runtime, statically linked into the executable: the keys are demangled
+		// paths (no build hash, no generic arguments), one attachment per monomorphized
+		// copy. Why each symbol: devdocs/rust-tokio-context-propagation.md, "Probe Points".
+		ebpfcommon.SelfLibKey: {
+			// Poll entry/exit: keeps a RET in release, unlike raw::poll.
+			"tokio::runtime::task::harness::Harness::poll": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioPoll,
+				End:           p.bpfObjects.ObiUretprobeTokioPoll,
+			}},
+			// Task creation: release inlines the copies of small futures, hence the spawn hooks.
+			"tokio::runtime::task::core::Cell::new": {{
+				Required:      false,
+				DemangledPath: true,
+				End:           p.bpfObjects.ObiUretprobeTokioCellNew,
+			}},
+			// Spawn-time registration, generic over the scheduler only: every tokio::spawn,
+			// and every spawn_blocking (absent from a binary without the blocking pool).
+			"tokio::runtime::task::list::OwnedTasks::bind_inner": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioBind,
+			}},
+			"tokio::runtime::blocking::pool::Spawner::spawn_task": {{
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				Start:         p.bpfObjects.ObiUprobeTokioBind,
+			}},
+			// spawn_local registration, shared with every wake of a local task; absent from
+			// a binary without a LocalSet.
+			"tokio::task::local::Shared::schedule": {{
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				Start:         p.bpfObjects.ObiUprobeTokioSchedule,
+			}},
+			// Task completion: out of line in release, as a local .llvm.-suffixed symbol.
+			"tokio::runtime::task::harness::Harness::complete": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioComplete,
+			}},
+			// Task destruction: the second chance for a task that never completed.
+			"tokio::runtime::task::raw::dealloc": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioDealloc,
+			}},
+			// Debug-build task identity: the TLS setter, inlined in release. Closure copies
+			// are excluded at match time (isRustClosureSymbol).
+			"tokio::runtime::context::set_current_task_id": {{
+				Required:      false,
+				DemangledPath: true,
+				Start:         p.bpfObjects.ObiUprobeTokioSetTaskId,
+			}},
+			// Debug-build id lineage; inlined in release, hence MayBeInlined.
+			"tokio::runtime::task::id::Id::next": {{
+				Required:      false,
+				DemangledPath: true,
+				MayBeInlined:  true,
+				End:           p.bpfObjects.ObiUretprobeTokioIdNext,
+			}},
+		},
+	}
+	// The one runtime switch among the passive uprobes (capture.runtimes.rust.enabled,
+	// Config v2): off, a Rust process is traced like any other native binary.
+	if !p.cfg.Rust.Enabled {
+		delete(m, ebpfcommon.SelfLibKey)
 	}
 	return m
 }

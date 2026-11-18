@@ -1,0 +1,60 @@
+# Integration-test image for Rust/Tokio context propagation.
+#
+# Builds the backend and one server, selected by SERVER_BIN:
+#   server       — axum on a multi-thread work-stealing runtime
+#   server-actix — actix-web, one current-thread runtime per worker thread.
+#   backend      — downstream service that echoes the traceparent on /ping.
+#
+# Both run in ONE container so server can reach backend over 127.0.0.1 (the
+# server hard-codes localhost). See docker-compose-rust-tokio.yml.
+#
+# Build context must be the repo root.
+#
+# RUST_LEG selects the mangling scheme the probes must resolve: v0 (rust 1.99.0, the stable
+# default since Rust 1.97) or legacy (rust 1.96.0, the last toolchain emitting _ZN…E; no flag
+# selects it on stable 1.97+). Declared before the first FROM so the FROM below can use it.
+ARG RUST_LEG=v0
+FROM rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460 AS rust-legacy
+FROM rust:1.99.0-bookworm@sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0 AS rust-v0
+FROM rust-${RUST_LEG} AS rustbuilder
+
+# CARGO_PROFILE selects release (default, what users ship) or debug. Both are tested:
+# tokio's task-id setter stays out of line only in debug, so the id walk runs only
+# there. The output dir name matches the profile (target/debug or target/release).
+ARG CARGO_PROFILE=release
+
+# SERVER_BIN selects the server crate (server or server-actix); it is copied into the
+# image as ./server either way, so the service name is the same in every suite.
+ARG SERVER_BIN=server
+
+# TOKIO_VERSION, when set, re-pins tokio in the lock before the build (a one-off sweep leg;
+# the regular matrix builds the committed lock). The lock stays consistent, so --locked holds.
+ARG TOKIO_VERSION=""
+
+WORKDIR /build
+COPY internal/test/integration/components/rusttokiotest .
+
+RUN if [ -n "$TOKIO_VERSION" ]; then cargo update -p tokio --precise "$TOKIO_VERSION"; fi && \
+    if [ "$CARGO_PROFILE" = "debug" ]; then \
+        cargo build --locked -p "$SERVER_BIN" -p backend; \
+    else \
+        cargo build --locked --release -p "$SERVER_BIN" -p backend; \
+    fi
+
+FROM debian:bookworm-slim@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421
+
+ARG CARGO_PROFILE=release
+ARG SERVER_BIN=server
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/${SERVER_BIN} ./server
+COPY --from=rustbuilder /build/target/${CARGO_PROFILE}/backend ./backend
+
+# One backend process per port and the server in the foreground. Two processes, not one with
+# two listeners: OBI keys a server's inbound trace by the client address and port plus the
+# server pid, and the A/B bursts reuse one ephemeral port toward both backend ports.
+# START_DELAY (seconds) holds all three back for docker-compose-rust-tokio-obi-first.yml.
+CMD ["sh", "-c", "sleep ${START_DELAY:-0}; ./backend 8093 & ./backend 8094 & exec ./server"]

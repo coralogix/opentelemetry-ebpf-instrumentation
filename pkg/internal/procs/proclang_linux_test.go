@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,6 +172,354 @@ func TestFindExeSymbolsExactLookup(t *testing.T) {
 	assert.NotNil(t, sym.Prog)
 }
 
+func TestStripDollarBrackets(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"LocalOwnedTasks$LT$S$GT$", "LocalOwnedTasks"},
+		{"OwnedTasks$LT$S$GT$", "OwnedTasks"},
+		{"Foo$LT$Bar$LT$X$GT$$GT$", "Foo"},        // nested
+		{"noGenerics", "noGenerics"},              // no-op
+		{"prefix$LT$X$GT$suffix", "prefixsuffix"}, // mid-ident
+		{"$LT$unclosed", "$LT$unclosed"},          // malformed — unchanged
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, stripDollarBrackets(c.in), c.in)
+	}
+}
+
+func TestRustDemangle_Legacy(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string // exact expected demangled path
+	}{
+		// Real samples (debug build) with $LT$S$GT$ generics + 17h<hash> build hash.
+		{
+			"LocalOwnedTasks::bind",
+			"_ZN5tokio7runtime4task4list24LocalOwnedTasks$LT$S$GT$4bind17he45315048f19b0faE",
+			"tokio::runtime::task::list::LocalOwnedTasks::bind",
+		},
+		{
+			"OwnedTasks::bind_inner",
+			"_ZN5tokio7runtime4task4list19OwnedTasks$LT$S$GT$10bind_inner17h69552d27e517e78cE",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner",
+		},
+		// The two non-generic spawn hooks (release build samples).
+		{
+			"local::Shared::schedule",
+			"_ZN5tokio4task5local6Shared8schedule17hc1df551b6d75b431E",
+			"tokio::task::local::Shared::schedule",
+		},
+		{
+			"pool::Spawner::spawn_task",
+			"_ZN5tokio7runtime8blocking4pool7Spawner10spawn_task17hd7c1f6286fd92f4cE",
+			"tokio::runtime::blocking::pool::Spawner::spawn_task",
+		},
+		// Non-generic methods (no $LT$): RawTask::poll and the spawn_blocking free fn.
+		{
+			"RawTask::poll",
+			"_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE",
+			"tokio::runtime::task::raw::RawTask::poll",
+		},
+		{
+			"pool::spawn_blocking",
+			"_ZN5tokio7runtime8blocking4pool14spawn_blocking17hfedcba9876543210E",
+			"tokio::runtime::blocking::pool::spawn_blocking",
+		},
+		// A trailing Itanium template block (…IiEE) does not occur in real Rust
+		// legacy symbols; the bare 'I' is a non-digit that just terminates the
+		// scan, leaving the already-collected prefix intact.
+		{
+			"trailing template block terminates scan",
+			"_ZN3foo3barIiEE",
+			"foo::bar",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, rustDemangle(c.raw))
+		})
+	}
+}
+
+func TestRustDemangle_BuildHashStripped(t *testing.T) {
+	got := rustDemangle("_ZN3foo3bar17h0123456789abcdefE")
+	assert.Equal(t, "foo::bar", got)
+	assert.NotContains(t, got, "h0123456789abcdef")
+}
+
+func TestRustDemangle_NonLegacyReturnsEmpty(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"main.someGoSymbol",
+		"plain_c_symbol",
+		// a v0 (_R) symbol must NOT be parsed by the legacy demangler
+		"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksE10bind_inner",
+	} {
+		assert.Empty(t, rustDemangle(in), "input %q", in)
+	}
+}
+
+func TestRustDemangleV0_Tokio(t *testing.T) {
+	cases := []struct {
+		name       string
+		raw        string
+		wantPrefix string
+	}{
+		// Real v0 samples.
+		{
+			"LocalOwnedTasks::bind",
+			"_RINvMs_NtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB5_15LocalOwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtBb_4task5local6SharedEE4bindINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtB1e_5boxed3BoxDNtNtNtB2k_6future6future6Futurep6OutputuNtNtB2k_6marker4SendEL_EEECsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::LocalOwnedTasks::bind",
+		},
+		{
+			"OwnedTasks::bind_inner",
+			"_RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner",
+		},
+		// The two non-generic spawn hooks: inherent impls with a disambiguator (Ms9_, Ms4_).
+		{
+			"local::Shared::schedule",
+			"_RNvMs9_NtNtCscMapNUXOuou_5tokio4task5localNtB5_6Shared8schedule",
+			"tokio::task::local::Shared::schedule",
+		},
+		{
+			"pool::Spawner::spawn_task",
+			"_RNvMs4_NtNtNtCscMapNUXOuou_5tokio7runtime8blocking4poolNtB5_7Spawner10spawn_task",
+			"tokio::runtime::blocking::pool::Spawner::spawn_task",
+		},
+		// Free fn with generic args and a trailing instantiation, both dropped.
+		{
+			"pool::spawn_blocking",
+			"_RINvNtNtNtCshFZRMeAqrSd_5tokio7runtime8blocking4pool14spawn_blockingNCNvMNtNtNtB6_9scheduler12multi_thread6workerNtB19_6Launch6launch0uEB8_",
+			"tokio::runtime::blocking::pool::spawn_blocking",
+		},
+		// macOS prepends an extra leading underscore (__R…); rustDemangleV0 strips it
+		// and must produce the same result as the _R… form above.
+		{
+			"OwnedTasks::bind_inner (macOS __R)",
+			"__RNvMNtNtNtCsec06QdWoQn_5tokio7runtime4task4listINtB2_10OwnedTasksINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB6_9scheduler14current_thread6HandleEE10bind_innerCsjqY7L67gDVE_8actix_rt",
+			"tokio::runtime::task::list::OwnedTasks::bind_inner",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := rustDemangleV0(c.raw)
+			assert.True(t, strings.HasPrefix(got, c.wantPrefix), "got %q", got)
+		})
+	}
+}
+
+// Real Harness::poll copies whose generic arguments hold constructs a byte scan for 'E'
+// miscounts: a D…E dyn bound, nested I…E, and identifiers containing 'I' or 'E'
+// (IntoFuture, Executor, Incoming). Every copy must resolve to the full path.
+func TestRustDemangleV0_ComplexGenericArgs(t *testing.T) {
+	const wantPrefix = "tokio::runtime::task::harness::Harness::poll"
+	cases := []struct{ name, raw string }{
+		{
+			"Pin<Box<dyn Future>> (D…E dyn bound)",
+			"_RNvMs0_NtNtNtCs9jSgvtFl8W9_5tokio7runtime4task7harnessINtB5_7HarnessINtNtCsjCd2fZ6KadX_4core3pin3PinINtNtCseexLZiveblW_5alloc5boxed3BoxDNtNtNtB19_6future6future6Futurep6OutputuNtNtB19_6marker4SendEL_EEINtNtB1F_4sync3ArcNtNtNtB9_9scheduler14current_thread6HandleEE4pollCslgrtaP4xVX1_7reqwest",
+		},
+		{
+			"H2Stream (deep nested I…E + IntoFuture/Incoming/Executor idents)",
+			"_RNvMs0_NtNtNtCs9jSgvtFl8W9_5tokio7runtime4task7harnessINtB5_7HarnessINtNtNtNtCsiWqk3PIG25g_5hyper5proto2h26server8H2StreamINtNtNtCslucI2pHvjt9_10hyper_util7service4glue25TowerToHyperServiceFutureINtNtNtCs2X6c5HaYEso_5tower4util11map_request10MapRequestNtNtCshMmHa2FyZAo_4axum7routing6RouterNCNCNvXs0_NtB46_5serveINtB4O_5ServeB42_B42_ENtNtNtCsjCd2fZ6KadX_4core6future11into_future10IntoFuture11into_future0s1_0EINtNtCsi3ewrsuCVNV_4http7request7RequestNtNtNtB1d_4body8incoming8IncomingEENtNtCs5zVckKwpyv3_9axum_core4body4BodyNtNtNtB23_2rt5tokio13TokioExecutorEINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB9_9scheduler14current_thread6HandleEE4pollCskAyKhQTcune_6server",
+		},
+		{
+			"UpgradedSendStreamTask<Bytes>",
+			"_RNvMs0_NtNtNtCs9jSgvtFl8W9_5tokio7runtime4task7harnessINtB5_7HarnessINtNtNtNtCsiWqk3PIG25g_5hyper5proto2h27upgrade22UpgradedSendStreamTaskNtNtCs10P6c5Uqsip_5bytes5bytes5BytesEINtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB9_9scheduler14current_thread6HandleEE4pollCskAyKhQTcune_6server",
+		},
+		{
+			"BlockingTask<trait-impl-method closure> (nested I…E in X trait path)",
+			"_RNvMs0_NtNtNtCs9jSgvtFl8W9_5tokio7runtime4task7harnessINtB5_7HarnessINtNtNtB9_8blocking4task12BlockingTaskNCNvXs5_NtNtNtNtCslucI2pHvjt9_10hyper_util6client6legacy7connect3dnsNtB1O_11GaiResolverINtCsjabPfDUFD8q_13tower_service7ServiceNtB1O_4NameE4call0ENtNtB19_8schedule16BlockingScheduleE4pollB1W_",
+		},
+		{
+			"axum serve IntoFuture (X trait method + nested I…E)",
+			"_RNvMs0_NtNtNtCs9jSgvtFl8W9_5tokio7runtime4task7harnessINtB5_7HarnessNCNCNvXs0_NtCshMmHa2FyZAo_4axum5serveINtB1e_5ServeNtNtB1g_7routing6RouterB1S_ENtNtNtCsjCd2fZ6KadX_4core6future11into_future10IntoFuture11into_future0s2_0INtNtCseexLZiveblW_5alloc4sync3ArcNtNtNtB9_9scheduler14current_thread6HandleEE4pollCskAyKhQTcune_6server",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := rustDemangleV0(c.raw)
+			assert.True(t, strings.HasPrefix(got, wantPrefix), "got %q", got)
+		})
+	}
+}
+
+func TestRustDemangleV0_NonV0ReturnsEmpty(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"main.someGoSymbol",
+		// a legacy (_ZN) symbol must NOT be parsed by the v0 demangler
+		"_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE",
+	} {
+		assert.Empty(t, rustDemangleV0(in), "input %q", in)
+	}
+}
+
+// A non-base62 byte ends the number without being consumed. '.' is used because a letter
+// is itself a digit, and the value stays below len(sym) so the overflow clamp does not mask it.
+func TestV0Base62StopsWithoutConsuming(t *testing.T) {
+	p := &v0Parser{sym: "1."}
+	got := p.base62()
+	assert.Equal(t, 2, got, "raw value 1, encoded +1")
+	assert.Equal(t, 1, p.pos, "must stop at '.' without consuming it")
+}
+
+// A base62 run long enough to overflow int must neither wrap negative (callers index with
+// it) nor stop mid-number: disambiguator hashes are long runs, and stranding pos inside
+// one derails every later token.
+func TestV0Base62DoesNotOverflowNegative(t *testing.T) {
+	sym := strings.Repeat("Z", 20) + "_" // 20 base62 digits, well past int64 overflow if uncapped
+	p := &v0Parser{sym: sym}
+	got := p.base62()
+	assert.GreaterOrEqual(t, got, 0, "must not overflow negative")
+	assert.Equal(t, len(sym), p.pos, "must consume the whole run and the trailing '_'")
+}
+
+// raw::poll (the vtable free fn) and RawTask::poll (the thunk) are different paths: a
+// request for one must not match the other.
+func TestRustPath_SelectsPollNotRawTaskPoll(t *testing.T) {
+	const path = "tokio::runtime::task::raw::poll"
+	rawPoll := rustDemangle("_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE")
+	rawTaskPoll := rustDemangle("_ZN5tokio7runtime4task3raw7RawTask4poll17h0123456789abcdefE")
+
+	assert.Equal(t, path, rawPoll, "raw::poll (vtable target) must match the probe path")
+	assert.Equal(t, "tokio::runtime::task::raw::RawTask::poll", rawTaskPoll)
+	assert.NotEqual(t, path, rawTaskPoll, "RawTask::poll (thunk) must NOT match the probe path")
+}
+
+// A path matches only a whole demangled path: the nested helpers of Cell::new (new_header,
+// check) and Harness::poll (poll_inner), out of line in debug builds, start with the
+// parent's path but are different functions. Real symbols of the debug test server plus
+// legacy-mangled equivalents.
+func TestRustPath_NestedItemsAreNotCopies(t *testing.T) {
+	const cellNew = "tokio::runtime::task::core::Cell::new"
+	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
+
+	copies := map[string]string{
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new17h0123456789abcdefE": cellNew,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB5_4CellINtNtCsjemqvGMJH9i_4core3pin3PinINtNtCsbSVVNPxiylx_5alloc5boxed3BoxNCNCNvCs388xbHJbcbW_6server11ws_direct_b00EEINtNtB1z_4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE3newB29_": cellNew,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessNCNCNvCs388xbHJbcbW_6server7chan_tx00INtNtCsbSVVNPxiylx_5alloc4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE4pollB1a_":                                                    harnessPoll,
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$4poll17h0123456789abcdefE": harnessPoll,
+	}
+	for mangled, want := range copies {
+		got := rustDemangle(mangled)
+		if got == "" {
+			got = rustDemangleV0(mangled)
+		}
+		assert.Equal(t, want, got, "monomorphized copy must demangle to the probe path: %s", mangled)
+	}
+
+	nested := map[string]string{
+		"_RNvNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB7_4CellppE3new10new_header":                                                                                                                   cellNew,
+		"_RINvNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task4coreINtB8_4CellppE3new5checkNtNtNtBc_8blocking8schedule16BlockingScheduleEBe_":                                                                       cellNew,
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new10new_header17h0123456789abcdefE":                                                                                                                     cellNew,
+		"_ZN5tokio7runtime4task4core17Cell$LT$T$C$S$GT$3new5check17h0123456789abcdefE":                                                                                                                           cellNew,
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$10poll_inner17h0123456789abcdefE":                                                                                                                   harnessPoll,
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessINtNtNtB9_8blocking4task12BlockingTaskNCNCNvCs388xbHJbcbW_6server8blocking00ENtNtB19_8schedule16BlockingScheduleE10poll_innerB1M_": harnessPoll,
+	}
+	for mangled, parent := range nested {
+		got := rustDemangle(mangled)
+		if got == "" {
+			got = rustDemangleV0(mangled)
+		}
+		require.NotEmpty(t, got, "must demangle: %s", mangled)
+		assert.True(t, strings.HasPrefix(got, parent), "nested item starts with the parent path: %s", got)
+		assert.NotEqual(t, parent, got, "nested item must NOT be taken as a copy of the parent: %s", got)
+	}
+}
+
+// A Rust path matches nothing in a Go binary.
+func TestFindRustSymbols_NoFalseMatchOnNonRust(t *testing.T) {
+	f := openSymbolFixtureELF(t)
+	defer f.Close()
+
+	out, err := FindRustSymbols(f, []string{"tokio::runtime::task::raw::poll"})
+	require.NoError(t, err)
+	assert.Empty(t, out["tokio::runtime::task::raw::poll"])
+}
+
+// The symbols are real ones of the test servers: a legacy and a v0 copy of Harness::poll,
+// the raw::poll vtable target, a v0 closure (which demangles to its parent's path), a
+// nested helper, a function of another crate and an object with a copy's name. The
+// .dynsym repeats raw::poll at the same address.
+func TestFindRustSymbolsTables(t *testing.T) {
+	const harnessPoll = "tokio::runtime::task::harness::Harness::poll"
+	const rawPoll = "tokio::runtime::task::raw::poll"
+	const trySend = "hyper::client::dispatch::Sender::try_send"
+	names := []string{
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$4poll17h0123456789abcdefE",
+		"_RNvMs0_NtNtNtCscQKylqqyKjT_5tokio7runtime4task7harnessINtB5_7HarnessNCNCNvCs388xbHJbcbW_6server7chan_tx00INtNtCsbSVVNPxiylx_5alloc4sync3ArcNtNtNtNtB9_9scheduler12multi_thread6handle6HandleEE4pollB1a_",
+		"_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE",
+		"_RNCNvMNtNtCsiYXsGep02p_5hyper6client8dispatchINtB4_6SenderE8try_send0B1E_",
+		"_ZN5tokio7runtime4task7harness20Harness$LT$T$C$S$GT$10poll_inner17h0123456789abcdefE",
+		"_ZN4core3fmt5write17h0123456789abcdefE",
+	}
+	symtab := symbolTableFixture{typ: elf.SHT_SYMTAB, strings: []byte{0}, symbols: []elf.Sym64{{}}}
+	for i, name := range names {
+		symtab.symbols = append(symtab.symbols, elf.Sym64{
+			Name: uint32(len(symtab.strings)), Info: byte(elf.STT_FUNC), Value: uint64(0x1000 * (i + 1)), Size: 8,
+		})
+		symtab.strings = append(symtab.strings, name+"\x00"...)
+	}
+	symtab.symbols = append(symtab.symbols, elf.Sym64{Name: 1, Info: byte(elf.STT_OBJECT), Value: 0x7000, Size: 8})
+	dynsym := symbolTableFixture{
+		typ: elf.SHT_DYNSYM, strings: append([]byte{0}, names[2]+"\x00"...),
+		symbols: []elf.Sym64{{}, {Name: 1, Info: byte(elf.STT_FUNC), Value: 0x3000, Size: 8}},
+	}
+	f, _ := symbolELFFixture(t, symtab, dynsym)
+
+	out, err := FindRustSymbols(f, []string{harnessPoll, rawPoll, trySend})
+	require.NoError(t, err)
+
+	offsets := func(syms []Sym) []uint64 {
+		var offs []uint64
+		for _, s := range syms {
+			offs = append(offs, s.Off)
+		}
+		return offs
+	}
+	assert.Len(t, out, 2)
+	assert.Equal(t, []uint64{0x1000, 0x2000}, offsets(out[harnessPoll]))
+	assert.Equal(t, []uint64{0x3000}, offsets(out[rawPoll]))
+	assert.NotContains(t, out, trySend, "a closure must not be taken as a copy of its parent")
+	_, err = f.SectionByType(elf.SHT_SYMTAB).Data()
+	require.NoError(t, err)
+	assert.Equal(t, names[0], out[harnessPoll][0].Name)
+}
+
+// Symbols of other crates cost no allocation: the demanglers run only on the symbols
+// that name a requested crate.
+func TestFindRustSymbolsAllocations(t *testing.T) {
+	const maxScanAllocations = 100
+	const rawPoll = "tokio::runtime::task::raw::poll"
+
+	f, _ := largeRustSymbolELFFixture(t, 10_000)
+	var out map[string][]Sym
+	var err error
+	allocations := testing.AllocsPerRun(3, func() {
+		out, err = FindRustSymbols(f, []string{rawPoll})
+	})
+	require.NoError(t, err)
+	require.Len(t, out[rawPoll], 1)
+	assert.Equal(t, uint64(10_001), out[rawPoll][0].Value)
+	assert.Less(t, allocations, float64(maxScanAllocations), "scan must not allocate for symbols of other crates")
+}
+
+// largeRustSymbolELFFixture holds count legacy-mangled functions of another crate and
+// one copy of raw::poll, last.
+func largeRustSymbolELFFixture(tb testing.TB, count int) (*elf.File, string) {
+	tb.Helper()
+
+	table := symbolTableFixture{typ: elf.SHT_SYMTAB, strings: []byte{0}, symbols: make([]elf.Sym64, count+2)}
+	for i := 1; i <= count; i++ {
+		table.symbols[i] = elf.Sym64{Name: uint32(len(table.strings)), Info: byte(elf.STT_FUNC), Value: uint64(i), Size: 8}
+		table.strings = fmt.Appendf(table.strings, "_ZN4core3fmt5write17h%016xE\x00", i)
+	}
+	table.symbols[count+1] = elf.Sym64{Name: uint32(len(table.strings)), Info: byte(elf.STT_FUNC), Value: uint64(count + 1), Size: 8}
+	table.strings = append(table.strings, "_ZN5tokio7runtime4task3raw4poll17h0123456789abcdefE\x00"...)
+	return symbolELFFixture(tb, table)
+}
+
 func openSymbolFixtureELF(t *testing.T) *elf.File {
 	t.Helper()
 
@@ -260,4 +609,81 @@ func TestPopulateRangeIsBestEffort(t *testing.T) {
 		populateRange(data, uint64(len(data)), 1)
 		populateRange(data, 1, ^uint64(0))
 	})
+}
+
+// Real symbols; see isRustClosureSymbol for the two encodings.
+func TestIsRustClosureSymbol(t *testing.T) {
+	closures := []string{
+		// legacy {{closure}} inside Sender::try_send
+		"_ZN5hyper6client8dispatch19Sender$LT$T$C$U$GT$8try_send28_$u7b$$u7b$closure$u7d$$u7d$17h4e845f50370058e4E",
+		// legacy {{closure}} inside Dispatcher::poll_catch
+		"_ZN5hyper5proto2h18dispatch32Dispatcher$LT$D$C$Bs$C$I$C$T$GT$10poll_catch28_$u7b$$u7b$closure$u7d$$u7d$17h2e4870ad20ac4d6aE",
+		// v0 root closure of Sender::try_send (NC element right after _R)
+		"_RNCNvMNtNtCsiYXsGep02p_5hyper6client8dispatchINtB4_6SenderINtNtCs6kuRhDqI2rp_4http7request7RequestNtNtNtCsbey0SzD3JOC_7reqwest10async_impl4body4BodyEINtNtBZ_8response8ResponseNtNtNtB8_4body8incoming8IncomingEE8try_send0B1E_",
+		// v0 root closure, macOS __R prefix variant
+		"__RNCNvMNtNtCsiYXsGep02p_5hyper6client8dispatchINtB4_6SenderE8try_send0B1E_",
+	}
+	for _, s := range closures {
+		if !isRustClosureSymbol(s) {
+			t.Errorf("expected closure: %s", s)
+		}
+	}
+
+	nonClosures := []string{
+		// legacy real fn
+		"_ZN5hyper6client8dispatch19Sender$LT$T$C$U$GT$8try_send17h5dd32ffbeae5b6beE",
+		// v0 real method (M element, not NC)
+		"_RNvMNtNtCsiYXsGep02p_5hyper6client8dispatchINtB2_6SenderINtNtCs6kuRhDqI2rp_4http7request7RequestNtNtNtCsbey0SzD3JOC_7reqwest10async_impl4body4BodyEINtNtBX_8response8ResponseNtNtNtB6_4body8incoming8IncomingEE8try_sendB1C_",
+		// v0 free fn in a value namespace (set_current_task_id shape)
+		"_RNvNtNtCs9WjIm1D4ZsH_5tokio7runtime7context19set_current_task_id",
+		// identifier containing the letters "NC" mid-symbol must not false-positive
+		"_ZN5tokio4sync4mpsc4chan15Tx$LT$T$C$S$GT$4send17hd609113dde8fd8cfE",
+		// non-Rust symbol
+		"main",
+	}
+	for _, s := range nonClosures {
+		if isRustClosureSymbol(s) {
+			t.Errorf("did not expect closure: %s", s)
+		}
+	}
+}
+
+// v0BackrefChain builds a v0 symbol of n trait-impl elements that each reference the
+// next one twice, ending in a plain `<foo as bar>`; the demangled text doubles per
+// element. References are fixed-width (two base62 digits) so every element is 9 bytes.
+func v0BackrefChain(n int) string {
+	const digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const elemLen = 9
+
+	var b strings.Builder
+	b.WriteString("_R")
+	for i := range n {
+		next := (i+1)*elemLen - 1 // base62 encodes value+1
+		ref := "B" + string(digits[next/62]) + string(digits[next%62]) + "_"
+		b.WriteString("X" + ref + ref)
+	}
+	b.WriteString("XC3fooC3bar")
+	return b.String()
+}
+
+func TestRustDemangleV0_BackrefChainIsBounded(t *testing.T) {
+	assert.Equal(t, "foo as bar", rustDemangleV0(v0BackrefChain(0)))
+	assert.NotEmpty(t, rustDemangleV0(v0BackrefChain(4)))
+	// 40 elements would demangle to terabytes; the parser must reject the symbol.
+	assert.Empty(t, rustDemangleV0(v0BackrefChain(40)))
+}
+
+// A decimal length longer than the symbol must stop the scan before it overflows into
+// a negative slice bound.
+func TestRustDemangle_LengthOverflow(t *testing.T) {
+	assert.Empty(t, rustDemangle("_ZN9227000000000000000"))
+	assert.Empty(t, rustDemangleV0("_RNvC9227000000000000000"))
+}
+
+// A nil ELF file makes the symbol table read panic; the scan must report it as an
+// error instead of taking the process down.
+func TestFindRustSymbols_RecoversFromPanic(t *testing.T) {
+	out, err := FindRustSymbols(nil, []string{"tokio::runtime::task::raw::poll"})
+	require.ErrorContains(t, err, "panicked")
+	assert.Nil(t, out)
 }

@@ -22,6 +22,7 @@
 #include <common/ssl_helpers.h>
 #include <common/tc_common.h>
 #include <common/tcp_info.h>
+#include <common/tokio_task.h>
 #include <common/tracked_connection.h>
 
 #include <generictracer/dns.h>
@@ -55,6 +56,7 @@
 #include <maps/fd_to_connection.h>
 #include <maps/msg_buffers.h>
 #include <maps/sock_pids.h>
+#include <maps/tokio_thread_state.h>
 #include <maps/unreadable_buffer_ports.h>
 #include <pid/pid.h>
 
@@ -1523,6 +1525,7 @@ int BPF_KRETPROBE_GUARDED(obi_kretprobe_sys_clone, int tid) {
 
     bpf_dbg_printk("=== kretprobe/sys_clone id->tid: %d -> %d ===", id, tid);
     bpf_map_update_elem(&clone_map, &child, &parent, BPF_ANY);
+    tokio_record_thread_birth(id, &parent, &child);
 
     return 0;
 }
@@ -1547,6 +1550,10 @@ int BPF_KPROBE_GUARDED(obi_kprobe_sys_exit, int status) {
                    valid_pid(id));
 
     bpf_map_delete_elem(&clone_map, &task.p_key);
+    bpf_map_delete_elem(&tokio_thread_birth, &task.p_key);
+    // A Tokio runtime thread's mark must not outlive its tid: a later thread reusing it
+    // would be resolved through the task walks it never takes part in.
+    bpf_map_delete_elem(&tokio_thread_state, &id);
     // This won't delete trace ids for traces with extra_id, like NodeJS. But,
     // we expect that it doesn't matter, since NodeJS main thread won't exit.
     bpf_map_delete_elem(&server_traces, &task);

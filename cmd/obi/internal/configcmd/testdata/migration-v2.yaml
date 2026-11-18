@@ -283,6 +283,8 @@ extensions:
                         enabled: false
                         bytecode_instrumentation: false
                     attach_timeout: 10s
+                rust:
+                    enabled: true
             network:
                 capture:
                     enabled: false

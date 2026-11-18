@@ -1,0 +1,57 @@
+# docker-compose-rust-tokio.yml with the Rust runtime probes switched off
+# (capture.runtimes.rust.enabled: false, Config v2) for TestRustTokioRuntimeDisabled.
+# No weaver: the suite checks what OBI attaches, not what it emits.
+services:
+  # One container running the server (8092) and one backend process per port (8093,
+  # 8094) so the server reaches its backends over 127.0.0.1. OBI shares this container's
+  # network + pid namespace, so it instruments all three processes.
+  tokioserver:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/rusttokiotest/Dockerfile
+      args:
+        CARGO_PROFILE: ${CARGO_PROFILE:-release}
+        RUST_LEG: ${RUST_LEG:-v0}
+        TOKIO_VERSION: ${TOKIO_VERSION:-}
+    image: hatest-rust-tokio
+    ports:
+      - "8092:8092" # server (the backends on 8093 and 8094 stay internal)
+    depends_on:
+      jaeger:
+        condition: service_started
+
+  obi:
+    build:
+      context: ../../..
+      dockerfile: ./internal/test/integration/components/obi/Dockerfile
+    command:
+      - --config=/configs/obi-config-rust-tokio-off-v2.yml
+    volumes:
+      - ./configs/:/configs
+      - ./system/sys/kernel/security:/sys/kernel/security
+      # sockops enrollment attaches at the host cgroup root; the FIONREAD compensation tracepoints need tracefs
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup
+      - ../../../testoutput:/coverage
+      - ../../../testoutput/run-rust-tokio-off:/var/run/obi
+    image: hatest-obi
+    privileged: true # in some environments you can drop this and use cap_add: [ SYS_ADMIN ]
+    network_mode: "service:tokioserver"
+    pid: "service:tokioserver"
+    # Config v2 reads no OTEL_EBPF_* environment: every setting, operational knobs included,
+    # lives in obi-config-rust-tokio-off-v2.yml.
+    environment:
+      GOCOVERDIR: "/coverage"
+    depends_on:
+      tokioserver:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60@sha256:4fd2d70fa347d6a47e79fcb06b1c177e6079f92cba88b083153d56263082135e
+    ports:
+      - "16686:16686" # query frontend (the test reads traces from here)
+      - "4317"        # OTLP gRPC (OBI exports here)
+      - "4318"        # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - LOG_LEVEL=debug

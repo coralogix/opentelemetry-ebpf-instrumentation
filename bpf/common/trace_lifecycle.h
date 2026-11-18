@@ -8,6 +8,7 @@
 
 #include <common/event_defs.h>
 #include <common/runtime.h>
+#include <common/tokio_task.h>
 #include <common/trace_key.h>
 #include <common/tracing.h>
 
@@ -33,6 +34,8 @@ static __always_inline void delete_server_trace(pid_connection_info_t *pid_conn,
     if (!(t_key->p_key.tid & JAVA_VT_TID_FLAG)) {
         obi_ctx__del(bpf_get_current_pid_tgid());
     }
+    // Closes the Tokio anchor's trust window; a no-op for non-Tokio threads.
+    tokio_untag_inbound_conn(bpf_get_current_pid_tgid());
 }
 
 // A client span ended: point the thread's context back at its parent server span
@@ -162,6 +165,10 @@ static __always_inline void server_or_client_trace(const u8 type,
                        conn_part.port);
 
         bpf_map_update_elem(&server_traces_aux, &conn_part, tp_p, BPF_ANY);
+
+        // Anchors the request on the running Tokio task with tp_p snapshotted: a late egress is
+        // immune to this connection key being remapped. A no-op for non-Tokio threads.
+        tokio_tag_inbound_conn(id, &conn_part, tp_p);
 
         tp_info_pid_t *existing = bpf_map_lookup_elem(&server_traces, &t_key);
         if (existing && existing->req_type == tp_p->req_type &&

@@ -568,11 +568,12 @@ HTTP `payload_extraction` uses the same list-based enablement model as other ins
 ### `capture.runtimes` Section
 
 The `capture.runtimes` section defines how language-specific runtime instrumentation injection mechanisms are controlled.
-These include Go probes, Node.js SIGUSR1 signal injection, and Java agent attachment.
+These include Go probes, Node.js SIGUSR1 signal injection, Java agent attachment, and the Rust Tokio probes.
 
 Unlike protocol instrumentation, runtimes are not about capturing specific telemetry signals — they are about *how* to instrument a service once it's selected.
 Each runtime has a simple structure: `enabled` (boolean) controls whether to attempt injection.
 Java also includes additional runtime-specific configuration such as debug controls and attachment timeout.
+`rust.enabled` (Config v2 only, default `true`) controls the Tokio task-lineage probes that carry the trace context across the tasks of a Tokio runtime; off, a Rust service is traced like any other native binary and its client spans resolve their parent by thread identity, which a work-stealing runtime can misattribute.
 Runtime `filter` fields are reserved by the schema but non-empty values are not
 supported by the current adapter; use capture rules for workload selection.
 
@@ -981,6 +982,7 @@ Important mapping notes:
 | `network.sampling` | `extensions.obi.capture.network.capture.flow_lifecycle.sampling` | Move |
 | `network.source` | `extensions.obi.capture.network.capture.source` | Move |
 | `nodejs.enabled` | `extensions.obi.capture.runtimes.nodejs.enabled` | Move |
+| N/A | `extensions.obi.capture.runtimes.rust.enabled` | Config v2-only switch for the Rust Tokio task-lineage probes, defaults to true |
 | `otel_metrics_export.endpoint` | `meter_provider.readers[0].periodic.exporter.otlp_grpc.endpoint` or, with gated HTTP support, `.otlp_http.endpoint` | OTel ownership move; automatic migration emits gRPC, while HTTP requires the documented manual mapping |
 | `otel_metrics_export.features` | Use the effective `metrics.features` mapping | Deprecated; an enabled OTLP exporter whose deprecated `features` field is present (including `[]`) takes precedence, otherwise enabled Prometheus features may supply it |
 | `otel_metrics_export.histogram_aggregation` | `meter_provider.readers[0].periodic.exporter.otlp_grpc.default_histogram_aggregation` | OTel ownership move + declarative reader/exporter shape |

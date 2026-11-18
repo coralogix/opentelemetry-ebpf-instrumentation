@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
+	"go.opentelemetry.io/obi/pkg/appolly/app/svc"
 	ebpfcommon "go.opentelemetry.io/obi/pkg/ebpf/common"
 	"go.opentelemetry.io/obi/pkg/export/imetrics"
 	"go.opentelemetry.io/obi/pkg/internal/ebpf/kprobe"
@@ -45,6 +46,7 @@ var (
 	errUSDTProbeNotFound = errors.New("USDT probe not found")
 
 	findNamespacedPids = procs.FindNamespacedPids
+	findRustSymbols    = procs.FindRustSymbols
 	attachKprobe       = func(symbol string, program *ebpf.Program) (io.Closer, error) {
 		return kprobe.Attach(symbol, program, false)
 	}
@@ -478,10 +480,16 @@ type uprobeModule struct {
 	probes    []map[string][]*ebpfcommon.ProbeDesc
 }
 
-func (i *instrumenter) uprobeModules(p Tracer, pid app.PID, maps []*procfs.ProcMap, exePath string, exeIno uint64, log *slog.Logger) map[uint64]*uprobeModule {
+func (i *instrumenter) uprobeModules(p Tracer, pid app.PID, lang svc.InstrumentableType, maps []*procfs.ProcMap, exePath string, exeIno uint64, log *slog.Logger) map[uint64]*uprobeModule {
 	modules := map[uint64]*uprobeModule{}
 
 	for lib, pMap := range p.UProbes() {
+		// The executable's own probes (SelfLibKey) are Rust demangled-path probes, resolved by
+		// demangling the whole symbol table: skip that scan for executables that cannot
+		// carry them.
+		if lib == ebpfcommon.SelfLibKey && lang != svc.InstrumentableRust {
+			continue
+		}
 		baseLib, selected, err := matchVersionedUprobeLibrary(lib, maps)
 		if err != nil {
 			log.Warn("invalid version annotation for uprobe library", "lib", lib, "error", err)
@@ -698,7 +706,9 @@ func resolveInstrPath(
 	exePath string,
 	exeIno uint64,
 ) (string, uint64, string, bool) {
-	if lib == "" {
+	// "" and SelfLibKey both mean the executable itself. Resolved here, not through
+	// procs.LibPath: a mapping whose path contains "/self" would otherwise match.
+	if lib == "" || lib == ebpfcommon.SelfLibKey {
 		return exePath, exeIno, "", true
 	}
 
@@ -724,7 +734,7 @@ func resolveInstrPath(
 	return mappedPath, exeIno, mappedPath, true
 }
 
-func (i *instrumenter) uprobes(pid app.PID, p Tracer, maps []*procfs.ProcMap) error {
+func (i *instrumenter) uprobes(pid app.PID, lang svc.InstrumentableType, p Tracer, maps []*procfs.ProcMap) error {
 	log := ilog().With("probes", "uprobes")
 	if len(maps) == 0 {
 		log.Info("didn't find any process maps, not instrumenting shared libraries", "pid", pid)
@@ -738,7 +748,7 @@ func (i *instrumenter) uprobes(pid app.PID, p Tracer, maps []*procfs.ProcMap) er
 
 	// Group all uprobes by module they should attach to.
 	// Eg. node ssl and runtime probes attach to the same binary
-	modules := i.uprobeModules(p, pid, maps, exePath, exeIno, log)
+	modules := i.uprobeModules(p, pid, lang, maps, exePath, exeIno, log)
 
 	for instrumentedIno, m := range modules {
 		target, err := os.Open(m.instrPath)
@@ -1384,7 +1394,11 @@ func gatherOffsetsImpl(
 
 	errs := make([]error, len(probeMaps))
 	for i, probes := range probeMaps {
-		errs[i] = resolveProbeOffsets(probes, syms, instrPath, log)
+		if err := resolveProbeOffsets(probes, syms, instrPath, log); err != nil {
+			errs[i] = err
+			continue
+		}
+		errs[i] = expandRustPathProbes(elfFile, probes, instrPath, log)
 	}
 
 	return errs, nil
@@ -1398,6 +1412,12 @@ func resolveProbeOffsets(
 ) error {
 	for symbolName, probeArray := range probes {
 		for _, probe := range probeArray {
+			// Demangled-path probes are resolved by expandRustPathProbes after this pass
+			// (one probe per monomorphized copy), not by mangled-name lookup.
+			if probe.DemangledPath {
+				continue
+			}
+
 			sym, ok := syms[symbolName]
 
 			if !ok {
@@ -1434,6 +1454,141 @@ func resolveProbeOffsets(
 	}
 
 	return nil
+}
+
+// expandRustPathProbes resolves every DemangledPath probe against the
+// binary and replaces its single template entry with one concrete ProbeDesc per
+// monomorphized copy (Rust generics emit many copies of the same function). A
+// path that resolves to no usable copy is removed from the map so it is never
+// attached at offset 0 — unless it was Required, which is a hard error.
+func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.ProbeDesc,
+	instrPath string, log *slog.Logger,
+) error {
+	var paths []string
+	for name, descs := range probes {
+		if len(descs) > 0 && descs[0].DemangledPath {
+			paths = append(paths, name)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+
+	pathSyms, err := findRustSymbols(elfFile, paths)
+	if err != nil {
+		return fmt.Errorf("failed to lookup Rust symbols for %s: %w", instrPath, err)
+	}
+
+	var resolved, unresolved []string
+	for _, symbolName := range paths {
+		templates := probes[symbolName]
+		matched := pathSyms[symbolName]
+		expanded, anyRequired, mayBeInlined := expandRustPathCopies(symbolName, templates, matched, instrPath, log)
+
+		if len(expanded) == 0 {
+			if anyRequired {
+				return fmt.Errorf("required symbol %s not found in %s", symbolName, instrPath)
+			}
+			log.Debug("rust path not resolved to any usable copy", "path", symbolName, "binary", instrPath)
+			delete(probes, symbolName)
+			if !mayBeInlined {
+				unresolved = append(unresolved, symbolName)
+			}
+			continue
+		}
+		log.Debug("rust path resolved", "path", symbolName,
+			"copies", len(matched), "programs", len(templates), "descs", len(expanded), "binary", instrPath)
+		probes[symbolName] = expanded
+		resolved = append(resolved, symbolName)
+	}
+
+	// Tokio paths are universal (every poll goes through Harness::poll, every creation
+	// through Cell::new): a Tokio binary resolves all of them, a non-Tokio binary none.
+	// "Some but not all" means a probe was lost, hence Warn. MayBeInlined paths vanish
+	// by design in some builds and do not count.
+	if len(resolved) > 0 && len(unresolved) > 0 {
+		log.Warn("rust paths only partially resolved, some Tokio probes not attached "+
+			"(demangler gap or inlined/stripped symbol?); context propagation may be degraded",
+			"resolved", resolved, "unresolved", unresolved, "binary", instrPath)
+	}
+
+	return nil
+}
+
+// expandRustPathCopies expands every ProbeDesc under a path against every monomorphized
+// copy. Copies that wanted a uretprobe but have no return offsets are warned once per
+// path: for Harness::poll the exit probe clears the thread's current task, so an
+// entry-only copy leaves a stale task after every poll. MayBeInlined paths stay silent.
+func expandRustPathCopies(symbolName string, templates []*ebpfcommon.ProbeDesc, matched []procs.Sym,
+	instrPath string, log *slog.Logger,
+) (expanded []*ebpfcommon.ProbeDesc, anyRequired, mayBeInlined bool) {
+	expanded = make([]*ebpfcommon.ProbeDesc, 0, len(matched)*len(templates))
+	withoutReturns := make([]bool, len(matched))
+	for _, template := range templates {
+		anyRequired = anyRequired || template.Required
+		mayBeInlined = mayBeInlined || template.MayBeInlined
+		for i := range matched {
+			desc, missingReturns := expandedProbeForSym(template, matched[i], symbolName, i, log)
+			if missingReturns {
+				withoutReturns[i] = true
+			}
+			if desc != nil {
+				expanded = append(expanded, desc)
+			}
+		}
+	}
+
+	missing := 0
+	for _, m := range withoutReturns {
+		if m {
+			missing++
+		}
+	}
+	if missing > 0 && !mayBeInlined {
+		log.Warn("rust path copies without return offsets: uretprobe not attached for them",
+			"path", symbolName, "without_returns", missing, "copies", len(matched), "binary", instrPath)
+	}
+	return expanded, anyRequired, mayBeInlined
+}
+
+// expandedProbeForSym builds the ProbeDesc of one monomorphized copy: nil when its code
+// cannot be read or it is uretprobe-only with no return offsets. The second result
+// reports a copy that wanted a uretprobe but has none.
+func expandedProbeForSym(template *ebpfcommon.ProbeDesc, sym procs.Sym,
+	symbolName string, copyIdx int, log *slog.Logger,
+) (*ebpfcommon.ProbeDesc, bool) {
+	log.Debug("rust monomorphized copy", "path", symbolName, "copy", copyIdx, "offset", fmt.Sprintf("0x%x", sym.Off))
+
+	progData := readSymbolData(&sym)
+	if progData == nil {
+		return nil, false
+	}
+	returns, err := goexec.FindReturnOffsets(sym.Off, progData)
+	if err != nil {
+		// The entry uprobe needs no return offsets: keep the copy, skip only the uretprobe.
+		log.Debug("error finding return offsets for Rust symbol; attaching entry probe only", "path", symbolName)
+		returns = nil
+	}
+
+	end := template.End
+	missingReturns := len(returns) == 0 && end != nil
+	if missingReturns {
+		log.Debug("rust tail-call / undecodable function, skipping uretprobe", "path", symbolName)
+		end = nil
+	}
+
+	if template.Start == nil && end == nil {
+		log.Debug("rust path copy has no attachable probe, skipping", "path", symbolName)
+		return nil, missingReturns
+	}
+
+	return &ebpfcommon.ProbeDesc{
+		Required:      template.Required,
+		Start:         template.Start,
+		End:           end,
+		StartOffset:   sym.Off,
+		ReturnOffsets: returns,
+	}, missingReturns
 }
 
 func applyResolvedSymbolOffsets(

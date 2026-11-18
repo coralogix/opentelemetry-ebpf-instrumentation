@@ -124,6 +124,7 @@ The following runtime and server baselines are currently documented or enforced 
 | Node.js async-hooks context propagation | Node.js `12.17+`, excluding `13.0`–`13.9` |
 | Node.js manual span capture | Opt-in; Node.js `14.0+` because the span bridge uses nullish coalescing; Node.js inspector must be reachable; the application must not register an OpenTelemetry SDK. See [devdocs/nodejs-manual-spans.md](devdocs/nodejs-manual-spans.md) |
 | Python asyncio context propagation | GIL-enabled, 64-bit CPython `3.9` through `3.14`, using the default asyncio loop or `uvloop`; free-threaded builds are unsupported |
+| Rust Tokio context propagation | Tokio Rust binaries with their symbols retained (a stripped binary falls back to thread-based resolution); validated on tokio `1.52.3` and `1.54.1`, rust `1.99.0` (v0 mangling) and `1.96.0` (legacy mangling), release and dev profiles, multi-thread and current-thread (actix-web) runtimes, arm64 |
 | Ruby applications | Ruby `3.0.2+` when served by Puma `5.0+` |
 | nginx | HTTP server and reverse-proxy tracing validated on nginx `>= 1.27.3` |
 
@@ -255,6 +256,7 @@ OBI currently documents the following asynchronous or runtime-specific context p
 | Java thread pool | Java | JDK `8+` | Parent lookup walks up to 3 thread-nesting levels | Stable |
 | Java virtual threads | Java | JDK `21+` | Log enrichment is skipped for requests handled on virtual threads | Stable |
 | Python asyncio | Python | GIL-enabled, 64-bit CPython `3.9` through `3.14` | Free-threaded builds are unsupported; `asyncio.start_server()` is not correlated under uvloop; mutated contexts and cancelled `to_thread` tasks may lose correlation | Stable |
+| Rust Tokio | Rust | tokio `1.52.3` and `1.54.1`, rust `1.99.0` and `1.96.0`, symbols retained | Pooled-client connection reuse and channel hand-off fail closed after the spawning request (orphans, never a wrong parent); egress after the response is an orphan; HTTP/2 is not correlated; threads of the process that never poll a task (a sync listener next to the runtime) keep their own thread-keyed parent; `capture.runtimes.rust.enabled` (Config v2) switches the probes off | Experimental |
 
 ## Payload Capture
 

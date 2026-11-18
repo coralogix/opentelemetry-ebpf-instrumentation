@@ -406,7 +406,7 @@ func (pt *ProcessTracer) NewExecutableInstance(ie *Instrumentable) error {
 		for _, p := range pt.Programs {
 			p.ProcessBinary(ie.FileInfo)
 			// Uprobes to be used for native module instrumentation points
-			if err := i.uprobes(ie.FileInfo.Pid(), p, maps); err != nil {
+			if err := i.uprobes(ie.FileInfo.Pid(), ie.Type, p, maps); err != nil {
 				printVerifierErrorInfo(err)
 				return err
 			}
@@ -487,7 +487,7 @@ func (pt *ProcessTracer) attachExecutable(exe *link.Executable, exePath string, 
 		i.uprobeKey = uprobeKey
 		if existing := pt.instrumenterForUprobeTarget(uprobeKey); existing != nil {
 			for _, p := range pt.Programs {
-				if err := existing.uprobes(ie.FileInfo.Pid(), p, maps); err != nil {
+				if err := existing.uprobes(ie.FileInfo.Pid(), ie.Type, p, maps); err != nil {
 					printVerifierErrorInfo(err)
 					return err
 				}
@@ -512,7 +512,7 @@ func (pt *ProcessTracer) attachExecutable(exe *link.Executable, exePath string, 
 		}
 
 		// Uprobes to be used for native module instrumentation points
-		if err := i.uprobes(ie.FileInfo.Pid(), p, maps); err != nil {
+		if err := i.uprobes(ie.FileInfo.Pid(), ie.Type, p, maps); err != nil {
 			printVerifierErrorInfo(err)
 			return err
 		}

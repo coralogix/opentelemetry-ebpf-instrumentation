@@ -1,0 +1,53 @@
+# OBI config v2 for TestRustTokioRuntimeDisabled: obi-config-rust-tokio.yml with the Rust
+# runtime probes switched off. The knob exists only in Config v2 (v1 is frozen), and v2 reads
+# no OTEL_EBPF_* environment, so the operational knobs the other suites pass through the
+# compose environment live here too.
+file_format: "1.0"
+log_level: debug
+resource:
+  attributes:
+    - name: host.name
+      value: obi
+    - name: service.namespace
+      value: integration-test
+tracer_provider:
+  processors:
+    - batch:
+        schedule_delay: 1
+        exporter:
+          otlp_grpc:
+            endpoint: http://jaeger:4317
+            tls:
+              insecure: true
+extensions:
+  obi:
+    version: "2.0"
+    capture:
+      policy:
+        default_action: exclude
+        poll_interval: 500ms
+      rules:
+        - action: include
+          match:
+            process:
+              open_ports: "8092,8093,8094" # server (8092) + one backend process per port (8093, 8094)
+      instrumentation:
+        http:
+          track_request_headers: true
+      engine:
+        debug:
+          bpf: true
+        batching:
+          batch_timeout: 10ms
+        propagation:
+          context_propagation: all
+      runtimes:
+        rust:
+          enabled: false
+    enrich:
+      enrichers:
+        kubernetes:
+          mode: disabled
+    daemon:
+      logging:
+        debug_trace_output: json_indent

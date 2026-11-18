@@ -1,0 +1,3 @@
+[workspace]
+members = ["server", "backend", "server-actix"]
+resolver = "2"

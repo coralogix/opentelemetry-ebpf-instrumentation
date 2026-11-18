@@ -30,6 +30,7 @@ follow the [Config v1 to v2 migration guide](config/version-2.0/migration.md).
 - [BPF print format](bpf-print-format.md): it explains a uniform standard for all BPF print debug statements across the project.
 - [Dependency Integrity Policy](dependency-integrity-policy.md): required dependency pinning and verification rules for Dockerfiles.
 - [Python asyncio and uvloop Context Propagation](python-asyncio-context-propagation.md): architecture and implementation of Python async context propagation for `asyncio` workloads, including applications running on `uvloop`.
+- [Rust Tokio Context Propagation](rust-tokio-context-propagation.md): how the trace context follows a request across the tasks and threads of a Tokio runtime (task-lineage probes, the fail-closed contract, the limits and the tests).
 - [Go Channel Span Links](go-channel-span-links.md): receiver-side span links for supported Go channel handoffs.
 - [Trace-Profile Correlation](trace-profile-correlation.md): standard communication channel for correlating profiles to OBI traces.
 - [Kubernetes Metadata Cache Service (`k8s-cache`)](k8s-cache.md): what the standalone metadata cache service is, why it exists, and how to deploy it alongside OBI.

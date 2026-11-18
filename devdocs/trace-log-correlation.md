@@ -14,6 +14,7 @@ OBI can enrich JSON and plain-text log lines with trace and span fields, linking
   - [Java — `k_ioctl_java_threads` in the ioctl kprobe](#java--k_ioctl_java_threads-in-the-ioctl-kprobe)
   - [Ruby (Puma) — `rb_ary_shift` uprobe](#ruby-puma--rb_ary_shift-uprobe)
   - [Python (asyncio) — `task_step` / `context_run` uprobes](#python-asyncio--task_step--context_run-uprobes)
+  - [Rust (Tokio) — `Harness::poll` uprobe](#rust-tokio--harnesspoll-uprobe)
 - [Per-runtime stdout buffering](#per-runtime-stdout-buffering)
   - [.NET specifics](#net-specifics)
 - [Filtering the suppressed placeholder lines](#filtering-the-suppressed-placeholder-lines)
@@ -102,6 +103,7 @@ The pin outlives the process, so entries a populating run left behind would sit 
 - **Java**: HTTP servers (Tomcat, Netty) use thread pools. The acceptor thread receives the data, but a worker thread from the pool processes the request and writes logs.
 - **Ruby (Puma)**: When all workers are busy, the reactor thread reads HTTP data (setting context for itself), then hands off to a worker that has no context.
 - **Python (asyncio)**: A single OS thread runs many tasks via the event loop. `pid_tgid` identifies the thread, not the request, so any `await` boundary that switches tasks would otherwise leave `traces_ctx_v1[pid_tgid]` pointing at whichever task ran most recently.
+- **Rust (Tokio)**: One worker thread polls many tasks, and a work-stealing runtime moves a task between threads at any `await`; `pid_tgid` identifies the thread, not the request.
 
 Without correction, `traces_ctx_v1[pid_tgid]` may carry the wrong trace context when a log is written. Each runtime has a dedicated mechanism to refresh the map at the right moment.
 
@@ -171,6 +173,10 @@ OBI hooks the CPython internals that mark every async transition:
 Together these probes keep `traces_ctx_v1[pid_tgid]` aligned with whichever async task is currently executing, so logs written between any two `await` points get the correct trace/span IDs.
 
 This works for plain `asyncio` and uvloop (the probe targets are CPython's `_asyncio` module and `libpython3.so` — both loops drive the same task machinery). Greenlet/gevent are out of scope: their context switches happen entirely inside the greenlet C extension and don't touch any of the probed symbols.
+
+### Rust (Tokio) — `Harness::poll` uprobe
+
+Every task poll of every Tokio scheduler enters `tokio::runtime::task::harness::Harness::poll`. OBI hooks it (`bpf/generictracer/tokio.c`) and, at each poll entry, walks the task's recorded lineage to the task anchored to an inbound request (see [rust-tokio-context-propagation.md](rust-tokio-context-propagation.md)) and calls `obi_ctx__set(pid_tgid, &tp)` with that request's trace, or `obi_ctx__del(pid_tgid)` when the walk resolves nothing. The exit of a top-level poll leaves the entry alone: deleting there would drop the context at the first `await` of a still-in-flight request. On multi-thread workers every user poll is nested inside the worker's own blocking-task poll, and its exit refreshes for that task, which deletes the entry, so there the context lives for the duration of the poll. Debug builds resolve through the task-id path only, which this refresh does not use, so the entry stays unset for Tokio tasks in those builds.
 
 ## Per-runtime stdout buffering
 

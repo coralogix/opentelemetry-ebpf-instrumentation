@@ -113,6 +113,8 @@ static __always_inline void cleanup_http_server_response_data(pid_connection_inf
     if (!(info->task_tid & JAVA_VT_TID_FLAG)) {
         obi_ctx__del(bpf_get_current_pid_tgid());
     }
+    // Closes the Tokio anchor's trust window; a no-op for non-Tokio threads.
+    tokio_untag_inbound_conn(bpf_get_current_pid_tgid());
 }
 
 static __always_inline void cleanup_http_server_thread_trace(http_info_t *info,
@@ -1055,7 +1057,7 @@ static __always_inline int __obi_continue_protocol_http(struct pt_regs *ctx,
             pid_connection_info_t p_conn = {.pid = args->pid_conn.pid};
             __builtin_memcpy(&p_conn.conn, &args->pid_conn.conn, sizeof(connection_info_t));
             found_tp = find_trace_for_client_request(
-                &p_conn, args->orig_dport, args->lw_thread, &tp_p->tp);
+                &p_conn, args->orig_dport, args->lw_thread, &tp_p->tp, k_tokio_walk_tasks);
             info->parent_status = found_tp;
         } else {
             //bpf_dbg_printk("Looking up existing trace for connection");

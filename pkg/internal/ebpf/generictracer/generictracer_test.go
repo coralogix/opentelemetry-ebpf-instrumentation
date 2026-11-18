@@ -526,7 +526,7 @@ func readJVMTestBatch(t *testing.T, events <-chan []runtimemetrics.RuntimeMetric
 // The libruby probes sit on symbols the Ruby runtime exercises as a whole, so
 // each symbol set must carry the Ruby version constraint that gates it.
 func TestRubyUProbesAreVersionGated(t *testing.T) {
-	tracer := &Tracer{}
+	tracer := &Tracer{cfg: &obi.Config{}}
 
 	var rubyKeys []string
 	for lib := range tracer.UProbes() {
@@ -588,3 +588,30 @@ func (f fakeServiceFilter) CurrentPIDs(ebpfcommon.PIDType) map[uint32]map[app.PI
 }
 
 func (f fakeServiceFilter) ProcPIDs(ebpfcommon.PIDType) []app.PID { return f.procPIDs }
+
+// The Tokio probes are the one runtime switch among the passive uprobes: off, the
+// executable's own key is gone and a Rust process is traced like any native binary.
+func TestRustUProbesAreGated(t *testing.T) {
+	tracer := &Tracer{cfg: &obi.Config{}}
+	assert.NotContains(t, tracer.UProbes(), ebpfcommon.SelfLibKey)
+
+	tracer.cfg.Rust.Enabled = true
+	probes := tracer.UProbes()
+	require.Contains(t, probes, ebpfcommon.SelfLibKey)
+
+	var paths []string
+	for path := range probes[ebpfcommon.SelfLibKey] {
+		paths = append(paths, path)
+	}
+	assert.ElementsMatch(t, []string{
+		"tokio::runtime::task::harness::Harness::poll",
+		"tokio::runtime::task::core::Cell::new",
+		"tokio::runtime::task::list::OwnedTasks::bind_inner",
+		"tokio::runtime::blocking::pool::Spawner::spawn_task",
+		"tokio::task::local::Shared::schedule",
+		"tokio::runtime::task::harness::Harness::complete",
+		"tokio::runtime::task::raw::dealloc",
+		"tokio::runtime::context::set_current_task_id",
+		"tokio::runtime::task::id::Id::next",
+	}, paths)
+}
