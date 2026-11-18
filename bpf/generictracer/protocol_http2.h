@@ -336,8 +336,8 @@ static __always_inline void http2_grpc_start(void *ctx,
         cp->t_key.extra_id = extra_runtime_id();
         cp->ts = bpf_ktime_get_ns();
     }
-    u8 found_tp =
-        find_trace_for_client_request(&s_key->pid_conn, orig_dport, k_lw_thread_none, &tp_p->tp);
+    u8 found_tp = find_trace_for_client_request(
+        &s_key->pid_conn, orig_dport, k_lw_thread_none, &tp_p->tp, k_tokio_walk_tasks);
     h2g_info->parent_status = found_tp;
     if (adopt_injected_trace(s_key, &tp_p->tp)) {
         // the uprobe's context comes from the running request itself

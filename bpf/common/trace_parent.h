@@ -378,12 +378,21 @@ static __always_inline tp_info_pid_t *find_go_parent_trace(const lw_thread_t lw_
     return NULL;
 }
 
+// Whether this copy of the lookup walks the Tokio task lineage. The failed-connect path skips
+// it: inlined there, the walks pushed obi_kprobe_tcp_close and obi_kprobe_sock_def_error_report
+// past the Linux 7.2 verifier's instruction budget in debug builds (devdoc "Parent Lookup").
+enum tokio_walk {
+    k_tokio_walk_skip,
+    k_tokio_walk_tasks,
+};
+
 static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_info_t *p_conn,
                                                         u64 pid_tgid,
                                                         lw_thread_t lw_thread,
                                                         trace_key_t *t_key,
                                                         u16 orig_dport,
-                                                        const tp_info_t *wire_tp) {
+                                                        const tp_info_t *wire_tp,
+                                                        const u8 tokio_walk) {
     // Tokio process: a thread that has polled a task resolves only through the task walks, any
     // other thread through its own thread-keyed server span, then the task it was cloned under
     // (devdoc "Parent Lookup"). Keyed with valid_pid() like the tokio probes: the two agree in
@@ -397,6 +406,9 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
             if (parent_trace_matches(thread_parent, wire_tp)) {
                 return thread_parent;
             }
+        }
+        if (tokio_walk != k_tokio_walk_tasks) {
+            return NULL;
         }
         tp_info_pid_t *tokio_parent =
             find_tokio_parent_trace_for_thread(pid_tgid, tgid, thread_state, &t_key->p_key);
@@ -517,9 +529,10 @@ find_trace_for_client_request_with_t_key(const pid_connection_info_t *p_conn,
                                          trace_key_t *t_key,
                                          u64 pid_tgid,
                                          lw_thread_t lw_thread,
-                                         tp_info_t *tp) {
+                                         tp_info_t *tp,
+                                         const u8 tokio_walk) {
     tp_info_pid_t *server_tp =
-        find_parent_trace(p_conn, pid_tgid, lw_thread, t_key, orig_dport, NULL);
+        find_parent_trace(p_conn, pid_tgid, lw_thread, t_key, orig_dport, NULL, tokio_walk);
 
     if (server_tp && server_tp->valid && valid_trace(server_tp->tp.trace_id)) {
         bpf_dbg_printk("Found existing server tp for client call");
@@ -550,14 +563,15 @@ find_trace_for_client_request_with_t_key(const pid_connection_info_t *p_conn,
 static __always_inline u8 find_trace_for_client_request(const pid_connection_info_t *p_conn,
                                                         u16 orig_dport,
                                                         lw_thread_t lw_thread,
-                                                        tp_info_t *tp) {
+                                                        tp_info_t *tp,
+                                                        const u8 tokio_walk) {
 
     trace_key_t t_key = {0};
     trace_key_from_pid_tid(&t_key);
     const u64 pid_tgid = bpf_get_current_pid_tgid();
 
     return find_trace_for_client_request_with_t_key(
-        p_conn, orig_dport, &t_key, pid_tgid, lw_thread, tp);
+        p_conn, orig_dport, &t_key, pid_tgid, lw_thread, tp, tokio_walk);
 }
 
 static __always_inline u8
@@ -568,8 +582,8 @@ find_parent_trace_for_client_request_with_t_key(const pid_connection_info_t *p_c
                                                 lw_thread_t lw_thread,
                                                 tp_info_t *tp,
                                                 const tp_info_t *wire_tp) {
-    tp_info_pid_t *server_tp =
-        find_parent_trace(p_conn, pid_tgid, lw_thread, t_key, orig_dport, wire_tp);
+    tp_info_pid_t *server_tp = find_parent_trace(
+        p_conn, pid_tgid, lw_thread, t_key, orig_dport, wire_tp, k_tokio_walk_tasks);
 
     if (server_tp && server_tp->valid && valid_trace(server_tp->tp.trace_id)) {
         bpf_dbg_printk("Found existing server tp for client call");
@@ -627,7 +641,8 @@ static __always_inline u8 find_trace_for_wire_client_request(const pid_connectio
     trace_key_t key = {};
     trace_key_from_pid_tid(&key);
     const u64 id = bpf_get_current_pid_tgid();
-    tp_info_pid_t *parent = find_parent_trace(p_conn, id, lw_thread, &key, orig_dport, wire_tp);
+    tp_info_pid_t *parent =
+        find_parent_trace(p_conn, id, lw_thread, &key, orig_dport, wire_tp, k_tokio_walk_tasks);
 
     if (!parent) {
         return k_parent_status_none;

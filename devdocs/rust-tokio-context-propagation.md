@@ -407,8 +407,21 @@ the `tokio_process` mark, and parents resolve through the generic thread-keyed p
 this feature, with its work-stealing misattribution. `TestRustTokioRuntimeDisabled` pins that
 path.
 
+### A failed connect does not walk the lineage
+
+`failed_to_connect_event` (`tcp_close` and `sock_def_error_report` on a socket that never
+connected) resolves the client span's parent with `k_tokio_walk_skip`: a thread that never
+polled keeps its own thread-keyed server span, a runtime thread gets no parent. Inlined
+there, the two task walks pushed `obi_kprobe_tcp_close` and `obi_kprobe_sock_def_error_report`
+past the Linux 7.2 verifier's one-million-instruction budget in debug builds (the normal
+client path, `obi_protocol_tcp`, passes with them). The walks run once per connect, not per
+request, and a refused connect from a task is reported as the root of its own trace, never
+under the wrong request.
+
 ## Known Limitations
 
+- **A failed connect from a Tokio runtime thread has no parent.** The failed-connect
+  path skips the task walks (above); the error span is exported as its own root.
 - **Release correlation depends on which Tokio internals the compiler keeps out of
   line.** `Harness::poll` survives because it is address-taken (the task vtable);
   `Cell::new` loses its copies for small futures; the three spawn hooks survive because
