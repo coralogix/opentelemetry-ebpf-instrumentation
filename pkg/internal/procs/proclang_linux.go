@@ -30,10 +30,7 @@ func rustDemangle(name string) string {
 	}
 	rest := name[3:] // inside the outer nested-name scope opened by _ZN
 	var parts []string
-	for len(rest) > 0 {
-		if rest[0] == 'E' {
-			goto done
-		}
+	for len(rest) > 0 && rest[0] != 'E' {
 		// Read a length-prefixed identifier. Digits past the symbol's own length cannot
 		// form a valid one and would overflow n.
 		n := 0
@@ -62,7 +59,6 @@ func rustDemangle(name string) string {
 		part = stripDollarBrackets(part)
 		parts = append(parts, part)
 	}
-done:
 	return strings.Join(parts, "::")
 }
 
