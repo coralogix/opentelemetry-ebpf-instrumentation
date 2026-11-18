@@ -36,9 +36,13 @@ static void *(*bpf_map_lookup_elem_hook)(void *map, const void *key);
 static inline void *bpf_map_lookup_elem(void *map, const void *key) {
     return bpf_map_lookup_elem_hook ? bpf_map_lookup_elem_hook(map, key) : NULL;
 }
+static long (*bpf_map_update_elem_hook)(void *map,
+                                        const void *key,
+                                        const void *val,
+                                        unsigned long long flags);
 static inline long
 bpf_map_update_elem(void *map, const void *key, const void *val, unsigned long long flags) {
-    return 0;
+    return bpf_map_update_elem_hook ? bpf_map_update_elem_hook(map, key, val, flags) : 0;
 }
 static inline long bpf_map_delete_elem(void *map, const void *key) {
     return 0;
