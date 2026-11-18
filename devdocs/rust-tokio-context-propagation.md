@@ -507,10 +507,11 @@ path.
   With the 2 MiB slot array the six maps hold about 13.2 MiB of keys and values (4.4 MiB
   `tokio_task_state` at 152 B per entry, 3.7 MiB `tokio_task_id_state` at 128 B, 1.4 MiB
   `tokio_thread_state`, 1.7 MiB `tokio_thread_birth` at 60 B, 0.1 MiB `tokio_process`), for
-  which the kernel charged 19.3 MiB of memlock before `tokio_thread_birth` was added, with its
-  per-element headers and buckets (`bpftool map show`, Linux 6.8),
-  preallocated when the tracer loads whether or not a Rust process exists. `capture.runtimes.rust.enabled:
-  false` skips the probes and leaves the maps allocated.
+  which the kernel charges 23.0 MiB of memlock with its per-element headers and buckets
+  (`bpftool map show`, Linux 6.8: 6.2 MiB `tokio_task_state`, 5.5 MiB `tokio_task_id_state`,
+  3.7 MiB `tokio_thread_birth`, 3.2 MiB `tokio_thread_state`, 2.3 MiB `tokio_process`, 2.0 MiB
+  `tokio_task_slots`), preallocated when the tracer loads whether or not a Rust process
+  exists. `capture.runtimes.rust.enabled: false` skips the probes and leaves the maps allocated.
 
 - **Validated on arm64 only** until the x86 integration matrix runs: Linux 6.8 for the
   suites, 5.10.0 and 5.8 for the verifier; tokio 1.52.3 and 1.54.1 (1.30.0 only as the
