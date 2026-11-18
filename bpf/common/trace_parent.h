@@ -245,8 +245,7 @@ static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(
     if (id) {
         tp_info_pid_t *tp = find_tokio_parent_trace_by_id(tgid, id, 1);
         if (tp) {
-            bpf_dbg_printk("found tp by id tid=%d id=%llu", (u32)pid_tgid, id);
-            bpf_dbg_printk("tokio egress IDWALK-HIT");
+            bpf_dbg_printk("tokio egress IDWALK-HIT tid=%d id=%llu", (u32)pid_tgid, id);
             return tp;
         }
         bpf_dbg_printk("tokio egress IDWALK-MISS");
@@ -260,8 +259,7 @@ static __always_inline tp_info_pid_t *find_tokio_parent_trace_for_thread(
 
     tp_info_pid_t *tp = find_tokio_parent_trace(tgid, task, 1);
     if (tp) {
-        bpf_dbg_printk("found tp tid=%d task=%llx", (u32)pid_tgid, task);
-        bpf_dbg_printk("tokio egress WALK-HIT");
+        bpf_dbg_printk("tokio egress WALK-HIT tid=%d task=%llx", (u32)pid_tgid, task);
         return tp;
     }
     bpf_dbg_printk("tokio egress WALK-MISS");
