@@ -407,21 +407,27 @@ the `tokio_process` mark, and parents resolve through the generic thread-keyed p
 this feature, with its work-stealing misattribution. `TestRustTokioRuntimeDisabled` pins that
 path.
 
-### A failed connect does not walk the lineage
+### A refused connect keeps main's thread-keyed parent
 
 `failed_to_connect_event` (`tcp_close` and `sock_def_error_report` on a socket that never
-connected) resolves the client span's parent with `k_tokio_walk_skip`: a thread that never
-polled keeps its own thread-keyed server span, a runtime thread gets no parent. Inlined
-there, the two task walks pushed `obi_kprobe_tcp_close` and `obi_kprobe_sock_def_error_report`
-past the Linux 7.2 verifier's one-million-instruction budget in debug builds (the normal
-client path, `obi_protocol_tcp`, passes with them). The walks run once per connect, not per
-request, and a refused connect from a task is reported as the root of its own trace, never
-under the wrong request.
+connected) resolves the client span's parent with `k_tokio_walk_skip`: the copy of
+`find_parent_trace` inlined there carries no Tokio code and behaves as on `main`, the
+thread-keyed lookup with its clone-ancestry fallback. In debug builds under the CI
+configurations the Linux 7.2 verifier already spends 911k of its one million instructions
+on `main`'s `obi_kprobe_sock_def_error_report`; measured on the CI kernel, the inlined walks
+(1,000,001, rejected), a single `tokio_process` lookup at the top of the lookup
+(1,000,001), and a `tokio_process` + `tokio_thread_state` check placed after the whole
+chain (1,000,001) all cross the limit, while the copy identical to `main` passes at
+911,943. A refused connect from a runtime thread therefore carries the parent `main` gives
+it, which under work-stealing may be another request's: it is the one egress the task walks
+do not cover. Bringing fail-closed back there means a user-space rule, not kernel code.
 
 ## Known Limitations
 
-- **A failed connect from a Tokio runtime thread has no parent.** The failed-connect
-  path skips the task walks (above); the error span is exported as its own root.
+- **A refused connect from a Tokio runtime thread is parented as on `main`** (thread-keyed,
+  possibly another request's under work-stealing): the failed-connect kprobes have no
+  verifier budget left on Linux 7.2 for any Tokio check (above). A user-space rule on
+  `parent_status` and the `tokio_process` map can drop that parent later.
 - **Release correlation depends on which Tokio internals the compiler keeps out of
   line.** `Harness::poll` survives because it is address-taken (the task vtable);
   `Cell::new` loses its copies for small futures; the three spawn hooks survive because

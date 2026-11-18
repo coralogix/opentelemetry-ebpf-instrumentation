@@ -378,9 +378,10 @@ static __always_inline tp_info_pid_t *find_go_parent_trace(const lw_thread_t lw_
     return NULL;
 }
 
-// Whether this copy of the lookup walks the Tokio task lineage. The failed-connect path skips
-// it: inlined there, the walks pushed obi_kprobe_tcp_close and obi_kprobe_sock_def_error_report
-// past the Linux 7.2 verifier's instruction budget in debug builds (devdoc "Parent Lookup").
+// Whether this copy of the lookup carries the Tokio branch at all. The failed-connect path
+// leaves it out and keeps main's thread-keyed lookup: in debug builds obi_kprobe_tcp_close and
+// obi_kprobe_sock_def_error_report already take 90 % of the Linux 7.2 verifier's instruction
+// budget on main, and one more map lookup there is rejected (devdoc "Parent Lookup").
 enum tokio_walk {
     k_tokio_walk_skip,
     k_tokio_walk_tasks,
@@ -398,7 +399,7 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
     // (devdoc "Parent Lookup"). Keyed with valid_pid() like the tokio probes: the two agree in
     // pod mode with the filter off.
     const u32 tgid = valid_pid(pid_tgid);
-    if (bpf_map_lookup_elem(&tokio_process, &tgid)) {
+    if (tokio_walk == k_tokio_walk_tasks && bpf_map_lookup_elem(&tokio_process, &tgid)) {
         const tokio_thread_state_t *thread_state =
             (const tokio_thread_state_t *)bpf_map_lookup_elem(&tokio_thread_state, &pid_tgid);
         if (!thread_state || !thread_state->polled) {
@@ -406,9 +407,6 @@ static __always_inline tp_info_pid_t *find_parent_trace(const pid_connection_inf
             if (parent_trace_matches(thread_parent, wire_tp)) {
                 return thread_parent;
             }
-        }
-        if (tokio_walk != k_tokio_walk_tasks) {
-            return NULL;
         }
         tp_info_pid_t *tokio_parent =
             find_tokio_parent_trace_for_thread(pid_tgid, tgid, thread_state, &t_key->p_key);

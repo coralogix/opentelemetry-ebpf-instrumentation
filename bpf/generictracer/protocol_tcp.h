@@ -248,7 +248,7 @@ static __always_inline void failed_to_connect_event(pid_connection_info_t *pid_c
 
         // A failed socket has no future sends. Publish only the span, not
         // propagation state that another connection could inherit by port reuse.
-        // No Tokio task walk here: see enum tokio_walk.
+        // No Tokio branch here, main's lookup: see enum tokio_walk.
         tcp_get_client_trace_info(req, pid_conn, lw_thread, orig_dport, k_tokio_walk_skip);
         bpf_ringbuf_submit(req, get_flags());
     }
