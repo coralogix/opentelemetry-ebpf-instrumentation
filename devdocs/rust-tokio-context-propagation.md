@@ -559,7 +559,9 @@ release needs a lock resolved for it).
   record OBI exported twice is not mistaken for a pile. Its `sync_threads` case drives the
   server's std-thread listener on port 8095, whose threads never poll a task, and requires
   the thread-keyed floor; its `thread_spawn` case clones a std thread inside the handler
-  that makes the call itself, and requires the birth-task floor.
+  that makes the call itself, and requires the birth-task floor; its `pool_born_in_request`
+  case starts a two-thread pool in the warm-up's first request and requires every later pool
+  egress to fail closed.
 - `TestRustTokioCurrentThread` runs the same A/B discrimination against an actix-web server
   (`server-actix`): one current-thread runtime per worker with a `LocalSet`, the handler
   polled inside the per-connection dispatcher task, so tasks never migrate. Six shapes:
