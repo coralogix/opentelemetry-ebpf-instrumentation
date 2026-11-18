@@ -246,6 +246,13 @@ branch with `capture.runtimes.rust.enabled: false`): on `/ws-spawn` the server's
 23.1 / 23.4 / 22.1 / 23.5 ms; OBI's own CPU 2.9 % in every OBI leg. On `/blocking` the
 four legs are within noise of each other. Per probe (`bpf_stats`): poll entry 323 ns,
 poll return 127 ns, `bind_inner` 197 ns, `complete` 237 ns, `Cell::new` 375 ns.
+Re-measured at the end of the branch, with the thread birth record in place (`main` and
+probes on, same VM and load): the BPF programs' own run time, summed from `bpf_stats` over
+the 60 s window, is 2.06 % of one CPU under `main` and 2.87 % with the probes on
+`/ws-spawn`, of which the Tokio programs take 0.62 %; 7.99 % and 7.91 % on `/blocking`,
+Tokio 0.86 %. Server CPU 185.6 % / 190.9 % and p99 26.3 / 27.9 ms on `/ws-spawn`, OBI's own
+CPU 2.9 % / 3.0 %; per probe, poll entry 380 ns, poll return 143 ns, `bind_inner` 271 ns,
+`complete` 337 ns, `Cell::new` 525 ns.
 
 The x86 integration matrix has not run yet; re-check this table on every toolchain bump
 (see the inlining limitation below).
