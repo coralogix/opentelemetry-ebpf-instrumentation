@@ -348,6 +348,56 @@ async fn thread_b() -> impl IntoResponse {
     respond(call_backend_on_thread(BACKEND_P).await)
 }
 
+// /pool-a, /pool-b: two std worker threads started by the first request and kept for the
+// process lifetime, each calling the backend itself. Their birth lineage is that first
+// request's, so every later egress must fail closed (devdoc "Known Limitations").
+struct PoolJob {
+    url: &'static str,
+    reply: tokio::sync::oneshot::Sender<Result<String, String>>,
+}
+
+static POOL_TX: std::sync::OnceLock<std::sync::mpsc::Sender<PoolJob>> = std::sync::OnceLock::new();
+
+fn pool_tx() -> &'static std::sync::mpsc::Sender<PoolJob> {
+    POOL_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<PoolJob>();
+        let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
+        for n in 0..2 {
+            let rx = rx.clone();
+            std::thread::spawn(move || {
+                println!("[pool] worker {} started on {:?}", n, std::thread::current().id());
+                loop {
+                    let job = match rx.lock().unwrap().recv() {
+                        Ok(job) => job,
+                        Err(_) => return,
+                    };
+                    let _ = job.reply.send(call_backend_blocking_url(job.url));
+                }
+            });
+        }
+        tx
+    })
+}
+
+async fn call_backend_on_pool(url: &'static str) -> Result<String, String> {
+    let (reply, rx) = tokio::sync::oneshot::channel();
+    pool_tx()
+        .send(PoolJob { url, reply })
+        .map_err(|_| "pool gone".to_string())?;
+    rx.await.unwrap_or_else(|e| Err(e.to_string()))
+}
+
+const BACKEND_Q: &str = "http://127.0.0.1:8093/ping-q";
+const BACKEND_R: &str = "http://127.0.0.1:8094/ping-r";
+
+async fn pool_a() -> impl IntoResponse {
+    respond(call_backend_on_pool(BACKEND_Q).await)
+}
+
+async fn pool_b() -> impl IntoResponse {
+    respond(call_backend_on_pool(BACKEND_R).await)
+}
+
 // A std-thread HTTP/1 listener on 8095 beside the Tokio runtime: /sync-a and /sync-b call
 // the backend on the handling thread itself, so the parent must be that thread's own server
 // span. Connection: close, so every request is read on a fresh thread.
@@ -420,6 +470,8 @@ async fn main() {
         .route("/thread", get(thread_spawn))
         .route("/thread-a", get(thread_a))
         .route("/thread-b", get(thread_b))
+        .route("/pool-a", get(pool_a))
+        .route("/pool-b", get(pool_b))
         .route("/ws-spawn-a", get(ws_spawn_a))
         .route("/ws-spawn-b", get(ws_spawn_b))
         .route("/ws-direct-a", get(ws_direct_a))
@@ -442,6 +494,8 @@ async fn main() {
     println!("  GET /thread          — std::thread::spawn -> ureq (thread cloned in the handler)");
     println!("  GET /thread-a        — std::thread::spawn -> ureq /ping-o (thread discrimination A)");
     println!("  GET /thread-b        — std::thread::spawn -> ureq /ping-p (thread discrimination B)");
+    println!("  GET /pool-a          — std thread pool started by the first request -> ureq /ping-q (pool discrimination A)");
+    println!("  GET /pool-b          — std thread pool started by the first request -> ureq /ping-r (pool discrimination B)");
     println!("  GET /ws-spawn-a      — tokio::spawn -> reqwest /ping-c (async discrimination A)");
     println!("  GET /ws-spawn-b      — tokio::spawn -> reqwest /ping-d (async discrimination B)");
     println!(

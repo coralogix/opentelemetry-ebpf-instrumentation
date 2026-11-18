@@ -414,6 +414,16 @@ func TestRustTokioProbeDiscrimination(t *testing.T) {
 			minClean: 20,
 		})
 	})
+	t.Run("pool_born_in_request", func(t *testing.T) {
+		// Two std worker threads started by the first /pool request and kept: their birth lineage
+		// is that request's, so once it has answered every pool egress must fail closed. The
+		// warm-up starts the pool, the burst runs on its stale lineage.
+		tokioABDiscrimination(t, tokioABCase{
+			serverA: "/pool-a", serverB: "/pool-b",
+			backendA: "/ping-q", backendB: "/ping-r",
+			failClosed: true,
+		})
+	})
 	t.Run("direct_egress", func(t *testing.T) {
 		// The spawned task writes its own TcpStream: the egress runs while the per-request
 		// task is current, so both builds correlate it.

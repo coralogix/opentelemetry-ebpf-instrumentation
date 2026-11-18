@@ -162,6 +162,24 @@ async fn ping_p(headers: HeaderMap) -> impl IntoResponse {
     format!("pong-p traceparent={}", traceparent)
 }
 
+async fn ping_q(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-q  traceparent={}", traceparent);
+    format!("pong-q traceparent={}", traceparent)
+}
+
+async fn ping_r(headers: HeaderMap) -> impl IntoResponse {
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("(none)");
+    println!("backend /ping-r  traceparent={}", traceparent);
+    format!("pong-r traceparent={}", traceparent)
+}
+
 async fn health() -> impl IntoResponse {
     "ok\n"
 }
@@ -186,7 +204,9 @@ async fn main() {
         .route("/ping-m", get(ping_m))
         .route("/ping-n", get(ping_n))
         .route("/ping-o", get(ping_o))
-        .route("/ping-p", get(ping_p));
+        .route("/ping-p", get(ping_p))
+        .route("/ping-q", get(ping_q))
+        .route("/ping-r", get(ping_r));
 
     // With a port argument the process serves that port alone (the image runs one backend per
     // port; see the Dockerfile for why). No argument keeps both listeners for local use.
