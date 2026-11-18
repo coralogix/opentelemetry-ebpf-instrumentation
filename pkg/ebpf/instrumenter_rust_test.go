@@ -8,6 +8,7 @@ package ebpf
 import (
 	"bytes"
 	"debug/elf"
+	"errors"
 	"log/slog"
 	"runtime"
 	"testing"
@@ -134,6 +135,19 @@ func TestExpandRustPathProbesFailsOnRequiredPathWithoutCopies(t *testing.T) {
 	err := expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default())
 
 	require.ErrorContains(t, err, "required symbol tokio::poll not found")
+}
+
+func TestExpandRustPathProbesReportsTheSymbolScanError(t *testing.T) {
+	scanErr := errors.New("corrupt symtab")
+	original := findRustSymbols
+	findRustSymbols = func(_ *elf.File, _ []string) (map[string][]procs.Sym, error) { return nil, scanErr }
+	t.Cleanup(func() { findRustSymbols = original })
+	probes := map[string][]*ebpfcommon.ProbeDesc{"tokio::poll": rustPathProbe(false, false)}
+
+	err := expandRustPathProbes(nil, probes, "/proc/1/exe", slog.Default())
+
+	require.ErrorIs(t, err, scanErr)
+	assert.ErrorContains(t, err, "/proc/1/exe")
 }
 
 func TestExpandRustPathProbesDropsOptionalPathWithoutCopies(t *testing.T) {
