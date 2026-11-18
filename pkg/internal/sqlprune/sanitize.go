@@ -39,7 +39,7 @@ func dialectFor(kind request.SQLKind) sqlDialect {
 		return sqlDialect{dbms: sqllexer.DBMSPostgres, dollarPlaceholders: true}
 	case request.DBMSSQL:
 		return sqlDialect{dbms: sqllexer.DBMSSQLServer, doubleQuotedStrings: true, moneyLiterals: true}
-	case request.DBMySQL:
+	case request.DBMySQL, request.DBMariaDB:
 		return sqlDialect{
 			dbms:                 sqllexer.DBMSMySQL,
 			questionPlaceholders: true,

@@ -159,6 +159,16 @@ section empty once drained.
   per-bucket counts for the bounds that received executions only. Bucket values grow and new
   `le` series appear, and `histogram_quantile` over this metric now returns correct values.
   The OTLP `obi.bpf.probe.latency` histogram is unchanged.
+- MariaDB connections report `db.system.name` `mariadb` instead of `mysql` on spans and on
+  `db.client.operation.duration` and `db.server.operation.duration`. Detection needs the
+  connection handshake to be observed and covers only drivers that send MariaDB extended
+  capabilities (MariaDB Connector/J and libmariadb-based clients); other clients still report
+  `mysql`.
+- MySQL and MariaDB spans and the database operation duration metrics carry `db.namespace` when
+  the connection's handshake is observed, so their metric series split by database.
+- MySQL and MariaDB spans for statements that name no table are named
+  `{db.operation.name} {db.namespace}` when the database is known (`SELECT sakila` instead of
+  `SELECT`).
 
 ## Hosting notes
 
