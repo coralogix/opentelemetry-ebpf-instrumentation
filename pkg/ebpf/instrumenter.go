@@ -1507,7 +1507,7 @@ func expandRustPathProbes(elfFile *elf.File, probes map[string][]*ebpfcommon.Pro
 	// "Some but not all" means a probe was lost, hence Warn. MayBeInlined paths vanish
 	// by design in some builds and do not count.
 	if len(resolved) > 0 && len(unresolved) > 0 {
-		log.Warn("rust paths only partially resolved — some Tokio probes not attached "+
+		log.Warn("rust paths only partially resolved, some Tokio probes not attached "+
 			"(demangler gap or inlined/stripped symbol?); context propagation may be degraded",
 			"resolved", resolved, "unresolved", unresolved, "binary", instrPath)
 	}
