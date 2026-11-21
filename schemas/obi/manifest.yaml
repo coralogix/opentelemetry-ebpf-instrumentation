@@ -30,9 +30,13 @@ description: |
   registry forms the complete contract of what OBI emits.
 stability: development
 dependencies:
-  # The dependency version MUST stay in sync with the upstream
-  # OpenTelemetry semantic conventions version OBI is built against. A
-  # CI guard asserts both sides match — bump them together.
+  # The dependency version MUST NOT be older than the
+  # go.opentelemetry.io/otel/semconv package OBI is built against; a CI
+  # guard asserts it.
+  #
+  # The `-genai-<sha>` suffix pins the semantic-conventions-genai commit
+  # that `make fetch-upstream-semconv` merges into the upstream model, since
+  # the GenAI conventions moved out of the main registry in v1.42.0.
   #
   # `registry_path` points to a local pre-fetched copy under `.deps/` so
   # weaver doesn't clone semconv on every container start. Run
@@ -41,5 +45,5 @@ dependencies:
   # is resolved relative to this manifest, so the same value works whether
   # weaver runs against the registry on the host or inside a container
   # bind-mount.
-  - schema_url: https://opentelemetry.io/schemas/1.41.0
-    registry_path: .deps/upstream-v1.41.0[model]
+  - schema_url: https://opentelemetry.io/schemas/1.45.0
+    registry_path: .deps/upstream-v1.45.0-genai-9ffc7e00c639be7712e544e3e54331e885dccf84[model]

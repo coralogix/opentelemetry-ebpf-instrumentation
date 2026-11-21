@@ -20,7 +20,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/obi/pkg/appolly/app"
@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/obi/pkg/ebpf/common/dnsparser"
 	"go.opentelemetry.io/obi/pkg/ebpf/timing"
 	attr "go.opentelemetry.io/obi/pkg/export/attributes/names"
+	"go.opentelemetry.io/obi/pkg/export/attributes/semconvgenai"
 )
 
 type EventType uint8
@@ -2720,13 +2721,13 @@ func (s *Span) GenAIProviderName() string {
 		return ""
 	}
 	if s.GenAI.OpenAI != nil {
-		return semconv.GenAIProviderNameOpenAI.Value.AsString()
+		return semconvgenai.GenAIProviderNameOpenAI.Value.AsString()
 	}
 	if s.GenAI.Anthropic != nil {
-		return semconv.GenAIProviderNameAnthropic.Value.AsString()
+		return semconvgenai.GenAIProviderNameAnthropic.Value.AsString()
 	}
 	if s.GenAI.Gemini != nil {
-		return semconv.GenAIProviderNameGCPGemini.Value.AsString()
+		return semconvgenai.GenAIProviderNameGCPGemini.Value.AsString()
 	}
 	if s.GenAI.Qwen != nil {
 		return attr.QwenProviderName
@@ -2735,13 +2736,13 @@ func (s *Span) GenAIProviderName() string {
 		return "ollama"
 	}
 	if s.GenAI.Cohere != nil {
-		return semconv.GenAIProviderNameCohere.Value.AsString()
+		return semconvgenai.GenAIProviderNameCohere.Value.AsString()
 	}
 	if s.GenAI.OpenAICompatible != nil {
 		return openAICompatibleProviderName(s.GenAI.OpenAICompatible.ProviderName)
 	}
 	if s.GenAI.Bedrock != nil {
-		return semconv.GenAIProviderNameAWSBedrock.Value.AsString()
+		return semconvgenai.GenAIProviderNameAWSBedrock.Value.AsString()
 	}
 	if s.GenAI.Embedding != nil {
 		return s.GenAI.Embedding.Provider

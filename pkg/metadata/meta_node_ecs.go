@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"go.opentelemetry.io/contrib/detectors/aws/ecs"
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 )
 
 func ecsNodeFetcher(ctx context.Context) (NodeMeta, error) {

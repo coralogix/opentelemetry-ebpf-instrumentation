@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"go.opentelemetry.io/obi/internal/test/weavercheck"
 )
@@ -26,7 +26,7 @@ const (
 )
 
 func SemconvVersion() string {
-	// semconv.SchemaURL is "https://opentelemetry.io/schemas/1.41.0"
+	// semconv.SchemaURL is "https://opentelemetry.io/schemas/1.43.0"
 	return semconv.SchemaURL[strings.LastIndex(semconv.SchemaURL, "/")+1:]
 }
 

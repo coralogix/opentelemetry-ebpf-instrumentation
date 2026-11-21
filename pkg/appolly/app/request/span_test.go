@@ -1860,7 +1860,7 @@ func TestSpan_GenAIProviderName(t *testing.T) {
 			},
 		}
 		result := span.GenAIProviderName()
-		assert.Equal(t, "openai", result) // Assuming semconv.GenAIProviderNameOpenAI.Value.AsString() returns "openai"
+		assert.Equal(t, "openai", result) // Assuming semconvgenai.GenAIProviderNameOpenAI.Value.AsString() returns "openai"
 	})
 
 	t.Run("Anthropic present", func(t *testing.T) {
@@ -1870,7 +1870,7 @@ func TestSpan_GenAIProviderName(t *testing.T) {
 			},
 		}
 		result := span.GenAIProviderName()
-		assert.Equal(t, "anthropic", result) // Assuming semconv.GenAIProviderNameAnthropic.Value.AsString() returns "anthropic"
+		assert.Equal(t, "anthropic", result) // Assuming semconvgenai.GenAIProviderNameAnthropic.Value.AsString() returns "anthropic"
 	})
 
 	t.Run("Gemini present", func(t *testing.T) {
