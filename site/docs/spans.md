@@ -165,6 +165,7 @@ Name, from the first template that applies: `{db.query.summary}`, `{db.operation
 | `db.query.summary` | string | `recommended`: if a summary could be derived from the query | stable | Low cardinality summary of a database query. | SELECT wuser_table; INSERT shipping_details SELECT orders; get user by id |
 | `db.query.text` | string | `opt_in` | stable | The database query being executed. | SELECT * FROM wuser_table where username = ?; SET mykey ? |
 | `db.response.status_code` | string | `conditionally_required`: if the operation failed and the status code is available | stable | Database response status code. | 102; ORA-17002; 08P01; 404 |
+| `db.stored_procedure.name` | string | `recommended`: if the query calls a stored procedure | stable | The name of a stored procedure within the database. | GetCustomer |
 | `db.system.name` | enum | `required` | stable | The database management system (DBMS) product as identified by the client instrumentation. | other_sql; softwareag.adabas; actian.ingres; aws.dynamodb; aws.redshift; azure.cosmosdb; intersystems.cache; cassandra; … |
 | `error.type` | string | `conditionally_required`: if the operation ended in an error | stable | Describes a class of error the operation ended with. | timeout; java.net.UnknownHostException; server_certificate_invalid; 500 |
 | `network.peer.address` | string | `recommended`: if the peer address is an IP rather than a name | stable | Peer address of the network connection - IP address or Unix domain socket name. | 10.1.2.80; /tmp/my.sock |

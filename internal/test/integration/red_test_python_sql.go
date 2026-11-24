@@ -194,6 +194,49 @@ func assertSQLOperationErrored(t *testing.T, comm, op, table, db string) {
 	}, testTimeout, 100*time.Millisecond)
 }
 
+func testPythonSQLCall(t *testing.T, comm, url, procedure, db string) {
+	t.Helper()
+
+	ti.DoHTTPGet(t, url+"/call", 200)
+
+	dbOperation := "CALL " + procedure
+
+	params := neturl.Values{}
+	params.Add("service", comm)
+	params.Add("operation", dbOperation)
+	fullURL := fmt.Sprintf("%s?%s", jaegerQueryURL, params.Encode())
+
+	require.EventuallyWithT(t, func(ct *assert.CollectT) {
+		resp, err := getJaeger(fullURL)
+		require.NoError(ct, err)
+		require.NotNil(ct, resp)
+		require.Equal(ct, http.StatusOK, resp.StatusCode)
+
+		var tq jaeger.TracesQuery
+		require.NoError(ct, json.NewDecoder(resp.Body).Decode(&tq))
+		traces := tq.FindBySpan(jaeger.Tag{Key: "db.stored_procedure.name", Type: "string", Value: procedure})
+		require.NotEmpty(ct, traces)
+		span := traces[len(traces)-1].Spans[0]
+
+		assert.Equal(ct, dbOperation, span.OperationName)
+
+		tag, found := jaeger.FindIn(span.Tags, "db.operation.name")
+		assert.True(ct, found)
+		assert.Equal(ct, "CALL", tag.Value)
+
+		tag, found = jaeger.FindIn(span.Tags, "db.query.summary")
+		assert.True(ct, found)
+		assert.Equal(ct, dbOperation, tag.Value)
+
+		tag, found = jaeger.FindIn(span.Tags, "db.system.name")
+		assert.True(ct, found)
+		assert.Equal(ct, db, tag.Value)
+
+		_, found = jaeger.FindIn(span.Tags, "db.collection.name")
+		assert.False(ct, found)
+	}, testTimeout, 100*time.Millisecond)
+}
+
 func testPythonSQLQuery(t *testing.T, comm, url, table, db string) {
 	t.Helper()
 
@@ -322,6 +365,7 @@ func testPythonPostgres(t *testing.T) {
 	testPythonSQLQuery(t, comm, testCaseURL, table, db)
 	testPythonSQLPreparedStatements(t, comm, testCaseURL, table, db)
 	testPythonSQLPipeline(t, comm, testCaseURL, db)
+	testPythonSQLCall(t, comm, testCaseURL, "accounting.noop", db)
 	testPythonSQLError(t, comm, testCaseURL, db)
 }
 
@@ -401,6 +445,7 @@ func testPythonMySQL(t *testing.T) {
 	testPythonSQLQuery(t, comm, testCaseURL, table, db)
 	testPythonSQLPreparedStatements(t, comm, testCaseURL, table, db)
 	testPythonSQLBigQuery(t, comm, testCaseURL, table, db)
+	testPythonSQLCall(t, comm, testCaseURL, "film_in_stock", db)
 	testPythonSQLError(t, comm, testCaseURL, db)
 }
 

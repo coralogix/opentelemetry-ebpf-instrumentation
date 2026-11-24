@@ -379,7 +379,8 @@ func SQLRequestTraceToSpan(trace *SQLRequestTrace) request.Span {
 			UserPID:   app.PID(trace.Pid.UserPid),
 			Namespace: trace.Pid.Ns,
 		},
-		Statement:      sql,
-		DBQuerySummary: sqlprune.SQLQuerySummary(method, tables),
+		Statement:         sql,
+		DBQuerySummary:    sqlprune.SQLQuerySummary(method, tables),
+		DBStoredProcedure: sqlprune.SQLStoredProcedure(method, tables),
 	}
 }

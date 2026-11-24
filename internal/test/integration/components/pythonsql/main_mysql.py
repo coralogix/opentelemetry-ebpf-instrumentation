@@ -117,6 +117,24 @@ async def root():
 
     return ""
 
+@app.get("/call")
+async def call():
+    call_conn = mysql.connector.connect(
+        database="sakila",
+        user="sakila",
+        password="p_ssW0rd",
+        host="sqlserver",
+        port="3306"
+    )
+
+    cur = call_conn.cursor()
+    cur.execute("CALL film_in_stock(1, 1, @film_count)")
+    rows = cur.fetchall()
+    cur.close()
+    call_conn.close()
+
+    return rows
+
 if __name__ == "__main__":
     print(f"Server running: port={8080} process_id={os.getpid()}")
     uvicorn.run(app, host="0.0.0.0", port=8080)

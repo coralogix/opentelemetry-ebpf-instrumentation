@@ -1687,6 +1687,22 @@ func TestDBClientServerPortGetter(t *testing.T) {
 	}
 }
 
+func TestSpanOTELGetters_DBStoredProcedure(t *testing.T) {
+	getter, ok := spanOTELGetters(attr.DBStoredProcedure)
+	require.True(t, ok, "getter should be found for DBStoredProcedure")
+
+	call := &Span{Type: EventTypeSQLClient, Method: "CALL", DBStoredProcedure: "conformance.noop"}
+	kv := getter(call)
+	require.True(t, kv.Valid())
+	assert.Equal(t, string(attr.DBStoredProcedure), string(kv.Key))
+	assert.Equal(t, "conformance.noop", kv.Value.AsString())
+	assert.Equal(t, "conformance.noop", spanPromGetters(attr.DBStoredProcedure)(call))
+
+	query := &Span{Type: EventTypeSQLClient, Method: "SELECT", Path: "users"}
+	assert.False(t, getter(query).Valid())
+	assert.Empty(t, spanPromGetters(attr.DBStoredProcedure)(query))
+}
+
 func TestSpanOTELGetters_DBNamespace(t *testing.T) {
 	getter, ok := spanOTELGetters(attr.DBNamespace)
 	require.True(t, ok, "getter should be found for DBNamespace")

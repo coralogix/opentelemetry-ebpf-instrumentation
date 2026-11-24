@@ -94,6 +94,9 @@ spans:
       - ref: db.operation.name
         requirement_level:
           conditionally_required: if the operation could be parsed from the query
+      - ref: db.stored_procedure.name
+        requirement_level:
+          recommended: if the query calls a stored procedure
       - ref: db.query.text
         requirement_level: opt_in
       - ref: db.query.summary

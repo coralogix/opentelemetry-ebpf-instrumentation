@@ -2137,6 +2137,17 @@ func TestTraceAttributesSelector_DBQuerySummary(t *testing.T) {
 	assert.Equal(t, "SELECT orders", v.AsString())
 }
 
+func TestTraceAttributesSelector_SQLStoredProcedure(t *testing.T) {
+	call := &request.Span{
+		Type:              request.EventTypeSQLClient,
+		Method:            "CALL",
+		DBStoredProcedure: "conformance.noop",
+	}
+	v, ok := attrValue(TraceAttributesSelector(call, defaultTraceAttrs(t)), "db.stored_procedure.name")
+	require.True(t, ok)
+	assert.Equal(t, "conformance.noop", v.AsString())
+}
+
 func TestTraceAttributesSelector_UserAgentOriginal(t *testing.T) {
 	noOpts := defaultTraceAttrs(t)
 

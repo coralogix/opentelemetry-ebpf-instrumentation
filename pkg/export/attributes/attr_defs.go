@@ -488,6 +488,7 @@ func getDefinitions(
 				attr.ErrorType:            true,
 				attr.DBCollectionName:     true,
 				attr.DBNamespace:          true,
+				attr.DBStoredProcedure:    true,
 				attr.DBResponseStatusCode: true,
 			},
 		},

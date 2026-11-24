@@ -227,6 +227,13 @@ func spanOTELGetters(name attr.Name) (attributes.Getter[*Span, attribute.KeyValu
 			}
 			return DBNamespace(span.DBNamespace)
 		}
+	case attr.DBStoredProcedure:
+		getter = func(span *Span) attribute.KeyValue {
+			if span.Type != EventTypeSQLClient || span.DBStoredProcedure == "" {
+				return attribute.KeyValue{}
+			}
+			return DBStoredProcedureName(span.DBStoredProcedure)
+		}
 	case attr.DBResponseStatusCode:
 		getter = func(span *Span) attribute.KeyValue {
 			// db.response.status_code is Conditionally Required "if the

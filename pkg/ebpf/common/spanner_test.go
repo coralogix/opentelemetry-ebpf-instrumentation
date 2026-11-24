@@ -289,6 +289,15 @@ func TestSQLRequestTraceToSpan(t *testing.T) {
 		assert.Equal(t, int(request.DBGeneric), span.SubType)
 	})
 
+	t.Run("stored procedure call", func(t *testing.T) {
+		tr := makeSQLRequestTrace("CALL sales.close(1)", uint8(request.DBPostgres), 5432, "")
+		span := SQLRequestTraceToSpan(&tr)
+		assert.Equal(t, "CALL", span.Method)
+		assert.Empty(t, span.Path)
+		assert.Equal(t, "CALL sales.close", span.DBQuerySummary)
+		assert.Equal(t, "sales.close", span.DBStoredProcedure)
+	})
+
 	t.Run("strips port from hostname", func(t *testing.T) {
 		tr := makeSQLRequestTrace("SELECT 1", uint8(request.DBGeneric), 0, "db-host:5432")
 		span := SQLRequestTraceToSpan(&tr)

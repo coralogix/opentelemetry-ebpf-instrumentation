@@ -1687,6 +1687,7 @@ func traceAttributesSelectorInternal(span *request.Span, optionalAttrs map[attr.
 			attrs = append(attrs, attributes.DBResponseErrorAttr(optionalAttrs, span.SQLErrorDescription())...)
 		}
 		attrs = appendIfSet(attrs, request.DBNamespace, span.DBNamespace)
+		attrs = appendIfSet(attrs, request.DBStoredProcedureName, span.DBStoredProcedure)
 	case request.EventTypeRedisServer, request.EventTypeRedisClient:
 		attrs = []attribute.KeyValue{
 			request.ServerPort(span.HostPort),

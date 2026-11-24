@@ -52,6 +52,7 @@ const (
 	ConnectionType         = Name("connection_type")
 	DBOperation            = Name(semconv.DBOperationNameKey)
 	DBCollectionName       = Name(semconv.DBCollectionNameKey)
+	DBStoredProcedure      = Name(semconv.DBStoredProcedureNameKey)
 	DBSystemName           = Name(semconv.DBSystemNameKey)
 	ErrorType              = Name(semconv.ErrorTypeKey)
 	ProcessExecutableName  = Name(semconv.ProcessExecutableNameKey)

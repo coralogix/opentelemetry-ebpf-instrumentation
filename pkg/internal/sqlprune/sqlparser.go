@@ -11,6 +11,8 @@ import (
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
 )
 
+const SQLCallOperation = "CALL"
+
 var tokenIsDBOperation = map[int]bool{
 	sqlparser.SELECT:   true,
 	sqlparser.STREAM:   true,
@@ -44,7 +46,14 @@ var tokenIsDBOperation = map[int]bool{
 // than one table mentioned in the SQL statement.
 // https://opentelemetry.io/docs/specs/semconv/db/database-metrics/#metric-dbclientoperationduration
 func SQLTargetCollection(op string, tables []string) string {
-	if len(tables) == 0 || (op == "SELECT" && len(tables) > 1) {
+	if len(tables) == 0 || op == SQLCallOperation || (op == "SELECT" && len(tables) > 1) {
+		return ""
+	}
+	return tables[0]
+}
+
+func SQLStoredProcedure(op string, tables []string) string {
+	if op != SQLCallOperation || len(tables) == 0 {
 		return ""
 	}
 	return tables[0]
@@ -86,6 +95,13 @@ func SQLQuerySummary(op string, tables []string) string {
 //
 //nolint:cyclop
 func SQLParseOperationAndTables(query string) (string, []string) {
+	if procedure, ok := sqlCallProcedure(query); ok {
+		if procedure == "" {
+			return SQLCallOperation, nil
+		}
+		return SQLCallOperation, []string{procedure}
+	}
+
 	var operation string
 	var lastType int
 	var tables []string
@@ -148,6 +164,49 @@ func SQLParseOperationAndTables(query string) (string, []string) {
 	}
 
 	return operation, tables
+}
+
+// sqlCallProcedure reports whether the statement starts with CALL and returns
+// the called procedure, or an empty name when it cannot be read reliably
+func sqlCallProcedure(query string) (string, bool) {
+	tokens := sqlparser.NewStringTokenizer(query)
+
+	tokenType, data := scanSkippingComments(tokens)
+	if tokenType != sqlparser.UNUSED || !strings.EqualFold(string(data), SQLCallOperation) {
+		return "", false
+	}
+
+	var parts []string
+	for {
+		tokenType, data = scanSkippingComments(tokens)
+		if !isSQLNameToken(tokenType) {
+			return "", true
+		}
+		parts = append(parts, string(data))
+
+		tokenType, _ = scanSkippingComments(tokens)
+		switch tokenType {
+		case '.':
+			continue
+		case '(', ';', 0:
+			return strings.Join(parts, "."), true
+		default:
+			return "", true
+		}
+	}
+}
+
+func scanSkippingComments(tokens *sqlparser.Tokenizer) (int, []byte) {
+	tokenType, data := tokens.Scan()
+	for tokenType == sqlparser.COMMENT {
+		tokenType, data = tokens.Scan()
+	}
+	return tokenType, data
+}
+
+func isSQLNameToken(tokenType int) bool {
+	return tokenType == sqlparser.ID || tokenType == sqlparser.STRING || tokenType == sqlparser.UNUSED ||
+		sqlparser.KeywordString(tokenType) != ""
 }
 
 func SQLParseError(kind request.SQLKind, buf []uint8) *request.SQLError {

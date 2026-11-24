@@ -4,6 +4,8 @@
 package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 
 import (
+	"bytes"
+
 	"go.opentelemetry.io/obi/pkg/appolly/app"
 	"go.opentelemetry.io/obi/pkg/appolly/app/request"
 	"go.opentelemetry.io/obi/pkg/internal/largebuf"
@@ -78,6 +80,13 @@ var sqlKeywords = [][]byte{
 	[]byte("INSERT"), []byte("ALTER"), []byte("CREATE"), []byte("DROP"),
 }
 
+var (
+	sqlCallKeyword       = []byte(sqlprune.SQLCallOperation)
+	sqlLineCommentStart  = []byte("--")
+	sqlBlockCommentStart = []byte("/*")
+	sqlBlockCommentEnd   = []byte("*/")
+)
+
 var sqlExecuteKeyword = []byte("EXECUTE ")
 
 const minSQLPrintableRun = len("SELECT 1")
@@ -116,11 +125,18 @@ func detectSQLPayload(useHeuristics bool, b *largebuf.LargeBuffer) (string, []st
 	}
 
 	view := b.UnsafeView()
-	if sqlKind == request.DBMySQL {
+	switch sqlKind {
+	case request.DBMySQL:
 		view = mysqlFirstPacket(view)
+	case request.DBPostgres:
+		view = view[min(len(view), pgHeaderLen):]
 	}
 
-	op, tables, sql := detectSQL(view)
+	detect := detectSQL
+	if sqlKind == request.DBGeneric {
+		detect = detectSQLKeyword
+	}
+	op, tables, sql := detect(view)
 
 	if !validSQL(op, len(tables) > 0, sqlKind) {
 		var table string
@@ -142,16 +158,75 @@ func detectSQLPayload(useHeuristics bool, b *largebuf.LargeBuffer) (string, []st
 	return op, tables, sql, sqlKind
 }
 
-func detectSQL(buf []byte) (string, []string, string) {
+func isSQLSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == '\v'
+}
+
+func skipSQLSpaceAndComments(b []byte) int {
+	i := 0
+	for i < len(b) {
+		rest := b[i:]
+		switch {
+		case isSQLSpace(rest[0]):
+			i++
+		case bytes.HasPrefix(rest, sqlLineCommentStart):
+			end := bytes.IndexByte(rest, '\n')
+			if end < 0 {
+				return len(b)
+			}
+			i += end + 1
+		case bytes.HasPrefix(rest, sqlBlockCommentStart):
+			end := bytes.Index(rest[len(sqlBlockCommentStart):], sqlBlockCommentEnd)
+			if end < 0 {
+				return len(b)
+			}
+			i += len(sqlBlockCommentStart) + end + len(sqlBlockCommentEnd)
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+func leadingCallIndex(scan []byte) int {
+	i := skipSQLSpaceAndComments(scan)
+	end := i + len(sqlCallKeyword)
+	if end < len(scan) && equalFoldASCII(scan[i:end], sqlCallKeyword) && isSQLSpace(scan[end]) {
+		return i
+	}
+	return -1
+}
+
+func sqlScan(buf []byte) []byte {
 	// Cheap prefilter: most SQL wire protocols carry a small binary header
 	// followed by the statement as plain text. If no printable-ASCII run long
 	// enough to fit the shortest valid SQL exists, skip the case-fold scan.
 	start := firstSQLRun(buf, minSQLPrintableRun)
 	if start < 0 {
-		return "", nil, ""
+		return nil
 	}
-	scan := buf[start:]
+	return buf[start:]
+}
 
+func sqlAt(scan []byte, idx int) (string, []string, string) {
+	sql := cstr(scan[idx:])
+	op, tables := sqlprune.SQLParseOperationAndTables(sql)
+	return op, tables, sql
+}
+
+func detectSQL(buf []byte) (string, []string, string) {
+	scan := sqlScan(buf)
+	if idx := leadingCallIndex(scan); idx >= 0 {
+		return sqlAt(scan, idx)
+	}
+	return sqlAtFirstKeyword(scan)
+}
+
+func detectSQLKeyword(buf []byte) (string, []string, string) {
+	return sqlAtFirstKeyword(sqlScan(buf))
+}
+
+func sqlAtFirstKeyword(scan []byte) (string, []string, string) {
 	minIdx := -1
 	for _, q := range sqlKeywords {
 		i := asciiIndexFold(scan, q)
@@ -164,9 +239,7 @@ func detectSQL(buf []byte) (string, []string, string) {
 	}
 
 	if minIdx >= 0 {
-		sql := cstr(scan[minIdx:])
-		op, tables := sqlprune.SQLParseOperationAndTables(sql)
-		return op, tables, sql
+		return sqlAt(scan, minIdx)
 	}
 
 	return "", nil, ""
@@ -214,10 +287,11 @@ func TCPToSQLToSpan(trace *TCPRequestInfo, op string, tables []string, sql strin
 			UserPID:   app.PID(trace.Pid.UserPid),
 			Namespace: trace.Pid.Ns,
 		},
-		Statement:      sql,
-		SubType:        int(kind),
-		SQLCommand:     sqlCommand,
-		SQLError:       sqlError,
-		DBQuerySummary: sqlprune.SQLQuerySummary(op, tables),
+		Statement:         sql,
+		SubType:           int(kind),
+		SQLCommand:        sqlCommand,
+		SQLError:          sqlError,
+		DBQuerySummary:    sqlprune.SQLQuerySummary(op, tables),
+		DBStoredProcedure: sqlprune.SQLStoredProcedure(op, tables),
 	}
 }

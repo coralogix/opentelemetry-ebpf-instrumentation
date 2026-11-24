@@ -376,3 +376,53 @@ func TestFirstSQLRun(t *testing.T) {
 		assert.Equal(t, 8, firstSQLRun(buf, 8))
 	})
 }
+
+func TestDetectSQLCall(t *testing.T) {
+	for _, tc := range []struct {
+		payload   string
+		op        string
+		tables    []string
+		statement string
+	}{
+		{payload: "CALL conformance.noop()", op: "CALL", tables: []string{"conformance.noop"}, statement: "CALL conformance.noop()"},
+		{payload: "call\tconformance.noop()", op: "CALL", tables: []string{"conformance.noop"}, statement: "call\tconformance.noop()"},
+		{payload: "  CALL\nconformance.noop()", op: "CALL", tables: []string{"conformance.noop"}, statement: "CALL\nconformance.noop()"},
+		{payload: "/* SELECT */ CALL conformance.noop()", op: "CALL", tables: []string{"conformance.noop"}, statement: "CALL conformance.noop()"},
+		{payload: "-- audit\nCALL conformance.noop()", op: "CALL", tables: []string{"conformance.noop"}, statement: "CALL conformance.noop()"},
+		{payload: "/* recall cache */ SELECT * FROM users", op: "SELECT", tables: []string{"users"}, statement: "SELECT * FROM users"},
+		{payload: "SELECT * FROM users WHERE note = 'call me'", op: "SELECT", tables: []string{"users"}, statement: "SELECT * FROM users WHERE note = 'call me'"},
+		{payload: "CALLBACK conformance.noop()"},
+		{payload: "/* CALL conformance.noop() */"},
+	} {
+		t.Run(tc.payload, func(t *testing.T) {
+			op, tables, statement := detectSQL([]byte(tc.payload))
+			assert.Equal(t, tc.op, op)
+			assert.Equal(t, tc.tables, tables)
+			assert.Equal(t, tc.statement, statement)
+		})
+	}
+}
+
+func TestDetectSQLPayloadGenericIgnoresCall(t *testing.T) {
+	op, tables, statement, kind := detectSQLPayload(true, largebuf.NewLargeBufferFrom([]byte("call me back; SELECT * FROM users")))
+	assert.Equal(t, request.DBGeneric, kind)
+	assert.Equal(t, "SELECT", op)
+	assert.Equal(t, []string{"users"}, tables)
+	assert.Equal(t, "SELECT * FROM users", statement)
+
+	op, _, _, kind = detectSQLPayload(true, largebuf.NewLargeBufferFrom([]byte("CALL conformance.noop()")))
+	assert.Equal(t, request.DBGeneric, kind)
+	assert.Empty(t, op)
+}
+
+func TestDetectSQLPayloadPostgresCallAfterPrintableLength(t *testing.T) {
+	query := "CALL conformance.noop_procedure()"
+	msg := postgresTestPacket(kPostgresQuery, append([]byte(query), 0))
+	require.True(t, isSQLByte(msg[pgHeaderLen-1]))
+
+	op, tables, statement, kind := detectSQLPayload(false, largebuf.NewLargeBufferFrom(msg))
+	assert.Equal(t, request.DBPostgres, kind)
+	assert.Equal(t, "CALL", op)
+	assert.Equal(t, []string{"conformance.noop_procedure"}, tables)
+	assert.Equal(t, query, statement)
+}

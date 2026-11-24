@@ -290,6 +290,7 @@ func TestDefault_DBClientDuration(t *testing.T) {
 		attr.DBNamespace,
 		attr.DBOperation,
 		attr.DBResponseStatusCode,
+		attr.DBStoredProcedure,
 		attr.DBSystemName,
 		attr.ErrorType,
 		attr.ServerAddr,

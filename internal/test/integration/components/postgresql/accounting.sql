@@ -89,6 +89,9 @@ CREATE UNIQUE INDEX "INDEX_0PJX" ON accounting.contacts USING btree (id);
 CREATE UNIQUE INDEX "INDEX_ELB5" ON accounting.invoices USING btree (id);
 
 
+CREATE PROCEDURE accounting.noop() LANGUAGE sql AS $$ SELECT 1 $$;
+
+
 --
 -- PostgreSQL database dump complete
 --

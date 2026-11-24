@@ -77,6 +77,15 @@ async def pipeline():
         conn.close()
     return {"status": "OK"}
 
+@app.get("/call")
+async def call():
+    conn = psycopg.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("CALL accounting.noop()")
+    cur.close()
+    conn.close()
+    return {"status": "OK"}
+
 if __name__ == "__main__":
     print(f"Server running: port={8080} process_id={os.getpid()}")
     uvicorn.run(app, host="0.0.0.0", port=8080)

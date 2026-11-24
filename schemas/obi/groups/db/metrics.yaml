@@ -28,6 +28,9 @@ metrics:
       - ref: server.port
         requirement_level:
           conditionally_required: if the port was observed on the connection
+      - ref: db.stored_procedure.name
+        requirement_level:
+          recommended: if the query calls a stored procedure
       - ref: db.response.status_code
         requirement_level:
           conditionally_required: if the operation failed and the status code is available

@@ -118,6 +118,10 @@ func DBNamespace(val string) attribute.KeyValue {
 	return attribute.Key(attr.DBNamespace).String(val)
 }
 
+func DBStoredProcedureName(val string) attribute.KeyValue {
+	return attribute.Key(attr.DBStoredProcedure).String(val)
+}
+
 func DBResponseStatusCode(val string) attribute.KeyValue {
 	return attribute.Key(attr.DBResponseStatusCode).String(val)
 }

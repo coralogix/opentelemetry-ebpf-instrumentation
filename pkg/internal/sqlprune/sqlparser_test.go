@@ -394,3 +394,49 @@ func TestSQLParseStatementID(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLParseStoredProcedureCall(t *testing.T) {
+	for query, procedure := range map[string]string{
+		"CALL conformance.noop()":      "conformance.noop",
+		"call get_customer(1, 'x')":    "get_customer",
+		"CALL `sales`.`close_month`()": "sales.close_month",
+		"CALL status(user_id)":         "status",
+		"CALL public.status()":         "public.status",
+		"CALL p":                       "p",
+		"CALL p;":                      "p",
+		"/* job */ CALL p()":           "p",
+		"-- job\nCALL p()":             "p",
+	} {
+		t.Run(query, func(t *testing.T) {
+			op, tables := SQLParseOperationAndTables(query)
+			assert.Equal(t, "CALL", op)
+			assert.Equal(t, []string{procedure}, tables)
+			assert.Empty(t, SQLTargetCollection(op, tables))
+			assert.Equal(t, procedure, SQLStoredProcedure(op, tables))
+			assert.Equal(t, "CALL "+procedure, SQLQuerySummary(op, tables))
+		})
+	}
+
+	assert.Empty(t, SQLStoredProcedure("SELECT", []string{"users"}))
+}
+
+func TestSQLParseStoredProcedureCallUnreadableName(t *testing.T) {
+	for _, query := range []string{"CALL ?", "CALL 42()", "CALL p q()", "CALL p.()"} {
+		t.Run(query, func(t *testing.T) {
+			op, tables := SQLParseOperationAndTables(query)
+			assert.Equal(t, "CALL", op)
+			assert.Empty(t, tables)
+			assert.Empty(t, SQLStoredProcedure(op, tables))
+			assert.Empty(t, SQLQuerySummary(op, tables))
+		})
+	}
+}
+
+func TestSQLParseCallNotLeading(t *testing.T) {
+	for _, query := range []string{"PREPARE s AS CALL p()", "SELECT call FROM t"} {
+		t.Run(query, func(t *testing.T) {
+			op, _ := SQLParseOperationAndTables(query)
+			assert.NotEqual(t, "CALL", op)
+		})
+	}
+}

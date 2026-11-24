@@ -1581,6 +1581,7 @@ type Span struct {
 	DBError           DBError        `json:"-"`
 	DBNamespace       string         `json:"-"`
 	DBQuerySummary    string         `json:"-"`
+	DBStoredProcedure string         `json:"-"`
 	DBSystem          string         `json:"-"`
 	SQLCommand        string         `json:"-"`
 	SQLError          *SQLError      `json:"-"`

@@ -851,6 +851,66 @@ func TestAppMetrics_MCPSessionDurationExportsDuringShutdown(t *testing.T) {
 	assert.Equal(t, 1, records[0].Count)
 }
 
+func TestAppMetrics_DBClientStoredProcedure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		selection attributes.Selection
+		expected  string
+	}{
+		"included by default": {expected: "conformance.noop"},
+		"excluded on request": {
+			selection: attributes.Selection{
+				attributes.DBClientDuration.Section: attributes.InclusionLists{
+					Exclude: []string{string(attr.DBStoredProcedure)},
+				},
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			metricRecords := make(chan collector.MetricRecord, 10)
+			metrics := msg.NewQueue[[]request.Span](msg.ChannelBufferLen(10))
+			processEvents := msg.NewQueue[exec.ProcessEvent](msg.ChannelBufferLen(10))
+			mcfg := &otelcfg.MetricsConfig{
+				Interval:          50 * time.Millisecond,
+				TTL:               30 * time.Minute,
+				ReportersCacheLen: 10,
+				Instrumentations:  []instrumentations.Instrumentation{instrumentations.InstrumentationSQL},
+				MetricsExport:     testMetricsConsumer(metricRecords),
+			}
+
+			reporter, err := newMetricsReporter(
+				ctx,
+				&global.ContextInfo{OTELMetricsExporter: &otelcfg.MetricsExporterInstancer{Cfg: mcfg}},
+				mcfg,
+				&perapp.GlobalMetricsConfig{Features: export.FeatureApplicationRED},
+				&attributes.SelectorConfig{SelectionCfg: tc.selection},
+				request.UnresolvedNames{},
+				metrics,
+				processEvents,
+			)
+			require.NoError(t, err)
+			go reporter.reportMetrics(ctx)
+
+			metrics.Send([]request.Span{{
+				Service:           svc.Attrs{Features: export.FeatureApplicationRED, UID: svc.UID{Instance: "foo"}},
+				Type:              request.EventTypeSQLClient,
+				SubType:           int(request.DBMySQL),
+				Method:            "CALL",
+				DBStoredProcedure: "conformance.noop",
+				RequestStart:      100,
+				End:               200,
+			}})
+
+			records := readMetricsByName(t, metricRecords, timeout, attributes.DBClientDuration.OTEL)
+			require.Len(t, records, 1)
+			assert.Equal(t, "CALL", records[0].Attributes[string(attr.DBOperation)])
+			value, found := records[0].Attributes[string(attr.DBStoredProcedure)]
+			assert.Equal(t, tc.expected != "", found)
+			assert.Equal(t, tc.expected, value)
+		})
+	}
+}
+
 func TestAppMetrics_DBClientAttributes(t *testing.T) {
 	ctx := t.Context()
 	metricRecords := make(chan collector.MetricRecord, 10)

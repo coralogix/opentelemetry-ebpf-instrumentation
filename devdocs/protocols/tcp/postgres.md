@@ -115,6 +115,16 @@ established, updated by the statements above. Connections opened before OBI
 attached report no namespace, and a schema changed by other means (for example
 inside a function or a rolled back transaction) is not tracked.
 
+## Stored procedure calls
+
+A statement whose first keyword (after whitespace and comments) is `CALL` is
+reported with `db.operation.name=CALL`, `db.stored_procedure.name` set to the
+called name (`schema.name` when qualified) and the summary `CALL {name}`, both as
+a simple query and through `Parse`/`Execute`. `db.collection.name` is not set.
+When the name cannot be read (for example a bind parameter), the span keeps
+`db.operation.name=CALL` without a procedure name. MySQL `CALL` statements are
+handled the same way.
+
 ## Tests
 
 The kernel-side classifier has a host-compilable unit test in

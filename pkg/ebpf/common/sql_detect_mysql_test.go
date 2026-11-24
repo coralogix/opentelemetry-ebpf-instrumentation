@@ -298,3 +298,14 @@ func TestReadTCPRequestIntoSpan_MySQLStmtCloseCoalescing(t *testing.T) {
 	assert.Equal(t, "products", span.Path)
 	assert.Equal(t, "QUERY", span.SQLCommand)
 }
+
+func TestHandleMySQLStoredProcedureCall(t *testing.T) {
+	req := mysqlPacket(kMySQLQuery, []byte("CALL conformance.noop()"))
+	span, err := handleMySQL(newPostgresTestContext(), &TCPRequestInfo{}, largebuf.NewLargeBufferFrom(req), largebuf.NewLargeBufferFrom(mysqlOKResponsePacket()))
+	require.NoError(t, err)
+	assert.Equal(t, "CALL", span.Method)
+	assert.Empty(t, span.Path)
+	assert.Equal(t, "CALL conformance.noop()", span.Statement)
+	assert.Equal(t, "CALL conformance.noop", span.DBQuerySummary)
+	assert.Equal(t, "conformance.noop", span.DBStoredProcedure)
+}

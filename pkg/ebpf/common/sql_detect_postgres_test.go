@@ -43,6 +43,23 @@ func newPostgresTestContext() *EBPFParseContext {
 	}, nil, nil)
 }
 
+func TestHandlePostgresStoredProcedureCall(t *testing.T) {
+	req := postgresTestPacket(kPostgresParse, postgresParseTestBody("", "CALL conformance.noop()"))
+	req = append(req, postgresTestPacket(kPostgresBind, make([]byte, 8))...)
+	req = append(req, postgresTestPacket('E', make([]byte, 5))...)
+	req = append(req, postgresTestPacket('S', nil)...)
+	executed := append(postgresTestPacket('1', nil), postgresTestPacket('2', nil)...)
+	executed = append(executed, postgresTestPacket('C', []byte("CALL\x00"))...)
+
+	span, err := handlePostgres(newPostgresTestContext(), &TCPRequestInfo{}, largebuf.NewLargeBufferFrom(req), largebuf.NewLargeBufferFrom(executed))
+	require.NoError(t, err)
+	assert.Equal(t, "CALL", span.Method)
+	assert.Empty(t, span.Path)
+	assert.Equal(t, "CALL conformance.noop()", span.Statement)
+	assert.Equal(t, "CALL conformance.noop", span.DBQuerySummary)
+	assert.Equal(t, "conformance.noop", span.DBStoredProcedure)
+}
+
 func TestHandlePostgresTruncatedParse(t *testing.T) {
 	query := "SELECT * FROM restaurants /*" + strings.Repeat("x", 300) + "*/"
 	parseCapture, capturedQuery := truncatedPostgresParse(query)
