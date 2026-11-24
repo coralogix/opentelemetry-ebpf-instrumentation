@@ -1649,6 +1649,11 @@ func TestDBClientServerPortGetter(t *testing.T) {
 			omitted: true,
 		},
 		{
+			name:    "default selection, mariadb default port",
+			span:    &Span{Type: EventTypeSQLClient, SubType: int(DBMariaDB), HostPort: 3306, Host: "dbhost"},
+			omitted: true,
+		},
+		{
 			name:     "default selection, no known default for the DBMS",
 			span:     &Span{Type: EventTypeSQLClient, HostPort: 5432, Host: "dbhost"},
 			expected: 5432,
@@ -1683,6 +1688,25 @@ func TestDBClientServerPortGetter(t *testing.T) {
 			require.True(t, kv.Valid(), "expected server.port to be reported")
 			assert.Equal(t, string(attr.ServerPort), string(kv.Key))
 			assert.Equal(t, int64(tt.expected), kv.Value.AsInt64())
+		})
+	}
+}
+
+func TestSpanDBSystemName(t *testing.T) {
+	tests := []struct {
+		span     Span
+		expected attribute.KeyValue
+	}{
+		{span: Span{Type: EventTypeSQLClient, SubType: int(DBPostgres)}, expected: semconv.DBSystemNamePostgreSQL},
+		{span: Span{Type: EventTypeSQLClient, SubType: int(DBMySQL)}, expected: semconv.DBSystemNameMySQL},
+		{span: Span{Type: EventTypeSQLServer, SubType: int(DBMariaDB)}, expected: semconv.DBSystemNameMariaDB},
+		{span: Span{Type: EventTypeSQLClient, SubType: int(DBMSSQL)}, expected: semconv.DBSystemNameMicrosoftSQLServer},
+		{span: Span{Type: EventTypeSQLClient, SubType: int(DBGeneric)}, expected: semconv.DBSystemNameOtherSQL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected.Value.AsString(), func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.span.DBSystemName())
 		})
 	}
 }

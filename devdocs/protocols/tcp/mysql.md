@@ -1,6 +1,6 @@
 # OBI MySQL protocol parser
 
-This document describes connection state that the MySQL protocol parser tracks to set `db.namespace`. It comes from the [client/server protocol](https://dev.mysql.com/doc/dev/mysql-server/latest/PAGE_PROTOCOL.html) traffic OBI observes on a connection, so a connection opened before OBI attached has no namespace until it next changes database.
+This document describes connection state that the MySQL protocol parser tracks to set `db.namespace` and to tell MariaDB from MySQL. Both come from the [client/server protocol](https://dev.mysql.com/doc/dev/mysql-server/latest/PAGE_PROTOCOL.html) traffic OBI observes on a connection, so a connection opened before OBI attached has no namespace until it next changes database, and always reports `mysql`.
 
 ## Database namespace
 
@@ -12,4 +12,12 @@ OBI sets `db.namespace` to the connection's current database:
 
 A database change made in other ways, such as a `USE` that is not the first statement of a query or dropping the current database, is not tracked. Statements that name no table use the namespace as their span name target, for example `SELECT db1`.
 
-Go `database/sql` spans come from Go library instrumentation instead of the TCP parser, so they carry no namespace.
+## MariaDB detection
+
+A MariaDB server clears the `CLIENT_MYSQL` capability in its initial handshake and announces MariaDB extended capabilities in the last 4 of its 10 reserved bytes. Clients that understand this also clear `CLIENT_MYSQL` and echo non-zero extended capabilities in the last 4 of the 23 reserved bytes of their HandshakeResponse41. OBI reports `db.system.name` `mariadb` for connections whose HandshakeResponse41 does both, and `mysql` otherwise.
+
+Detection therefore depends on the client: MariaDB Connector/J and libmariadb-based clients (including the `mariadb` CLI) are detected. MySQL Connector/J, libmysqlclient (including the `mysql` CLI) and other drivers that leave the reserved bytes zero still report `mysql` when connected to MariaDB.
+
+OBI keeps this per-connection state in a cache of 4096 connections shared by everything it observes, and does not remove entries when connections close. A connection whose entry is evicted loses its namespace until it next changes database, and reports `mysql` until it reconnects.
+
+Go `database/sql` spans come from Go library instrumentation instead of the TCP parser, so they carry neither attribute.

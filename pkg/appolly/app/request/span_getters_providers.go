@@ -32,6 +32,7 @@ func SpanPromGetters(unresolved UnresolvedNames) attributes.NamedGetters[*Span, 
 var dbClientDefaultPorts = map[string]int{
 	semconv.DBSystemNamePostgreSQL.Value.AsString():         5432,
 	semconv.DBSystemNameMySQL.Value.AsString():              3306,
+	semconv.DBSystemNameMariaDB.Value.AsString():            3306,
 	semconv.DBSystemNameMicrosoftSQLServer.Value.AsString(): 1433,
 	semconv.DBSystemNameRedis.Value.AsString():              6379,
 	semconv.DBSystemNameMemcached.Value.AsString():          11211,

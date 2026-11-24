@@ -113,6 +113,20 @@ func matchOnlySpanCases() []emittedSpanCase {
 			optional: defaultSpanOptional,
 		},
 		{
+			name:     "mariadb sql client",
+			spanType: "obi.db.sql.client",
+			span: &request.Span{
+				Type:        request.EventTypeSQLClient,
+				SubType:     int(request.DBMariaDB),
+				Method:      "SELECT",
+				Path:        "users",
+				DBNamespace: "app",
+				Host:        "10.0.0.1",
+				HostPort:    3306,
+			},
+			optional: defaultSpanOptional,
+		},
+		{
 			name:     "redis client",
 			spanType: "obi.db.client",
 			span: &request.Span{

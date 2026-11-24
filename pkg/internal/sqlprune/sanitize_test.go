@@ -53,6 +53,7 @@ var sanitizeCases = []sanitizeCase{
 	{"line comment", request.DBMySQL, "SELECT 1 -- it's 2\nFROM t", "SELECT ? -- it's 2\nFROM t"},
 	{"block comment", request.DBPostgres, "SELECT /* id = 5 */ a FROM t WHERE b = 7", "SELECT /* id = 5 */ a FROM t WHERE b = ?"},
 	{"hash comment", request.DBMySQL, "SELECT a FROM t # where 'x'\nWHERE b = 7", "SELECT a FROM t # where 'x'\nWHERE b = ?"},
+	{"mariadb hash comment", request.DBMariaDB, "SELECT a FROM t # where 'x'\nWHERE b = 7", "SELECT a FROM t # where 'x'\nWHERE b = ?"},
 	{"mysql executable comment", request.DBMySQL, "SELECT /*!40001 SQL_NO_CACHE */ a FROM t WHERE b = 'x'", "SELECT /*!40001 SQL_NO_CACHE */ a FROM t WHERE b = ?"},
 	{"postgres hash operator", request.DBPostgres, "SELECT a # 5 FROM t", "SELECT a # ? FROM t"},
 	{"mssql temp table", request.DBMSSQL, "SELECT * FROM #tmp WHERE id = 1", "SELECT * FROM #tmp WHERE id = ?"},

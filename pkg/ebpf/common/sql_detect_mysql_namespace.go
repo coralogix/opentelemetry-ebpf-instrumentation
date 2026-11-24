@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	mysqlCapClientMySQL                = uint32(0x00000001)
 	mysqlCapConnectWithDB              = uint32(0x00000008)
 	mysqlCapProtocol41                 = uint32(0x00000200)
 	mysqlCapSSL                        = uint32(0x00000800)
@@ -45,7 +46,8 @@ const (
 )
 
 type mysqlConnInfo struct {
-	db string
+	db      string
+	mariaDB bool
 }
 
 type mysqlDatabaseChange struct {
@@ -122,11 +124,12 @@ func parseMySQLHandshakeResponse(buf *largebuf.LargeBuffer) (mysqlConnInfo, bool
 		return mysqlConnInfo{}, false
 	}
 
-	if r.Skip(mysqlHandshakeExtCapsLen) != nil {
+	extCaps, err := r.ReadU32LE()
+	if err != nil {
 		return mysqlConnInfo{}, false
 	}
 
-	var info mysqlConnInfo
+	info := mysqlConnInfo{mariaDB: caps&mysqlCapClientMySQL == 0 && extCaps != 0}
 	if caps&mysqlCapConnectWithDB != 0 {
 		info.db = mysqlHandshakeDatabase(&r, caps)
 	}
@@ -430,4 +433,7 @@ func setMySQLConnAttributes(parseCtx *EBPFParseContext, connInfo BpfConnectionIn
 	}
 
 	span.DBNamespace = info.db
+	if info.mariaDB {
+		span.SubType = int(request.DBMariaDB)
+	}
 }

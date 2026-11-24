@@ -107,6 +107,7 @@ const (
 	DBPostgres
 	DBMySQL
 	DBMSSQL
+	DBMariaDB
 )
 
 const (
@@ -2525,6 +2526,8 @@ func (s *Span) DBSystemName() attribute.KeyValue {
 			return semconv.DBSystemNameMySQL
 		case int(DBMSSQL):
 			return semconv.DBSystemNameMicrosoftSQLServer
+		case int(DBMariaDB):
+			return semconv.DBSystemNameMariaDB
 		}
 	}
 

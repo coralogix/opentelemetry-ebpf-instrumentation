@@ -415,15 +415,21 @@ func TestParseMySQLHandshakeResponse(t *testing.T) {
 			ok:       true,
 		},
 		{
-			name:     "MariaDB extended capabilities do not affect the database",
-			raw:      mysqlHandshakeResponsePacket(mysqlTestCaps, mariaDBTestExtCaps, auth, "shop"),
+			name:     "extended capabilities without CLIENT_MYSQL cleared are not MariaDB",
+			raw:      mysqlHandshakeResponsePacket(mysqlTestCaps|mysqlCapClientMySQL, mariaDBTestExtCaps, auth, "shop"),
 			expected: mysqlConnInfo{db: "shop"},
+			ok:       true,
+		},
+		{
+			name:     "MariaDB extended capabilities",
+			raw:      mysqlHandshakeResponsePacket(mysqlTestCaps, mariaDBTestExtCaps, auth, "shop"),
+			expected: mysqlConnInfo{db: "shop", mariaDB: true},
 			ok:       true,
 		},
 		{
 			name:     "no CLIENT_CONNECT_WITH_DB",
 			raw:      mysqlHandshakeResponsePacket(mysqlTestCaps&^mysqlCapConnectWithDB, mariaDBTestExtCaps, auth, ""),
-			expected: mysqlConnInfo{},
+			expected: mysqlConnInfo{mariaDB: true},
 			ok:       true,
 		},
 		{
@@ -453,7 +459,7 @@ func TestParseMySQLHandshakeResponse(t *testing.T) {
 		{
 			name:     "SSLRequest captured together with the handshake response",
 			raw:      mysqlTLSHandshakeResponsePacket(mariaDBTestExtCaps, "shop"),
-			expected: mysqlConnInfo{db: "shop"},
+			expected: mysqlConnInfo{db: "shop", mariaDB: true},
 			ok:       true,
 		},
 		{
@@ -516,7 +522,7 @@ func TestParseMySQLHandshakeResponseCaptured(t *testing.T) {
 				"352e310c5f7365727665725f686f7374093132372e302e302e31035f6f73054c696e7578075f74687265616401310c5f" +
 				"6a6176615f76656e646f721045636c697073652041646f707469756d0d5f6a6176615f76657273696f6e0932312e302e" +
 				"31322e31",
-			expected: mysqlConnInfo{db: "sakila"},
+			expected: mysqlConnInfo{db: "sakila", mariaDB: true},
 		},
 		{
 			name: "libmariadb 3.4.10 to MariaDB 11.8",
@@ -525,7 +531,7 @@ func TestParseMySQLHandshakeResponseCaptured(t *testing.T) {
 				"054c696e75780c5f636c69656e745f6e616d650a6c69626d617269616462045f706964033133330f5f636c69656e745f" +
 				"76657273696f6e06332e342e3130095f706c6174666f726d07616172636836340c70726f6772616d5f6e616d65056d79" +
 				"73716c0c5f7365727665725f686f7374093132372e302e302e31",
-			expected: mysqlConnInfo{db: "sakila"},
+			expected: mysqlConnInfo{db: "sakila", mariaDB: true},
 		},
 		{
 			name: "libmysqlclient 8.4.13 to MySQL 8.4",
@@ -535,6 +541,15 @@ func TestParseMySQLHandshakeResponseCaptured(t *testing.T) {
 				"6c69656e745f6e616d65086c69626d7973716c076f735f7573657204726f6f740f5f636c69656e745f76657273696f6e" +
 				"06382e342e31330c70726f6772616d5f6e616d65056d7973716c",
 			expected: mysqlConnInfo{db: "sakila"},
+		},
+		{
+			name: "libmariadb 3.4.10 to MySQL 8.4",
+			raw: "dd0000018da2bf00000010002d0000000000000000000000000000000000000000000000726f6f740020aa539369e561" +
+				"856c97a434c340a1ee583a35f3d3e2b770f13c06aa34e16f59516462310063616368696e675f736861325f7061737377" +
+				"6f7264007c035f6f73054c696e75780c5f636c69656e745f6e616d650a6c69626d617269616462045f70696401330f5f" +
+				"636c69656e745f76657273696f6e06332e342e3130095f706c6174666f726d07616172636836340c70726f6772616d5f" +
+				"6e616d65056d7973716c0c5f7365727665725f686f7374093132372e302e302e31",
+			expected: mysqlConnInfo{db: "db1"},
 		},
 		{
 			name: "libmysqlclient 8.4.13 to MariaDB 11.8",
@@ -804,7 +819,7 @@ func TestReadTCPRequestIntoSpan_MySQLConnState(t *testing.T) {
 		assert.False(t, ignore)
 		assert.Equal(t, "SELECT", span.Method)
 		assert.Equal(t, "shop", span.DBNamespace)
-		assert.Equal(t, semconv.DBSystemNameMySQL, span.DBSystemName())
+		assert.Equal(t, semconv.DBSystemNameMariaDB, span.DBSystemName())
 	})
 
 	t.Run("heuristic SQL path", func(t *testing.T) {
@@ -812,7 +827,7 @@ func TestReadTCPRequestIntoSpan_MySQLConnState(t *testing.T) {
 		assert.False(t, ignore)
 		assert.Equal(t, "SELECT", span.Method)
 		assert.Equal(t, "shop", span.DBNamespace)
-		assert.Equal(t, semconv.DBSystemNameMySQL, span.DBSystemName())
+		assert.Equal(t, semconv.DBSystemNameMariaDB, span.DBSystemName())
 	})
 
 	t.Run("COM_INIT_DB changes the namespace", func(t *testing.T) {
@@ -821,7 +836,7 @@ func TestReadTCPRequestIntoSpan_MySQLConnState(t *testing.T) {
 
 		span, _ := readSpan(t, query(ProtocolTypeMySQL))
 		assert.Equal(t, "orders", span.DBNamespace)
-		assert.Equal(t, semconv.DBSystemNameMySQL, span.DBSystemName())
+		assert.Equal(t, semconv.DBSystemNameMariaDB, span.DBSystemName())
 	})
 
 	t.Run("USE changes the namespace", func(t *testing.T) {
@@ -860,7 +875,7 @@ func TestReadTCPRequestIntoSpan_MySQLConnState(t *testing.T) {
 
 			span, _ = readSpan(t, query(ProtocolTypeMySQL))
 			assert.Empty(t, span.DBNamespace)
-			assert.Equal(t, semconv.DBSystemNameMySQL, span.DBSystemName())
+			assert.Equal(t, semconv.DBSystemNameMariaDB, span.DBSystemName())
 		}
 	})
 
@@ -872,7 +887,7 @@ func TestReadTCPRequestIntoSpan_MySQLConnState(t *testing.T) {
 
 		span, _ := readSpan(t, query(ProtocolTypeMySQL))
 		assert.Empty(t, span.DBNamespace)
-		assert.Equal(t, semconv.DBSystemNameMySQL, span.DBSystemName())
+		assert.Equal(t, semconv.DBSystemNameMariaDB, span.DBSystemName())
 	})
 
 	t.Run("TLS handshake and a database change whose response is only a header", func(t *testing.T) {

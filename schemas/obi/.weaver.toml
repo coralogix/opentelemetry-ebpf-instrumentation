@@ -193,7 +193,7 @@ id = "match.span.db.sql.client"
 sample_type = "span"
 when = '''
 kind == "client" && "db.system.name" in attributes
-  && attributes["db.system.name"] in ["postgresql", "mysql", "microsoft.sql_server", "other_sql"]
+  && attributes["db.system.name"] in ["postgresql", "mysql", "mariadb", "microsoft.sql_server", "other_sql"]
 '''
 signal = "obi.db.sql.client"
 
@@ -202,7 +202,7 @@ id = "match.span.db.client"
 sample_type = "span"
 when = '''
 kind == "client" && "db.system.name" in attributes
-  && !(attributes["db.system.name"] in ["postgresql", "mysql", "microsoft.sql_server", "other_sql"])
+  && !(attributes["db.system.name"] in ["postgresql", "mysql", "mariadb", "microsoft.sql_server", "other_sql"])
   && !("http.request.method" in attributes)
 '''
 signal = "obi.db.client"
