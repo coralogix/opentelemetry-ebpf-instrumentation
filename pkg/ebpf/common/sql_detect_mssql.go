@@ -5,7 +5,11 @@ package ebpfcommon // import "go.opentelemetry.io/obi/pkg/ebpf/common"
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log/slog"
+	"math"
+	"strings"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -25,9 +29,30 @@ const (
 	kMSSQLRPC       = 3
 	kMSSQLResponse  = 4
 
-	kMSSQLProcIDPrepare  = 11
-	kMSSQLProcIDExecute  = 12
-	kMSSQLProcIDPrepExec = 13
+	// Well-known RPC procedure IDs (MS-TDS 2.2.6.6)
+	kMSSQLProcIDExecuteSQL = 10
+	kMSSQLProcIDPrepare    = 11
+	kMSSQLProcIDExecute    = 12
+	kMSSQLProcIDPrepExec   = 13
+
+	// NameLenProcID value announcing that a procedure ID follows instead of a name
+	kMSSQLProcIDMarker   = 0xFFFF
+	kMSSQLOptionFlagsLen = 2
+	kMSSQLUCS2CharLen    = 2
+
+	// sp_prepare and sp_prepexec take @handle, @params and then @stmt
+	kMSSQLPreparedStmtParamIndex = 2
+
+	// ALL_HEADERS (MS-TDS 2.2.5.3)
+	kMSSQLAllHeadersTotalLenSize       = 4
+	kMSSQLHeaderLenSize                = 4
+	kMSSQLHeaderTypeSize               = 2
+	kMSSQLAllHeadersPrefixLen          = kMSSQLAllHeadersTotalLenSize + kMSSQLHeaderLenSize + kMSSQLHeaderTypeSize
+	kMSSQLHeaderTypeQueryNotifications = 1
+	kMSSQLHeaderTypeTraceActivity      = 3
+
+	kMSSQLExecuteOperation = "EXECUTE"
+	kMSSQLExecKeyword      = "EXEC"
 
 	// TDS Token types
 	// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/7091f6f6-b83d-4ed2-afeb-ba5013dfb18f
@@ -35,8 +60,17 @@ const (
 
 	// TDS TypeInfo type identifiers
 	// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/d2ed21d6-527b-46ac-8035-94f6f68eb9a8
-	kMSSQLTypeInt4 = 0x26 // fixed-length 4-byte integer
-	kMSSQLTypeIntN = 0x38 // variable-length integer (length byte precedes value)
+	kMSSQLTypeIntN       = 0x26 // variable-length integer (length byte precedes value)
+	kMSSQLTypeInt4       = 0x38 // fixed-length 4-byte integer
+	kMSSQLTypeBigVarChar = 0xA7
+	kMSSQLTypeNVarChar   = 0xE7
+
+	kMSSQLInt4Len        = 4
+	kMSSQLIntNMaxLenSize = 1
+	kMSSQLCollationLen   = 5
+	kMSSQLMaxLenPLP      = 0xFFFF // MAXLEN of a (max) type, whose value is PLP encoded
+	kMSSQLNullLen        = 0xFFFF
+	kMSSQLPLPNull        = math.MaxUint64
 
 	// Fixed lengths for TDS RETURNVALUE (0xAC) token fields that follow the name
 	kMSSQLStatusLen   = 1
@@ -191,38 +225,7 @@ func handleMSSQL(parseCtx *EBPFParseContext, event *TCPRequestInfo, requestBuffe
 	case "SQL_BATCH":
 		op, tables, stmt = mssqlExtractBatchSQL(requestBuffer)
 	case "RPC":
-		procID, r, err := parseMSSQLRPC(requestBuffer)
-		if err == nil {
-			payload := r.Bytes()
-			switch procID {
-			case kMSSQLProcIDPrepExec:
-				text := ucs2ToUTF8(payload)
-				op, tables, stmt = detectSQL(text)
-			case kMSSQLProcIDPrepare:
-				text := ucs2ToUTF8(payload)
-				_, _, stmt = detectSQL(text)
-				handle := parseHandleFromPrepareResponse(responseBuffer)
-				if handle != 0 && stmt != "" {
-					parseCtx.mssqlPreparedStatements.Add(mssqlPreparedStatementsKey{
-						connInfo: event.ConnInfo,
-						stmtID:   handle,
-					}, stmt)
-					return span, errIgnore
-				}
-			case kMSSQLProcIDExecute:
-				handle := parseHandleFromExecute(r)
-				if handle != 0 {
-					var found bool
-					stmt, found = parseCtx.mssqlPreparedStatements.Get(mssqlPreparedStatementsKey{
-						connInfo: event.ConnInfo,
-						stmtID:   handle,
-					})
-					if found {
-						op, tables = sqlprune.SQLParseOperationAndTables(stmt)
-					}
-				}
-			}
-		}
+		return handleMSSQLRPC(parseCtx, event, requestBuffer, responseBuffer, sqlError)
 	}
 
 	if !validSQL(op, len(tables) > 0, request.DBMSSQL) {
@@ -233,136 +236,347 @@ func handleMSSQL(parseCtx *EBPFParseContext, event *TCPRequestInfo, requestBuffe
 	return TCPToSQLToSpan(event, op, tables, stmt, request.DBMSSQL, sqlCommand, sqlError), nil
 }
 
-func parseMSSQLRPC(b *largebuf.LargeBuffer) (uint16, largebuf.LargeBufferReader, error) {
-	if b.Len() < kMSSQLHeaderLen+2 {
-		return 0, largebuf.LargeBufferReader{}, errFallback
-	}
-
-	firstPktLen, err := b.U16BEAt(2)
-	if err != nil || int(firstPktLen) < kMSSQLHeaderLen || int(firstPktLen) > b.Len() {
-		return 0, largebuf.LargeBufferReader{}, errFallback
-	}
-
-	// Parse ProcID from the first packet's payload. The RPC header fields
-	// (NameLen, ProcID/Name, OptionFlags) are always in the first TDS packet.
-	r, err := b.NewLimitedReader(kMSSQLHeaderLen, int(firstPktLen))
+func handleMSSQLRPC(parseCtx *EBPFParseContext, event *TCPRequestInfo, requestBuffer, responseBuffer *largebuf.LargeBuffer, sqlError *request.SQLError) (request.Span, error) {
+	rpc, err := parseMSSQLRPC(requestBuffer)
 	if err != nil {
-		return 0, largebuf.LargeBufferReader{}, err
+		slog.Debug("MSSQL RPC request could not be parsed", "error", err)
+		return request.Span{}, errFallback
+	}
+
+	if rpc.procName != "" {
+		return mssqlProcedureSpan(event, rpc.procName, "", sqlError), nil
+	}
+
+	var stmt string
+	switch rpc.procID {
+	case kMSSQLProcIDExecuteSQL:
+		stmt = mssqlReadStatementParam(&rpc.params, 0)
+	case kMSSQLProcIDPrepExec:
+		stmt = mssqlReadStatementParam(&rpc.params, kMSSQLPreparedStmtParamIndex)
+		mssqlCachePreparedStatement(parseCtx, event, responseBuffer, stmt)
+	case kMSSQLProcIDPrepare:
+		stmt = mssqlReadStatementParam(&rpc.params, kMSSQLPreparedStmtParamIndex)
+		mssqlCachePreparedStatement(parseCtx, event, responseBuffer, stmt)
+		return request.Span{}, errIgnore
+	case kMSSQLProcIDExecute:
+		stmt = mssqlLookupPreparedStatement(parseCtx, event, &rpc.params)
+	default:
+		slog.Debug("MSSQL RPC procedure ID unhandled", "procID", rpc.procID)
+		return request.Span{}, errFallback
+	}
+
+	op, tables := sqlprune.SQLParseOperationAndTables(stmt)
+	if validSQL(op, len(tables) > 0, request.DBMSSQL) {
+		return TCPToSQLToSpan(event, op, tables, stmt, request.DBMSSQL, "RPC", sqlError), nil
+	}
+
+	if proc := mssqlExecProcedureName(stmt); proc != "" {
+		return mssqlProcedureSpan(event, proc, stmt, sqlError), nil
+	}
+
+	slog.Debug("MSSQL RPC operation is invalid", "procID", rpc.procID, "stmt", stmt)
+	return request.Span{}, errFallback
+}
+
+func mssqlProcedureSpan(event *TCPRequestInfo, proc, stmt string, sqlError *request.SQLError) request.Span {
+	span := TCPToSQLToSpan(event, kMSSQLExecuteOperation, []string{proc}, stmt, request.DBMSSQL, "RPC", sqlError)
+	// A stored procedure is not a collection.
+	span.Path = ""
+	return span
+}
+
+// mssqlExecProcedureName returns the procedure invoked by an
+// "EXEC[UTE] procedure ..." statement, or "" for any other statement.
+func mssqlExecProcedureName(stmt string) string {
+	rest, found := mssqlCutKeyword(strings.TrimLeftFunc(stmt, unicode.IsSpace), kMSSQLExecuteOperation)
+	if !found {
+		rest, found = mssqlCutKeyword(strings.TrimLeftFunc(stmt, unicode.IsSpace), kMSSQLExecKeyword)
+	}
+	if !found {
+		return ""
+	}
+
+	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
+	if end := strings.IndexFunc(rest, isMSSQLProcedureNameEnd); end >= 0 {
+		rest = rest[:end]
+	}
+	if rest == "" || rest[0] == '@' {
+		return ""
+	}
+	return rest
+}
+
+func mssqlCutKeyword(s, keyword string) (string, bool) {
+	if len(s) <= len(keyword) || !strings.EqualFold(s[:len(keyword)], keyword) {
+		return "", false
+	}
+	if !unicode.IsSpace(rune(s[len(keyword)])) {
+		return "", false
+	}
+	return s[len(keyword):], true
+}
+
+func isMSSQLProcedureNameEnd(r rune) bool {
+	return unicode.IsSpace(r) || r == ';' || r == '('
+}
+
+func mssqlCachePreparedStatement(parseCtx *EBPFParseContext, event *TCPRequestInfo, responseBuffer *largebuf.LargeBuffer, stmt string) {
+	if stmt == "" {
+		return
+	}
+	handle, ok := parseHandleFromPrepareResponse(responseBuffer)
+	if !ok {
+		return
+	}
+	parseCtx.mssqlPreparedStatements.Add(mssqlPreparedStatementsKey{
+		connInfo: event.ConnInfo,
+		stmtID:   handle,
+	}, stmt)
+}
+
+func mssqlLookupPreparedStatement(parseCtx *EBPFParseContext, event *TCPRequestInfo, params *largebuf.LargeBufferReader) string {
+	param, err := mssqlReadParam(params)
+	if err != nil {
+		return ""
+	}
+	handle, ok := param.int32Value()
+	if !ok {
+		return ""
+	}
+	stmt, found := parseCtx.mssqlPreparedStatements.Get(mssqlPreparedStatementsKey{
+		connInfo: event.ConnInfo,
+		stmtID:   handle,
+	})
+	if !found {
+		slog.Debug("MSSQL sp_execute with unknown handle", "handle", handle)
+	}
+	return stmt
+}
+
+// mssqlReadStatementParam returns the text of the RPC parameter at index, or
+// "" if it can't be read as a string.
+func mssqlReadStatementParam(params *largebuf.LargeBufferReader, index int) string {
+	for range index {
+		if _, err := mssqlReadParam(params); err != nil {
+			return ""
+		}
+	}
+	param, err := mssqlReadParam(params)
+	if err != nil {
+		return ""
+	}
+	return param.text()
+}
+
+type mssqlRPCRequest struct {
+	procID   uint16
+	procName string
+	params   largebuf.LargeBufferReader
+}
+
+// parseMSSQLRPC decodes the header of an RPC request (MS-TDS 2.2.6.6) and
+// returns a reader positioned at its first parameter.
+func parseMSSQLRPC(b *largebuf.LargeBuffer) (mssqlRPCRequest, error) {
+	var rpc mssqlRPCRequest
+
+	r := largebuf.NewLargeBufferFrom(extractTDSPayloads(b)).NewReader()
+	if err := mssqlSkipAllHeaders(&r); err != nil {
+		return rpc, err
 	}
 
 	nameLen, err := r.ReadU16LE()
 	if err != nil {
-		return 0, largebuf.LargeBufferReader{}, err
+		return rpc, err
 	}
 
-	var procID uint16
-	if nameLen == 0xFFFF {
-		// ProcID follows NameLen when it is 0xFFFF
-		procID, err = r.ReadU16LE()
+	if nameLen == kMSSQLProcIDMarker {
+		rpc.procID, err = r.ReadU16LE()
 	} else {
-		// Skip the name string (UCS-2, so 2 bytes per char)
-		err = r.Skip(int(nameLen) * 2)
+		var name []byte
+		name, err = r.ReadN(int(nameLen) * kMSSQLUCS2CharLen)
+		rpc.procName = string(ucs2ToUTF8(name))
 	}
-
 	if err != nil {
-		return 0, largebuf.LargeBufferReader{}, err
+		return rpc, err
 	}
 
-	if err := r.Skip(2); err != nil { // OptionFlags
-		return procID, largebuf.LargeBufferReader{}, err
+	if err := r.Skip(kMSSQLOptionFlagsLen); err != nil {
+		return rpc, err
 	}
 
-	// headerConsumed is the number of bytes at the start of the TDS payload
-	// used by the RPC header (NameLen + ProcID/Name + OptionFlags).
-	headerConsumed := r.ReadOffset() - kMSSQLHeaderLen
-
-	// Extract parameters from all TDS packets so that multi-packet RPC
-	// requests are handled correctly. Strip the RPC header from the front.
-	allPayloads := extractTDSPayloads(b)
-	if headerConsumed > len(allPayloads) {
-		return procID, largebuf.LargeBufferReader{}, errFallback
-	}
-
-	return procID, largebuf.NewLargeBufferFrom(allPayloads[headerConsumed:]).NewReader(), nil
+	rpc.params = r
+	return rpc, nil
 }
 
-func parseHandleFromExecute(r largebuf.LargeBufferReader) uint32 {
+// mssqlSkipAllHeaders skips the ALL_HEADERS block that TDS 7.2+ clients put
+// before the RPC header. Older clients omit it, so it is only skipped when its
+// declared lengths and first header type are consistent.
+func mssqlSkipAllHeaders(r *largebuf.LargeBufferReader) error {
+	prefix, err := r.Peek(kMSSQLAllHeadersPrefixLen)
+	if err != nil {
+		return nil
+	}
+
+	totalLen := binary.LittleEndian.Uint32(prefix)
+	headerLen := binary.LittleEndian.Uint32(prefix[kMSSQLAllHeadersTotalLenSize:])
+	headerType := binary.LittleEndian.Uint16(prefix[kMSSQLAllHeadersTotalLenSize+kMSSQLHeaderLenSize:])
+
+	if totalLen > uint32(r.Remaining()) ||
+		headerLen < kMSSQLHeaderLenSize+kMSSQLHeaderTypeSize ||
+		headerLen > totalLen-kMSSQLAllHeadersTotalLenSize ||
+		headerType < kMSSQLHeaderTypeQueryNotifications ||
+		headerType > kMSSQLHeaderTypeTraceActivity {
+		return nil
+	}
+
+	return r.Skip(int(totalLen))
+}
+
+type mssqlParam struct {
+	typ   uint8
+	value []byte
+}
+
+func (p mssqlParam) int32Value() (uint32, bool) {
+	if (p.typ != kMSSQLTypeIntN && p.typ != kMSSQLTypeInt4) || len(p.value) != kMSSQLInt4Len {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint32(p.value), true
+}
+
+func (p mssqlParam) text() string {
+	switch p.typ {
+	case kMSSQLTypeNVarChar:
+		return string(ucs2ToUTF8(p.value))
+	case kMSSQLTypeBigVarChar:
+		return string(p.value)
+	}
+	return ""
+}
+
+// mssqlReadParam reads one RPC parameter (ParamMetaData followed by its
+// value). Values cut short by the capture limit are returned truncated.
+func mssqlReadParam(r *largebuf.LargeBufferReader) (mssqlParam, error) {
 	nameLen, err := r.ReadU8()
 	if err != nil {
-		return 0
+		return mssqlParam{}, err
 	}
-
-	if err := r.Skip(int(nameLen) * 2); err != nil { // name (UCS-2)
-		return 0
+	if err := r.Skip(int(nameLen)*kMSSQLUCS2CharLen + kMSSQLStatusLen); err != nil {
+		return mssqlParam{}, err
 	}
-
-	if err := r.Skip(1); err != nil { // status
-		return 0
-	}
-
-	typ, err := r.ReadU8()
-	if err != nil {
-		return 0
-	}
-
-	switch typ {
-	case kMSSQLTypeInt4:
-		val, _ := r.ReadU32LE()
-		return val
-	case kMSSQLTypeIntN:
-		length, err := r.ReadU8()
-		if err == nil && length == 4 {
-			val, _ := r.ReadU32LE()
-			return val
-		}
-	}
-	return 0
+	return mssqlReadTypedValue(r)
 }
 
-func parseHandleFromPrepareResponse(b *largebuf.LargeBuffer) uint32 {
-	payload := extractTDSPayloads(b)
-	if len(payload) == 0 {
-		return 0
+// mssqlReadTypedValue reads a TYPE_INFO followed by its value, for the types
+// that carry prepared statement handles and statement text.
+func mssqlReadTypedValue(r *largebuf.LargeBufferReader) (mssqlParam, error) {
+	typ, err := r.ReadU8()
+	if err != nil {
+		return mssqlParam{}, err
 	}
 
-	r := largebuf.NewLargeBufferFrom(payload).NewReader()
+	param := mssqlParam{typ: typ}
+	switch typ {
+	case kMSSQLTypeInt4:
+		param.value, err = r.ReadN(kMSSQLInt4Len)
+	case kMSSQLTypeIntN:
+		param.value, err = mssqlReadIntN(r)
+	case kMSSQLTypeNVarChar, kMSSQLTypeBigVarChar:
+		param.value, err = mssqlReadVarChar(r)
+	default:
+		err = fmt.Errorf("unsupported MSSQL type 0x%x", typ)
+	}
+	return param, err
+}
+
+func mssqlReadIntN(r *largebuf.LargeBufferReader) ([]byte, error) {
+	if err := r.Skip(kMSSQLIntNMaxLenSize); err != nil {
+		return nil, err
+	}
+	length, err := r.ReadU8()
+	if err != nil {
+		return nil, err
+	}
+	return r.ReadN(int(length))
+}
+
+func mssqlReadVarChar(r *largebuf.LargeBufferReader) ([]byte, error) {
+	maxLen, err := r.ReadU16LE()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.Skip(kMSSQLCollationLen); err != nil {
+		return nil, err
+	}
+
+	if maxLen == kMSSQLMaxLenPLP {
+		return mssqlReadPLP(r)
+	}
+
+	length, err := r.ReadU16LE()
+	if err != nil || length == kMSSQLNullLen {
+		return nil, err
+	}
+	return r.ReadN(min(int(length), r.Remaining()))
+}
+
+// mssqlReadPLP reads a partially length-prefixed value: a total length
+// followed by length-prefixed chunks and a zero-length terminator.
+func mssqlReadPLP(r *largebuf.LargeBufferReader) ([]byte, error) {
+	totalLen, err := r.ReadU64LE()
+	if err != nil || totalLen == kMSSQLPLPNull {
+		return nil, err
+	}
+
+	var value []byte
+	for r.Remaining() > 0 {
+		chunkLen, err := r.ReadU32LE()
+		if err != nil || chunkLen == 0 {
+			break
+		}
+		chunk, err := r.ReadN(min(int(chunkLen), r.Remaining()))
+		if err != nil {
+			break
+		}
+		value = append(value, chunk...)
+	}
+	return value, nil
+}
+
+// parseHandleFromPrepareResponse returns the prepared statement handle from
+// the RETURNVALUE token (MS-TDS 2.2.7.18) that sp_prepare and sp_prepexec send
+// back for their first, OUTPUT, parameter.
+func parseHandleFromPrepareResponse(b *largebuf.LargeBuffer) (uint32, bool) {
+	r := largebuf.NewLargeBufferFrom(extractTDSPayloads(b)).NewReader()
 
 	for {
 		idx := r.IndexByte(kMSSQLTokenReturnValue)
 		if idx < 0 {
-			break
+			return 0, false
 		}
-
 		_ = r.Skip(idx + 1)
 
-		if r.Remaining() < 3 {
-			continue
-		}
-
-		_ = r.Skip(2) // Ordinal
-		nameLen, _ := r.ReadU8()
-
-		metadataLen := int(nameLen)*2 + kMSSQLReturnValueMetadataLen
-		if r.Remaining() < metadataLen+1 {
-			continue
-		}
-
-		_ = r.Skip(metadataLen)
-		typ, _ := r.ReadU8()
-
-		switch typ {
-		case kMSSQLTypeInt4:
-			if r.Remaining() >= 4 {
-				val, _ := r.ReadU32LE()
-				return val
-			}
-		case kMSSQLTypeIntN:
-			length, _ := r.ReadU8()
-			if length == 4 && r.Remaining() >= 4 {
-				val, _ := r.ReadU32LE()
-				return val
-			}
+		if handle, ok := mssqlReadHandleReturnValue(r); ok {
+			return handle, true
 		}
 	}
-	return 0
+}
+
+func mssqlReadHandleReturnValue(r largebuf.LargeBufferReader) (uint32, bool) {
+	ordinal, err := r.ReadU16LE()
+	if err != nil || ordinal != 0 {
+		return 0, false
+	}
+	nameLen, err := r.ReadU8()
+	if err != nil {
+		return 0, false
+	}
+	if err := r.Skip(int(nameLen)*kMSSQLUCS2CharLen + kMSSQLReturnValueMetadataLen); err != nil {
+		return 0, false
+	}
+	param, err := mssqlReadTypedValue(&r)
+	if err != nil {
+		return 0, false
+	}
+	return param.int32Value()
 }
